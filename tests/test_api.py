@@ -1,0 +1,347 @@
+"""API /v1/* de punta a punta: mocks en memoria, LLM falso y Postgres real."""
+
+import asyncio
+import json
+import os
+import uuid
+from datetime import date
+
+import httpx
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from asistente.config import Settings
+from asistente.core.llm.base import LlamadaTool, Mensaje, Respuesta
+from asistente.core.llm.falso import LLMFalso, pide, texto
+from asistente.core.prompts import Prompts
+from asistente.limits import LimitesPostgres
+from asistente.main import create_app
+from asistente.servicios import LLMNoConfigurado, Servicios
+from asistente.sistemas.auth import Autenticador
+from asistente.sistemas.conector_http import ConectorHttp
+from asistente.sistemas.manifiesto import CacheManifiestos
+from asistente.sistemas.registro import RegistroSistemas
+from asistente.store.auditoria import AuditoriaSql
+from asistente.store.models import Base
+from asistente.store.models import LlamadaTool as FilaLlamada
+from asistente.store.repo import Repo, recortar
+from conftest import entorno, entrada_sistema, escribir_registro, firmar
+
+URL = os.environ.get("ASISTENTE_DATABASE_URL")
+pytestmark = pytest.mark.skipif(not URL, reason="sin ASISTENTE_DATABASE_URL")
+
+ORIGEN_A, ORIGEN_B = "https://a.example", "https://b.example"
+LISTAR = LlamadaTool("c1", "listar_establecimientos", {})
+
+
+def sub() -> str:
+    return "u" + uuid.uuid4().hex[:10]
+
+
+def sse(resp: httpx.Response) -> list[tuple[str, dict]]:
+    eventos = []
+    for bloque in resp.text.split("\n\n"):
+        lineas = [x for x in bloque.split("\n") if x and not x.startswith(":")]
+        if lineas:
+            eventos.append((lineas[0].removeprefix("event: "), json.loads(lineas[1].removeprefix("data: "))))
+    return eventos
+
+
+class LLMMutable:
+    """Permite cambiar el guion del LLM falso entre peticiones de un mismo test."""
+
+    def __init__(self):
+        self.actual = LLMFalso([])
+        self.capacidades = self.actual.capacidades
+
+    def usar(self, *guion) -> LLMFalso:
+        self.actual = LLMFalso(list(guion))
+        return self.actual
+
+    async def stream(self, **kw):
+        return await self.actual.stream(**kw)
+
+
+@pytest.fixture
+async def sesiones():
+    motor = create_async_engine(URL)
+    async with motor.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+    yield async_sessionmaker(motor, expire_on_commit=False)
+    await motor.dispose()
+
+
+@pytest.fixture
+def llm():
+    return LLMMutable()
+
+
+@pytest.fixture
+def construir_app(tmp_path, cliente_mocks, sesiones, llm):
+    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None):
+        (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
+        topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
+        ruta = escribir_registro(tmp_path / "s.yaml", [
+            entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes),
+            entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes),
+        ])
+        registro = RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
+        manifiestos = CacheManifiestos(registro, cliente_mocks)
+
+        def llm_para(sistema):
+            if not llm_ok:
+                raise LLMNoConfigurado("sin llm")
+            return (llm_obj or llm), "modelo-test"
+
+        svc = Servicios(
+            settings=Settings(database_url=URL, heartbeat_s=heartbeat_s, admin_token=admin_token),
+            registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
+            conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
+            limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
+            prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones,
+        )
+        app = create_app(svc)
+        return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")
+
+    return _construir
+
+
+@pytest.fixture
+async def api(construir_app):
+    async with construir_app() as c:
+        yield c
+
+
+def auth(sistema="mock-a", usuario="ana", **kw) -> dict:
+    return {"Authorization": f"Bearer {firmar(sistema, usuario, **kw)}"}
+
+
+async def chatear(api, mensaje="hola", conv=None, **kw):
+    cuerpo = {"mensaje": mensaje, **({"conversacion_id": str(conv)} if conv else {})}
+    return await api.post("/v1/chat", json=cuerpo, headers=auth(**kw))
+
+
+# --- flujo feliz -------------------------------------------------------------------------
+
+
+async def test_chat_con_tool_persiste_y_expone_solo_texto_visible(api, llm):
+    guion = llm.usar(pide(LISTAR), texto("Tenés El Matorral"))
+    r = await chatear(api, "¿qué campos tengo?")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    ev = sse(r)
+    nombres = [e for e, _ in ev]
+    assert nombres[0] == "tool" and "ui" in nombres and "delta" in nombres and nombres[-1] == "done"
+    conv = ev[-1][1]["conversacion_id"]
+    # el modelo recibió los datos reales del sistema y el system prompt compuesto
+    assert "El Matorral" in guion.llamadas[1].messages[-1].texto
+    assert "Reglas base." in guion.llamadas[0].system and "Mock A" in guion.llamadas[0].system.replace("MOCK-A", "Mock A")
+
+    visibles = (await api.get(f"/v1/conversaciones/{conv}", headers=auth())).json()["mensajes"]
+    assert [(m["rol"], m["texto"]) for m in visibles] == [
+        ("user", "¿qué campos tengo?"), ("assistant", "Tenés El Matorral"),
+    ]
+    lista = (await api.get("/v1/conversaciones", headers=auth())).json()
+    assert conv in [c["id"] for c in lista]
+
+
+async def test_segundo_mensaje_recibe_historial_con_resultados_viejos_recortados(api, llm):
+    llm.usar(pide(LISTAR), texto("uno"))
+    conv = sse(await chatear(api, "primero"))[-1][1]["conversacion_id"]
+    guion = llm.usar(texto("dos"))
+    assert sse(await chatear(api, "segundo", conv))[-1][0] == "done"
+    previos = guion.llamadas[0].messages
+    assert [m.rol for m in previos] == ["user", "assistant", "tool", "assistant", "user"]
+    assert "El Matorral" not in previos[2].texto  # dato de cliente de un turno viejo
+
+
+async def test_auditoria_registra_la_tool_con_usuario_y_conversacion(api, llm, sesiones):
+    u = sub()
+    llm.usar(pide(LISTAR), texto("ok"))
+    conv = sse(await chatear(api, usuario=u))[-1][1]["conversacion_id"]
+    async with sesiones() as s:
+        filas = (await s.execute(select(FilaLlamada).where(FilaLlamada.usuario_ref == u))).scalars().all()
+    assert len(filas) == 1
+    f = filas[0]
+    assert (f.sistema_id, f.tool, f.ok, f.status_http) == ("mock-a", "listar_establecimientos", True, 200)
+    assert str(f.conversacion_id) == conv and f.bytes_respuesta
+
+
+async def test_delete_borra_y_luego_404(api, llm):
+    llm.usar(texto("hola"))
+    conv = sse(await chatear(api))[-1][1]["conversacion_id"]
+    assert (await api.delete(f"/v1/conversaciones/{conv}", headers=auth())).status_code == 204
+    assert (await api.delete(f"/v1/conversaciones/{conv}", headers=auth())).status_code == 404
+    assert (await api.get(f"/v1/conversaciones/{conv}", headers=auth())).status_code == 404
+
+
+async def test_estado(api):
+    r = await api.get("/v1/estado", headers=auth())
+    assert r.json() == {"habilitado": True, "nombre_sistema": "MOCK-A"}
+
+
+# --- aislamiento (el hito del punto 5 se apoya acá) -----------------------------------------
+
+
+async def test_otro_usuario_y_otro_sistema_no_ven_ni_tocan_la_conversacion(api, llm):
+    llm.usar(texto("secreto de ana"))
+    ana = sub()
+    conv = sse(await chatear(api, usuario=ana))[-1][1]["conversacion_id"]
+    intrusos = [{"sistema": "mock-a", "usuario": sub()}, {"sistema": "mock-b", "usuario": ana}]
+    for i in intrusos:
+        h = auth(i["sistema"], i["usuario"])
+        assert (await api.get(f"/v1/conversaciones/{conv}", headers=h)).status_code == 404
+        assert (await api.delete(f"/v1/conversaciones/{conv}", headers=h)).status_code == 404
+        r = await chatear(api, conv=conv, sistema=i["sistema"], usuario=i["usuario"])
+        assert r.status_code == 404 and "secreto" not in r.text
+        assert conv not in [c["id"] for c in (await api.get("/v1/conversaciones", headers=h)).json()]
+    # y a ana no le pasó nada
+    assert (await api.get(f"/v1/conversaciones/{conv}", headers=auth(usuario=ana))).status_code == 200
+
+
+async def test_id_de_conversacion_inexistente_responde_igual_que_uno_ajeno(api):
+    r = await chatear(api, conv=uuid.uuid4())
+    assert (r.status_code, r.json()) == (404, {"error": "conversacion_no_encontrada"})
+
+
+# --- autenticación, origen y CORS ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ruta", ["/v1/estado", "/v1/conversaciones"])
+async def test_sin_token_401(api, ruta):
+    r = await api.get(ruta)
+    assert r.status_code == 401 and r.json() == {"error": "token_invalido"}
+
+
+async def test_token_vencido_se_distingue(api):
+    r = await api.get("/v1/estado", headers=auth(iat=1, exp=2))
+    assert r.status_code == 401 and r.json() == {"error": "token_expirado"}
+
+
+async def test_token_firmado_con_clave_de_otro_sistema_401(api):
+    r = await api.get("/v1/estado", headers=auth("mock-a", _clave="secreto-mock-b-" + "x" * 32))
+    assert r.status_code == 401
+
+
+async def test_origen_debe_pertenecer_al_sistema_del_token(api):
+    ok = await api.get("/v1/estado", headers={**auth(), "Origin": ORIGEN_A})
+    assert ok.status_code == 200 and ok.headers["access-control-allow-origin"] == ORIGEN_A
+    cruzado = await api.get("/v1/estado", headers={**auth("mock-a"), "Origin": ORIGEN_B})
+    assert cruzado.status_code == 403 and cruzado.json() == {"error": "origen_no_permitido"}
+    ajeno = await api.get("/v1/estado", headers={**auth(), "Origin": "https://evil.example"})
+    assert ajeno.status_code == 403 and "access-control-allow-origin" not in ajeno.headers
+
+
+async def test_preflight_solo_para_origenes_registrados(api):
+    pre = {"Access-Control-Request-Method": "POST"}
+    r = await api.options("/v1/chat", headers={"Origin": ORIGEN_B, **pre})
+    assert r.status_code == 204 and r.headers["access-control-allow-origin"] == ORIGEN_B
+    r = await api.options("/v1/chat", headers={"Origin": "https://evil.example", **pre})
+    assert "access-control-allow-origin" not in r.headers
+
+
+# --- validaciones y errores ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mensaje", ["", "   ", "x" * 5000])
+async def test_mensaje_invalido_422(api, mensaje):
+    r = await chatear(api, mensaje)
+    assert (r.status_code, r.json()) == (422, {"error": "mensaje_invalido"})
+
+
+async def test_llm_sin_configurar_503(construir_app):
+    async with construir_app(llm_ok=False) as c:
+        r = await chatear(c)
+    assert (r.status_code, r.json()) == (503, {"error": "llm_no_configurado"})
+
+
+async def test_limite_por_minuto_llega_como_evento_de_error(construir_app, llm):
+    async with construir_app(limites={"mensajes_por_usuario_min": 1}) as c:
+        u = sub()
+        llm.usar(texto("a"))
+        assert sse(await chatear(c, usuario=u))[-1][0] == "done"
+        r = await chatear(c, usuario=u)
+    assert sse(r) == [("error", {"codigo": "mensajes_min"})]
+
+
+async def test_turno_fallido_no_guarda_nada(api, llm):
+    def falla(_):
+        raise __import__("asistente.core.llm.base", fromlist=["LLMError"]).LLMError("x")
+
+    llm.usar(falla)
+    u = sub()
+    assert sse(await chatear(api, usuario=u)) == [("error", {"codigo": "llm_no_disponible"})]
+    assert (await api.get("/v1/conversaciones", headers=auth(usuario=u))).json() == []
+
+
+async def test_heartbeat_en_turnos_lentos(construir_app):
+    class Lento:
+        capacidades = LLMFalso([]).capacidades
+
+        async def stream(self, **kw):
+            await asyncio.sleep(0.3)
+            return Respuesta("tarde", motivo_fin="fin")
+
+    async with construir_app(heartbeat_s=0.05, llm_obj=Lento()) as c:
+        r = await chatear(c)
+    assert ": ping" in r.text and sse(r)[-1][0] == "done"
+
+
+# --- admin ------------------------------------------------------------------------------------
+
+
+async def test_admin_deshabilitado_sin_token_configurado(api):
+    assert (await api.post("/admin/recargar")).status_code == 503
+
+
+async def test_admin_exige_token_y_reporta_sistemas(construir_app):
+    async with construir_app(admin_token="adm1n") as c:
+        assert (await c.get("/admin/sistemas", headers={"Authorization": "Bearer mal"})).status_code == 401
+        assert (await c.get("/admin/sistemas")).status_code == 401
+        h = {"Authorization": "Bearer adm1n"}
+        r = (await c.get("/admin/sistemas", headers=h)).json()
+        assert {s["id"]: s["manifiesto_ok"] for s in r["sistemas"]} == {"mock-a": True, "mock-b": True}
+        assert (await c.post("/admin/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
+
+
+async def test_salud_verifica_la_bd(api):
+    r = await api.get("/salud")
+    assert r.status_code == 200 and r.json() == {"ok": True, "bd": True, "sistemas": 2}
+
+
+# --- unidades sin red ----------------------------------------------------------------------------
+
+
+def test_recorte_de_historial_por_turnos():
+    def turno(i):
+        return [Mensaje("user", f"q{i}"), Mensaje("assistant", "", (LlamadaTool(f"c{i}", "t", {}),)),
+                Mensaje("tool", '{"ok": true, "datos": "PRIVADO"}', llamada_id=f"c{i}"),
+                Mensaje("assistant", f"a{i}")]
+
+    historial = [m for i in range(4) for m in turno(i)]
+    r = recortar(historial, max_turnos=2)
+    assert [m.texto for m in r if m.rol == "user"] == ["q2", "q3"]
+    assert r[0].rol == "user"  # nunca empieza con una tool huérfana
+    assert all("PRIVADO" not in m.texto for m in r)  # ningún resultado viejo sobrevive
+    assert [m.llamada_id for m in r if m.rol == "tool"] == ["c2", "c3"]  # pero el emparejamiento sí
+
+
+def test_prompts_compone_capas_y_versiona(tmp_path):
+    (tmp_path / "base.md").write_text("BASE", encoding="utf-8")
+    (tmp_path / "dominio").mkdir()
+    (tmp_path / "dominio" / "agro.md").write_text("AGRO", encoding="utf-8")
+    p = Prompts(tmp_path)
+    t, v = p.componer(sistema_nombre="SGA", prompt_dominio=f"{tmp_path.name}/dominio/agro.md",
+                      usuario_nombre="Ana", locale="es-AR", hoy=date(2026, 3, 1))
+    assert t.index("BASE") < t.index("AGRO") < t.index("2026-03-01") and "Ana" in t
+    _, v2 = p.componer(sistema_nombre="SGA", prompt_dominio=None, usuario_nombre=None, locale=None,
+                       hoy=date(2026, 3, 1))
+    assert v != v2
+
+
+def test_prompt_dominio_fuera_de_prompts_se_ignora(tmp_path):
+    (tmp_path / "base.md").write_text("BASE", encoding="utf-8")
+    (tmp_path.parent / "fuera.md").write_text("SECRETO", encoding="utf-8")
+    t, _ = Prompts(tmp_path).componer(sistema_nombre="S", prompt_dominio="../fuera.md",
+                                      usuario_nombre=None, locale=None, hoy=date(2026, 1, 1))
+    assert "SECRETO" not in t
