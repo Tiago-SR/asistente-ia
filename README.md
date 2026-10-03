@@ -91,7 +91,7 @@ Luego reconstruir con `docker compose build asistente`. Si el lock queda con due
 
 ## Widget
 
-El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni build; código en `src/asistente/static/widget.js`). Es una **vista de chat a pantalla completa** (barra lateral con historial, columna de mensajes y entrada fija abajo), no una burbuja flotante: ocupa el 100% de su contenedor, así que el sistema lo coloca en una página o sección propia y le da alto. Se integra con dos líneas:
+El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni build; código en `src/asistente/static/widget.js`). Es una **vista de chat a pantalla completa** (columna de mensajes y entrada fija abajo; solo muestra la conversación actual, con un botón para empezar otra, sin lista de chats por ahora), no una burbuja flotante: ocupa el 100% de su contenedor, así que el sistema lo coloca en una página o sección propia y le da alto. Se integra con dos líneas:
 
 ```html
 <script src="https://asistente.example.com/widget.js" defer></script>

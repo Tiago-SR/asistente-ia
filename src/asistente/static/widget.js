@@ -5,8 +5,9 @@
  * (incluido el Markdown del modelo) se construye con nodos DOM, así que no hay inyección.
  *
  * Es una vista de chat a pantalla completa: ocupa el 100% del alto y ancho de su contenedor
- * (el anfitrión le da tamaño, p. ej. style="display:block;height:100vh") y trae su propia barra
- * lateral con el historial. No es un popup ni se superpone a la página.
+ * (el anfitrión le da tamaño, p. ej. style="display:block;height:100vh"). No es un popup ni se
+ * superpone a la página. Muestra solo la conversación actual (botón "Nueva conversación" en la
+ * barra superior); el historial de chats está oculto (ver MOSTRAR_HISTORIAL).
  *
  * Atributos:
  *   token-url   (obligatorio) ruta del sistema anfitrión que emite el token; se pide con
@@ -34,6 +35,12 @@
     try { return new URL(document.currentScript.src).origin; } catch { return ""; }
   })();
   const MARGEN_RENOVAR_MS = 60_000;
+  // Decisión de producto: por ahora el widget es solo la conversación actual, sin lista de chats.
+  // El historial (barra lateral, carga, borrado) sigue implementado; ponerlo en true lo reactiva.
+  const MOSTRAR_HISTORIAL = false;
+  // Se recuerda solo el id de la conversación actual (nunca el token) en sessionStorage, para
+  // retomarla al recargar la página. Se descarta al cerrar la pestaña.
+  const CLAVE_CONV = "asistente:conversacion:";
 
   const TEXTOS = {
     escribir: "Escribí tu pregunta…",
@@ -210,8 +217,9 @@
     .principal { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .barra { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--b); }
     .barra h1 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .barra .menu { display: none; background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer; place-items: center; }
-    .barra .menu:hover { background: var(--suave); }
+    .barra .menu, .barra .accion { background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+    .barra .menu { display: none; }
+    .barra .menu:hover, .barra .accion:hover { background: var(--suave); }
     .barra svg { width: 20px; height: 20px; }
 
     .scroll { flex: 1; overflow-y: auto; }
@@ -355,7 +363,9 @@
       this._titulo = el("h1", { textContent: this.getAttribute("titulo") || "Asistente" });
       const menu = el("button", { class: "menu", type: "button", title: TEXTOS.historial, "aria-label": TEXTOS.historial }, icono("menu"));
       menu.addEventListener("click", () => this._menu());
-      const barra = el("header", { class: "barra" }, menu, this._titulo);
+      const otra = el("button", { class: "accion", type: "button", title: TEXTOS.nueva, "aria-label": TEXTOS.nueva }, icono("nuevo"));
+      otra.addEventListener("click", () => this._nueva());
+      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
       this._scroll = el("div", { class: "scroll" }, this._mensajes);
@@ -378,7 +388,7 @@
         el("div", { class: "entrada" }, form, el("div", { class: "pie", textContent: TEXTOS.pie })));
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
-      r.append(lateral, velo, principal, this._aviso);
+      r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
       this._mostrarBienvenida();
     }
 
@@ -426,7 +436,7 @@
       } catch { /* sin acceso: se muestra el aviso */ }
       this._raiz.classList.toggle("sin-acceso", !habilitado);
       this._raiz.hidden = false;
-      if (habilitado) { this._cargarHistorial(); this._entrada.focus(); }
+      if (habilitado) { this._cargarHistorial(); this._entrada.focus(); this._restaurar(); }
       this.dispatchEvent(new CustomEvent("asistente:estado", { detail: { habilitado }, bubbles: true, composed: true }));
     }
 
@@ -461,13 +471,30 @@
     }
 
     // — conversaciones (barra lateral) —
+    // Recordar/olvidar la conversación actual entre recargas. Nunca guarda el token.
+    _recordar() {
+      try {
+        const clave = CLAVE_CONV + this._servidor;
+        if (this._convId) sessionStorage.setItem(clave, this._convId); else sessionStorage.removeItem(clave);
+      } catch { /* storage no disponible: se pierde solo la continuidad */ }
+    }
+
+    async _restaurar() {
+      let id = null;
+      try { id = sessionStorage.getItem(CLAVE_CONV + this._servidor); } catch { /* sin storage */ }
+      if (id) await this._abrir(id, true);
+    }
+
+    // "Nueva conversación" no borra la anterior: solo deja de mostrarla (sigue en el servidor,
+    // sujeta a la retención del sistema).
     _nueva() {
       if (this._ocupado) return;
-      this._convId = null; this._mostrarBienvenida(); this._pintarHistorial();
+      this._convId = null; this._recordar(); this._mostrarBienvenida(); this._pintarHistorial();
       this._menu(false); this._entrada.focus();
     }
 
     async _cargarHistorial() {
+      if (!MOSTRAR_HISTORIAL) return;
       try {
         const r = await this._conToken((h) => fetch(this._servidor + "/v1/conversaciones", { headers: h }));
         if (!r.ok) throw new Error(r.status);
@@ -499,7 +526,8 @@
       return el("li", { class: c.id === this._convId ? "activa" : "" }, abrir, borrar);
     }
 
-    async _abrir(id) {
+    // `silencioso`: al restaurar al arrancar, si falla (borrada, de otro usuario) se empieza vacío sin error.
+    async _abrir(id, silencioso = false) {
       if (this._ocupado) return;
       try {
         const r = await this._conToken((h) => fetch(`${this._servidor}/v1/conversaciones/${id}`, { headers: h }));
@@ -510,8 +538,10 @@
           const b = this._burbuja(m.rol);
           if (m.rol === "assistant") markdown(m.texto, b); else b.textContent = m.texto;
         }
-        this._pintarHistorial(); this._menu(false); this._bajar();
-      } catch { this._error(); }
+        this._recordar(); this._pintarHistorial(); this._menu(false); this._bajar();
+      } catch {
+        if (silencioso) { this._convId = null; this._recordar(); } else this._error();
+      }
     }
 
     // — chat —
@@ -580,7 +610,7 @@
             break;
           case "ui": this._acciones(datos.acciones || [], burbuja); break;
           case "done":
-            if (datos.conversacion_id) this._convId = datos.conversacion_id; break;
+            if (datos.conversacion_id) { this._convId = datos.conversacion_id; this._recordar(); } break;
           case "token_expirado": resultado = "token_expirado"; break;
           case "error":
             if (!acumulado) burbuja.remove(); else estado.remove();

@@ -1,6 +1,6 @@
 # Contrato de integración v1
 
-Lo que **cada sistema** debe implementar para que el asistente responda preguntas sobre sus datos. Es HTTP + JSON, con tres piezas obligatorias (token, manifiesto, ejecución) y una opcional (salud). Las rutas mostradas son las sugeridas; en `config/sistemas.yaml` son configurables.
+Lo que **cada sistema** debe implementar para que el asistente responda preguntas sobre sus datos. Es HTTP + JSON, con tres piezas obligatorias (token, manifiesto, ejecución) y una opcional (salud). Las rutas mostradas son las sugeridas; en `config/sistemas.yaml` son configurables. La interfaz para el usuario es el [widget de la sección 7](#7-widget-de-chat-interfaz-para-el-usuario), que el sistema inserta en una página.
 
 Archivos de referencia:
 
@@ -17,7 +17,7 @@ Ruta del sistema (p. ej. `GET /asistente/token`), accesible desde su UI con su s
 { "token": "<jwt>", "expira": "2026-10-03T15:30:00Z" }
 ```
 
-Si el usuario no tiene permitido el asistente, responde `403` y el widget se oculta.
+Si el usuario no tiene permitido el asistente, responde `403` y el widget muestra un aviso de que no está disponible (ver [sección 7](#7-widget-de-chat-interfaz-para-el-usuario)).
 
 | Claim | Obligatorio | Contenido |
 |---|---|---|
@@ -196,3 +196,53 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - Rotar de inmediato ante cualquier sospecha de filtración, y cuando alguien con acceso al valor deje el proyecto.
 - No poner estos valores en el repositorio, en tickets, en logs ni en el código del front. El navegador solo ve el JWT de vida corta, nunca la clave ni el token de manifiesto.
 - Un valor por sistema y por entorno: pruebas y producción no comparten claves.
+
+## 7. Widget de chat (interfaz para el usuario)
+
+El asistente sirve un Web Component, `<asistente-chat>`, que el sistema inserta en una de sus páginas. No requiere framework ni build, y es independiente del stack del sistema. Es una **vista de chat a pantalla completa** (mensajes y entrada fija abajo; muestra solo la conversación actual, con un botón "Nueva conversación" en la barra superior y sin lista de chats por ahora), no una burbuja flotante.
+
+### 7.1 Integración
+
+```html
+<script src="https://asistente.example.com/widget.js" defer></script>
+<asistente-chat
+    style="display:block;height:100vh"
+    servidor="https://asistente.example.com"
+    token-url="/asistente/token"></asistente-chat>
+```
+
+- **El widget ocupa el 100% de su contenedor y no se superpone a la página.** El sistema le da el tamaño: una ruta propia (p. ej. `/asistente`) con `height:100vh`, o un contenedor con alto definido. Si el contenedor no tiene alto, el widget se ve con un mínimo de 360 px.
+- Conviene una página o pestaña dedicada y una entrada de menú que lleve a ella. Si el sistema quiere ocultar esa entrada cuando el asistente no está disponible, puede escuchar `asistente:estado` (ver 7.3).
+- `token-url` es la ruta de emisión del [token de usuario](#1-emisión-del-token-de-usuario). Es **del mismo origen que la página** y se pide con las cookies de sesión del usuario, así que el widget nunca ve credenciales del sistema. Debe responder `{ "token", "expira" }`, o `403` si el usuario no tiene permitido el asistente.
+- `servidor` es la URL del asistente. Si se omite, se usa el origen desde el que se cargó `widget.js`.
+
+### 7.2 Qué necesita el sistema
+
+1. **Registrar el origen de la página** en `origenes_permitidos` (sección [6.3](#63-reglas-del-registro)). Sin eso, el asistente rechaza los requests del widget con `origen_no_permitido`.
+2. **La ruta de emisión del token** accesible desde esa página (sección 1). Debe estar protegida por la sesión del sistema, no ser pública.
+3. Opcional: Content Security Policy que permita `script-src` y `connect-src` hacia el asistente.
+
+El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessionStorage`, únicamente el id de la conversación actual para retomarla al recargar la página (se descarta al cerrar la pestaña). Renueva el token antes de que venza y, ante `token_expirado`, renueva y reintenta el mensaje una vez.
+
+### 7.3 Atributos, estilos y eventos
+
+| Atributo | Contenido |
+|---|---|
+| `token-url` | Obligatorio. Ruta de emisión del token. |
+| `servidor` | URL base del asistente. |
+| `titulo` | Título de la barra superior. Por defecto, "Asistente · {nombre del sistema}". |
+| `placeholder` | Texto del campo de entrada. |
+
+Colores, tipografía y anchos se personalizan con variables CSS definidas en el elemento o en un ancestro: `--asistente-color`, `--asistente-color-texto`, `--asistente-fondo`, `--asistente-texto`, `--asistente-borde`, `--asistente-fuente`, `--asistente-radio`, `--asistente-ancho-lateral` (reservada para cuando se active el historial) y `--asistente-ancho-columna`.
+
+El widget emite eventos DOM (`CustomEvent`, que burbujean y atraviesan el Shadow DOM):
+
+| Evento | `detail` | Cuándo |
+|---|---|---|
+| `asistente:accion` | `{ tipo, url, etiqueta }` | Una tool devolvió una sugerencia `ui` (ver sección 3). Si el sistema llama a `preventDefault()`, el widget no muestra su botón y el sistema decide qué hacer (navegar, abrir un mapa, filtrar una tabla). Por defecto, solo se muestra un botón para URLs relativas del mismo origen. |
+| `asistente:estado` | `{ habilitado }` | Al decidir si el asistente está disponible. Si no lo está (`403` del token o sistema deshabilitado), el widget muestra un aviso en lugar del chat. |
+
+### 7.4 Seguridad
+
+- El contenido del modelo (Markdown) se construye con nodos DOM, nunca con `innerHTML`; los enlaces del modelo solo admiten `http`, `https` y `mailto`.
+- El navegador solo ve el JWT de vida corta, nunca la clave de firma ni el token de manifiesto.

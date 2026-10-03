@@ -19,7 +19,7 @@ def test_widget_no_usa_innerhtml_ni_storage():
 
     js = (Path(__file__).resolve().parent.parent / "src/asistente/static/widget.js").read_text()
     for prohibido in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
-                      "localStorage", "sessionStorage", "eval("):
+                      "localStorage", "eval("):
         assert prohibido not in js.replace("sin innerHTML", ""), prohibido
 
 
@@ -51,3 +51,14 @@ def test_widget_sintaxis_valida():
     ruta = Path(__file__).resolve().parent.parent / "src/asistente/static/widget.js"
     r = subprocess.run([node, "--check", str(ruta)], capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
+
+
+def test_widget_solo_recuerda_el_id_de_conversacion():
+    """sessionStorage solo guarda el id de la conversación; el token vive en memoria (sección 9)."""
+    import re
+
+    js = _js()
+    usos = re.findall(r"sessionStorage\.\w+Item\(([^)]*)\)", js)
+    assert usos, "debería recordar la conversación"
+    assert "token" not in "".join(usos).lower(), usos
+    assert 'setItem(clave, this._convId)' in js  # lo único que se escribe es el id

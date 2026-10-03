@@ -501,7 +501,7 @@ Se compone en tres capas, todas versionadas (`PROMPT_VERSION` + hash del dominio
 
 - **Web Component** `<asistente-chat>` servido por el propio asistente (`/widget.js`), sin dependencia del framework del sistema anfitrión. Estilos encapsulados (Shadow DOM) y **personalizables por variables CSS** (colores, tipografía) para respetar la identidad de cada sistema.
 - **Un único modo: vista de chat a pantalla completa** (decisión de producto; se eliminan el modo flotante —botón + popup— y el incrustado de alto fijo). El componente ocupa **todo el espacio de su contenedor** (`width/height: 100%`); si el anfitrión lo coloca en una página dedicada (p. ej. `/asistente`) con el contenedor a `100vh`, es una vista completa. Estructura:
-  - Barra lateral con historial de conversaciones, "Nueva conversación" y borrar; en pantallas angostas se oculta tras un botón de menú.
+  - **Solo la conversación actual** (decisión de producto, revisable): botón "Nueva conversación" en la barra superior y sin lista de chats. La barra lateral con historial, el borrado y el menú móvil están implementados pero ocultos tras la constante `MOSTRAR_HISTORIAL` del widget; reactivarlo es cambiar un valor.
   - Columna central de mensajes (ancho máx. ~760 px), con scroll propio, y campo de entrada fijo abajo (Enter envía, Shift+Enter salto de línea, se desactiva mientras responde).
   - Estado vacío con la bienvenida; indicador de las tools que se están consultando durante el turno.
   - El anfitrión decide **dónde** vive (ruta propia, entrada de menú, pestaña); el widget no se superpone a su UI.
@@ -517,7 +517,8 @@ Se compone en tres capas, todas versionadas (`PROMPT_VERSION` + hash del dominio
 - SSE con `fetch` + `ReadableStream` (permite cabecera `Authorization`; `EventSource` no).
 - Render de Markdown **sanitizado**; nunca `innerHTML` sin sanitizar.
 - Eventos `ui` → el widget dispara un `CustomEvent('asistente:accion', {detail})` en el DOM. El sistema anfitrión decide qué hacer (navegar, abrir un mapa, filtrar una tabla). El widget, por defecto, solo muestra un botón con la `etiqueta` para `tipo: "navegar"` a URLs relativas del mismo origen.
-- Historial de conversaciones, nueva conversación, borrar.
+- Al recargar la página retoma la conversación actual: guarda **solo su id** en `sessionStorage` (nunca el token) y, si ya no existe o es de otro usuario, empieza vacío. "Nueva conversación" no borra la anterior.
+- Nueva conversación; el historial (listar, abrir, borrar) existe en la API y en el widget, pero está oculto por ahora.
 - Si `/v1/estado` responde deshabilitado o `token-url` devuelve 403, no muestra el chat sino un aviso breve de que el asistente no está disponible (el anfitrión también recibe `asistente:estado` para ocultar su entrada de menú).
 
 ---
@@ -674,7 +675,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 
 **Fase 2**
 - [x] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui` (versión inicial con burbuja flotante)
-- [ ] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): barra lateral de historial, columna central, entrada fija; eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
+- [ ] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): columna central, entrada fija, solo conversación actual (historial oculto); eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
 - [ ] Implementación de referencia PHP
 - [ ] Guía de diseño de tools
 - [ ] Verificador de conformidad completo
