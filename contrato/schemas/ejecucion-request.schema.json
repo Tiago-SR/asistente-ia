@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asistente.local/contrato/v1/ejecucion-request.schema.json",
+  "title": "Cuerpo del request de ejecución de una tool",
+  "type": "object",
+  "required": ["parametros"],
+  "properties": {
+    "parametros": { "type": "object" }
+  },
+  "additionalProperties": false
+}

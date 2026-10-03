@@ -647,11 +647,12 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 ## 16. Checklist de implementación
 
 **Fase 0**
-- [ ] `contrato/CONTRATO.md`, `schemas/`, `openapi.yaml`
-- [ ] Sistema mock con datos ficticios
-- [ ] Esqueleto FastAPI, Dockerfile, docker-compose, Alembic, CI
-- [ ] `.env.example` y `config/sistemas.example.yaml` sin secretos
-- [ ] Decisiones de retención/privacidad (preguntas 1–2) y API key del equipo
+- [x] `contrato/CONTRATO.md`, `schemas/`, `openapi.yaml`
+- [x] Sistema mock con datos ficticios (`ejemplos/sistema-mock/`, dos instancias en docker-compose)
+- [x] Esqueleto FastAPI, Dockerfile, docker-compose, Alembic, CI
+- [x] `.env.example` y `config/sistemas.example.yaml` sin secretos
+- [x] Verificador básico (`herramientas/verificar_sistema.py`): 21/21 contra ambos mocks
+- [~] Decisiones: retención 30 días, manifiesto global, HS256 solo legados, modelo de pruebas local/gratuito. Pendiente: privacidad por cliente (pregunta 2) y API key si se usa proveedor de pago
 
 **Fase 1**
 - [ ] `sistemas/registro.py` + validación del YAML

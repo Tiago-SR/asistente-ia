@@ -1,0 +1,82 @@
+openapi: 3.1.0
+info:
+  title: Contrato de integración del Asistente (v1)
+  version: "1"
+  description: |
+    Lo que cada sistema debe implementar para integrarse con el asistente.
+    Las rutas son las sugeridas; en el registro del asistente son configurables.
+servers:
+  - url: https://sistema.example.com
+paths:
+  /asistente/token:
+    get:
+      summary: Emite un JWT corto para el usuario logueado
+      description: Usa la sesión normal del sistema. 403 si el usuario no tiene permitido el asistente.
+      responses:
+        "200":
+          description: Token emitido
+          content:
+            application/json:
+              schema: { $ref: "schemas/token-respuesta.schema.json" }
+        "403":
+          description: El usuario no tiene permitido el asistente
+  /asistente/tools:
+    get:
+      summary: Manifiesto de tools
+      security: [{ tokenManifiesto: [] }]
+      responses:
+        "200":
+          description: Manifiesto
+          content:
+            application/json:
+              schema: { $ref: "schemas/manifiesto.schema.json" }
+        "401":
+          description: Credencial de manifiesto inválida
+  /asistente/tools/{nombre}:
+    post:
+      summary: Ejecuta una tool con el token del usuario
+      security: [{ tokenUsuario: [] }]
+      parameters:
+        - { name: nombre, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" } }
+        - { name: X-Asistente-Contrato, in: header, required: true, schema: { type: string, const: "1" } }
+        - { name: X-Asistente-Request-Id, in: header, required: false, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "schemas/ejecucion-request.schema.json" }
+      responses:
+        "200":
+          description: "Éxito (`ok: true`) o error de negocio (`ok: false`)"
+          content:
+            application/json:
+              schema: { $ref: "schemas/ejecucion-respuesta.schema.json" }
+        "401":
+          description: Token inválido o vencido
+        "403":
+          description: Scope insuficiente, o se usó el token de manifiesto
+        "5XX":
+          description: Error del sistema
+  /asistente/salud:
+    get:
+      summary: Salud (opcional)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties: { ok: { type: boolean } }
+components:
+  securitySchemes:
+    tokenUsuario:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT de usuario (claims en schemas/token-claims.schema.json)
+    tokenManifiesto:
+      type: http
+      scheme: bearer
+      description: Credencial de servicio, solo válida para leer el manifiesto

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asistente.local/contrato/v1/manifiesto.schema.json",
+  "title": "Manifiesto de tools",
+  "type": "object",
+  "required": ["contrato", "sistema", "tools"],
+  "properties": {
+    "contrato": { "type": "string", "const": "1" },
+    "sistema": {
+      "type": "object",
+      "required": ["nombre"],
+      "properties": {
+        "nombre": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "version": { "type": "string", "maxLength": 50 }
+      },
+      "additionalProperties": true
+    },
+    "tools": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/tool" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "required": ["nombre", "descripcion", "parametros", "efecto"],
+      "properties": {
+        "nombre": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "descripcion": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "parametros": {
+          "type": "object",
+          "required": ["type"],
+          "properties": { "type": { "const": "object" } },
+          "description": "JSON Schema válido de tipo object."
+        },
+        "efecto": { "type": "string", "enum": ["lectura", "escritura"] },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 120 }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen --group dev
+      - run: uv run ruff check .
+      - run: uv run pytest
+
+      # Hito de la Fase 0: el verificador pasa contra los dos mocks.
+      - name: Verificador contra los mocks
+        run: |
+          export PYTHONPATH=src
+          MOCK_ID=mock-a MOCK_SECRETO=secreto-a-0123456789-0123456789 MOCK_TOKEN_MANIFIESTO=man-a \
+            uv run uvicorn app:app --app-dir ejemplos/sistema-mock --port 8201 &
+          MOCK_ID=mock-b MOCK_SECRETO=secreto-b-9876543210-9876543210 MOCK_TOKEN_MANIFIESTO=man-b \
+            uv run uvicorn app:app --app-dir ejemplos/sistema-mock --port 8202 &
+          sleep 5
+          uv run python herramientas/verificar_sistema.py --base-url http://localhost:8201 \
+            --token-url "http://localhost:8201/asistente/token?usuario=ana" --token-manifiesto man-a
+          uv run python herramientas/verificar_sistema.py --base-url http://localhost:8202 \
+            --token-url "http://localhost:8202/asistente/token?usuario=beto" --token-manifiesto man-b

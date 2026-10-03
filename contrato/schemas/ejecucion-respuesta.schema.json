@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asistente.local/contrato/v1/ejecucion-respuesta.schema.json",
+  "title": "Respuesta (HTTP 200) de la ejecución de una tool",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["ok", "datos"],
+      "properties": {
+        "ok": { "const": true },
+        "datos": {},
+        "fuente": { "type": "string", "maxLength": 200 },
+        "ui": { "type": "array", "items": { "$ref": "#/$defs/ui" } }
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "error": {
+          "type": "string",
+          "enum": ["no_encontrado", "sin_acceso", "parametros_invalidos", "no_disponible"]
+        },
+        "detalle": { "type": "string", "maxLength": 1000 }
+      },
+      "additionalProperties": true
+    }
+  ],
+  "$defs": {
+    "ui": {
+      "type": "object",
+      "required": ["tipo"],
+      "properties": {
+        "tipo": { "type": "string", "enum": ["navegar"] },
+        "url": { "type": "string" },
+        "etiqueta": { "type": "string", "maxLength": 200 }
+      },
+      "additionalProperties": true
+    }
+  }
+}

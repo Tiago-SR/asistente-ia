@@ -30,14 +30,43 @@ services:
     volumes:
       - pgdata-dev:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"   # 5432 queda libre para el proyecto de pruebas (SGAgro)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U asistente"]
       interval: 5s
       timeout: 3s
       retries: 10
 
-  # El sistema mock se agrega aquí cuando exista (ejemplos/sistema-mock/).
+  # Dos sistemas mock con ids y secretos distintos (tests de aislamiento).
+  mock-a:
+    build:
+      context: .
+      target: dev
+    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
+    environment:
+      MOCK_ID: mock-a
+      MOCK_NOMBRE: Mock A
+      MOCK_SECRETO: secreto-mock-a-0123456789-0123456789
+      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-a
+    volumes:
+      - ./ejemplos/sistema-mock:/mock:ro
+    ports:
+      - "127.0.0.1:8201:8000"
+
+  mock-b:
+    build:
+      context: .
+      target: dev
+    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
+    environment:
+      MOCK_ID: mock-b
+      MOCK_NOMBRE: Mock B
+      MOCK_SECRETO: secreto-mock-b-9876543210-9876543210
+      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-b
+    volumes:
+      - ./ejemplos/sistema-mock:/mock:ro
+    ports:
+      - "127.0.0.1:8202:8000"
 
 volumes:
   pgdata-dev:
