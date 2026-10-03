@@ -54,6 +54,9 @@
     bienvenida: "Hola, ¿en qué te puedo ayudar?",
     pensando: "Pensando…",
     consultando: "Consultando",
+    dictar: "Dictar",
+    detener: "Detener grabación",
+    transcribiendo: "Transcribiendo…",
     pie: "Las respuestas pueden contener errores; verificá los datos importantes.",
   };
   const ERRORES = {
@@ -68,7 +71,25 @@
     mensaje_invalido: "El mensaje está vacío o es demasiado largo.",
     no_se_pudo_guardar: "No se pudo guardar la conversación.",
   };
+  const ERRORES_VOZ = {
+    voz_no_disponible: "El dictado no está disponible por ahora.",
+    audio_tipo_no_permitido: "Tu navegador grabó en un formato que el dictado no admite.",
+    audio_demasiado_grande: "La grabación es demasiado larga. Probá con una más corta.",
+    audio_demasiado_largo: "La grabación es demasiado larga. Probá con una más corta.",
+    audio_invalido: "No se pudo procesar el audio. Probá de nuevo.",
+    limite_excedido: "Dictaste demasiadas veces seguidas. Esperá un momento.",
+    voz_error: "No se pudo transcribir el audio. Probá de nuevo.",
+    mic_denegado: "No hay permiso para usar el micrófono.",
+    mic_no_disponible: "No se encontró un micrófono.",
+    sin_texto: "No se entendió nada. Probá de nuevo.",
+  };
+  // Formatos que acepta POST /v1/voz/transcribir, en orden de preferencia.
+  const TIPOS_GRABACION = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
   const ERROR_GENERICO = "Ocurrió un error. Probá de nuevo.";
+
+  function puedeGrabar() {
+    return !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  }
 
   // ───────────────────────── Markdown → nodos DOM (sin innerHTML) ─────────────────────────
 
@@ -267,6 +288,15 @@
       background: var(--c); color: var(--ct); cursor: pointer;
     }
     form button:disabled { opacity: .4; cursor: default; }
+    form button.mic { background: transparent; color: var(--apagado); border: 1px solid var(--b); }
+    form button.mic:hover:not(:disabled) { color: var(--c); border-color: var(--c); }
+    form button.mic.grabando { background: #c0392b; border-color: #c0392b; color: #fff; }
+    form button.mic[hidden] { display: none; }
+    .aviso-voz { font-size: 12px; color: var(--apagado); text-align: center; padding-top: 4px; min-height: 16px; }
+    .aviso-voz:empty { display: none; }
+    .aviso-voz.err { color: #8a1f1f; }
+    @media (prefers-reduced-motion: no-preference) { form button.mic.grabando { animation: pulso 1.2s infinite; } }
+    @keyframes pulso { 50% { opacity: .6; } }
     form button svg { width: 18px; height: 18px; }
     .pie { padding-top: 6px; font-size: 11px; color: var(--apagado); text-align: center; }
 
@@ -289,6 +319,8 @@
     menu: "M4 6h16M4 12h16M4 18h16",
     x: "M6 6l12 12M18 6L6 18",
     enviar: "M12 19V5M5 12l7-7 7 7",
+    mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
+    parar: "M7 7h10v10H7z",
   };
   function icono(nombre) {
     const ns = "http://www.w3.org/2000/svg";
@@ -335,7 +367,10 @@
       this._arrancar();
     }
 
-    disconnectedCallback() { if (this._abort) this._abort.abort(); }
+    disconnectedCallback() {
+      if (this._abort) this._abort.abort();
+      this._detenerGrabacion(true);
+    }
 
     attributeChangedCallback(nombre, viejo, nuevo) {
       if (this.isConnected && this._iniciado && viejo !== nuevo) {
@@ -382,10 +417,14 @@
         this._entrada.style.height = Math.min(this._entrada.scrollHeight, 200) + "px";
       });
       this._enviar = el("button", { type: "submit", title: TEXTOS.enviar, "aria-label": TEXTOS.enviar }, icono("enviar"));
-      const form = el("form", {}, this._entrada, this._enviar);
+      // dictado: oculto hasta que /v1/estado lo habilite (voz.dictado)
+      this._mic = el("button", { type: "button", class: "mic", hidden: true, title: TEXTOS.dictar, "aria-label": TEXTOS.dictar }, icono("mic"));
+      this._mic.addEventListener("click", () => this._conmutarDictado());
+      this._avisoVoz = el("div", { class: "aviso-voz", role: "status" });
+      const form = el("form", {}, this._entrada, this._mic, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
       const principal = el("main", { class: "principal" }, barra, this._scroll,
-        el("div", { class: "entrada" }, form, el("div", { class: "pie", textContent: TEXTOS.pie })));
+        el("div", { class: "entrada" }, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie })));
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
       r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
@@ -431,6 +470,9 @@
           const e = await r.json();
           habilitado = e.habilitado !== false;
           this._nombreSistema = e.nombre_sistema || "";
+          const voz = e.voz || {};
+          this._maxAudioS = Number(voz.max_audio_s) > 0 ? Number(voz.max_audio_s) : 60;
+          this._mic.hidden = !(voz.dictado === true && puedeGrabar());
           if (!this.getAttribute("titulo") && this._nombreSistema) this._titulo.textContent = "Asistente · " + this._nombreSistema;
         }
       } catch { /* sin acceso: se muestra el aviso */ }
@@ -541,6 +583,92 @@
         this._recordar(); this._pintarHistorial(); this._menu(false); this._bajar();
       } catch {
         if (silencioso) { this._convId = null; this._recordar(); } else this._error();
+      }
+    }
+
+    // — dictado: graba, transcribe y rellena el campo (sin enviar) —
+    _conmutarDictado() {
+      if (this._grabador) this._detenerGrabacion(false); else this._iniciarGrabacion();
+    }
+
+    _avisarVoz(texto, esError = false) {
+      this._avisoVoz.textContent = texto || "";
+      this._avisoVoz.classList.toggle("err", esError);
+    }
+
+    async _iniciarGrabacion() {
+      if (this._transcribiendo || this._ocupado) return;
+      this._avisarVoz("");
+      let flujo;
+      try {
+        flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        const negado = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+        this._avisarVoz(ERRORES_VOZ[negado ? "mic_denegado" : "mic_no_disponible"], true);
+        return;
+      }
+      const tipo = TIPOS_GRABACION.find((t) => MediaRecorder.isTypeSupported(t));
+      let grabador;
+      try { grabador = new MediaRecorder(flujo, tipo ? { mimeType: tipo } : undefined); }
+      catch { flujo.getTracks().forEach((t) => t.stop()); this._avisarVoz(ERRORES_VOZ.mic_no_disponible, true); return; }
+      const trozos = [];
+      const inicio = Date.now();
+      let cancelada = false;
+      grabador.addEventListener("dataavailable", (ev) => { if (ev.data && ev.data.size) trozos.push(ev.data); });
+      grabador.addEventListener("stop", () => {
+        flujo.getTracks().forEach((t) => t.stop());
+        clearTimeout(this._tope);
+        this._grabador = null;
+        this._mic.classList.remove("grabando");
+        this._mic.title = TEXTOS.dictar; this._mic.setAttribute("aria-label", TEXTOS.dictar);
+        this._mic.replaceChildren(icono("mic"));
+        if (cancelada) { this._avisarVoz(""); return; }
+        const blob = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
+        this._transcribir(blob, (Date.now() - inicio) / 1000);
+      });
+      this._grabador = grabador;
+      this._cancelarFn = () => { cancelada = true; };
+      grabador.start();
+      this._mic.classList.add("grabando");
+      this._mic.title = TEXTOS.detener; this._mic.setAttribute("aria-label", TEXTOS.detener);
+      this._mic.replaceChildren(icono("parar"));
+      // Corta al llegar al tope del servidor (con un margen para que el header no lo supere).
+      this._tope = setTimeout(() => this._detenerGrabacion(false), Math.max(1, this._maxAudioS - 1) * 1000);
+    }
+
+    _detenerGrabacion(cancelar) {
+      const g = this._grabador;
+      if (!g) return;
+      if (cancelar && this._cancelarFn) this._cancelarFn();
+      if (g.state !== "inactive") g.stop();
+    }
+
+    async _transcribir(blob, segundos) {
+      if (!blob.size) { this._avisarVoz(ERRORES_VOZ.audio_invalido, true); return; }
+      this._transcribiendo = true; this._mic.disabled = true;
+      this._avisarVoz(TEXTOS.transcribiendo);
+      try {
+        const tipo = blob.type.split(";")[0] || "audio/webm";
+        const r = await this._conToken((h) => fetch(`${this._servidor}/v1/voz/transcribir`, {
+          method: "POST", body: blob,
+          headers: { ...h, "Content-Type": blob.type || tipo, "X-Audio-Duracion-S": segundos.toFixed(1) },
+        }));
+        if (!r.ok) {
+          let codigo = ""; try { codigo = (await r.json()).error; } catch { /* sin cuerpo */ }
+          this._avisarVoz(ERRORES_VOZ[codigo] || ERROR_GENERICO, true);
+          return;
+        }
+        const texto = String((await r.json()).texto ?? "").trim();
+        if (!texto) { this._avisarVoz(ERRORES_VOZ.sin_texto, true); return; }
+        const actual = this._entrada.value;
+        this._entrada.value = (actual && !/\s$/.test(actual) ? actual + " " : actual) + texto;
+        this._entrada.dispatchEvent(new Event("input"));
+        this._entrada.focus();
+        this._avisarVoz("");
+      } catch {
+        this._avisarVoz(ERROR_GENERICO, true);
+      } finally {
+        this._transcribiendo = false; this._mic.disabled = false;
       }
     }
 

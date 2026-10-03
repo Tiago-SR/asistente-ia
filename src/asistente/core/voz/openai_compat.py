@@ -22,6 +22,15 @@ _EXTENSIONES = {
 }
 
 
+def _codigo_idioma(idioma: str | None) -> str | None:
+    """`es-UY` / `es_UY` -> `es`: Whisper y OpenAI aceptan solo el código base (ISO 639).
+    Si no se reconoce, se omite y el servidor detecta el idioma."""
+    if not idioma:
+        return None
+    base = idioma.replace("_", "-").split("-")[0].strip().lower()
+    return base if base.isascii() and base.isalpha() and 2 <= len(base) <= 3 else None
+
+
 class SttOpenAICompat:
     def __init__(
         self,
@@ -44,8 +53,9 @@ class SttOpenAICompat:
         base_mime = tipo_mime.split(";")[0].strip().lower()
         archivo = f"audio.{_EXTENSIONES.get(base_mime, 'bin')}"
         datos = {"model": self._modelo, "response_format": "json"}
-        if idioma:
-            datos["language"] = idioma
+        codigo = _codigo_idioma(idioma)
+        if codigo:
+            datos["language"] = codigo
         try:
             r = await self._cliente.post(
                 f"{self._base}/audio/transcriptions",
@@ -69,11 +79,19 @@ class SttOpenAICompat:
         return texto.strip()
 
     async def disponible(self) -> bool:
-        """Chequeo barato para `/v1/estado`: el servidor responde en `/models`."""
+        """Chequeo barato para `/v1/estado`: el servidor responde en `/models` y, si lista
+        modelos, incluye el configurado (un Whisper local sin el modelo descargado da 404 al
+        transcribir). Si la respuesta no es una lista reconocible, basta con el 200."""
         try:
             r = await self._cliente.get(
                 f"{self._base}/models", headers=self._headers(), timeout=httpx.Timeout(2.0)
             )
         except httpx.HTTPError:
             return False
-        return r.status_code == 200
+        if r.status_code != 200:
+            return False
+        try:
+            ids = {m["id"] for m in r.json()["data"]}
+        except (ValueError, KeyError, TypeError):
+            return True
+        return self._modelo in ids

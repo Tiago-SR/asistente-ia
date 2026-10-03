@@ -62,3 +62,16 @@ def test_widget_solo_recuerda_el_id_de_conversacion():
     assert usos, "debería recordar la conversación"
     assert "token" not in "".join(usos).lower(), usos
     assert 'setItem(clave, this._convId)' in js  # lo único que se escribe es el id
+
+
+def test_widget_dictado_solo_con_capacidad_y_sin_envio_automatico():
+    """El micrófono nace oculto, se muestra con voz.dictado y solo rellena el campo (sección 7.7)."""
+    js = _js()
+    assert 'class: "mic", hidden: true' in js
+    assert "voz.dictado === true" in js
+    assert "/v1/voz/transcribir" in js and "X-Audio-Duracion-S" in js
+    assert "MediaRecorder" in js and "max_audio_s" in js
+    # el texto transcrito va al campo; _transcribir no debe enviar el mensaje
+    cuerpo = js.split("async _transcribir(", 1)[1].split("// — chat —", 1)[0]
+    assert "_entrada.value" in cuerpo
+    assert "_enviarForm" not in cuerpo and "_enviarMensaje" not in cuerpo

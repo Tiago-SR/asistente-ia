@@ -180,7 +180,7 @@ async def test_estado(api):
     assert r.json() == {
         "habilitado": True,
         "nombre_sistema": "MOCK-A",
-        "voz": {"dictado": False, "respuesta": False},
+        "voz": {"dictado": False, "respuesta": False, "max_audio_s": 60},
     }
 
 
@@ -190,7 +190,7 @@ async def test_estado_informa_dictado_segun_el_stt(construir_app):
     for stt, esperado in [(SttFalso(), True), (SttFalso(disponible=False), False), (None, False)]:
         async with construir_app(stt=stt) as c:
             r = await c.get("/v1/estado", headers=auth())
-            assert r.json()["voz"] == {"dictado": esperado, "respuesta": False}
+            assert r.json()["voz"] == {"dictado": esperado, "respuesta": False, "max_audio_s": 60}
 
 
 # --- aislamiento (el hito del punto 5 se apoya acá) -----------------------------------------
@@ -251,6 +251,16 @@ async def test_preflight_solo_para_origenes_registrados(api):
     assert r.status_code == 204 and r.headers["access-control-allow-origin"] == ORIGEN_B
     r = await api.options("/v1/chat", headers={"Origin": "https://evil.example", **pre})
     assert "access-control-allow-origin" not in r.headers
+
+
+async def test_preflight_permite_la_cabecera_de_duracion_del_dictado(api):
+    """El widget manda X-Audio-Duracion-S desde otro origen: sin esto el navegador bloquea el dictado."""
+    r = await api.options("/v1/voz/transcribir", headers={
+        "Origin": ORIGEN_B, "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization,content-type,x-audio-duracion-s",
+    })
+    permitidas = r.headers["access-control-allow-headers"].lower()
+    assert r.status_code == 204 and "x-audio-duracion-s" in permitidas
 
 
 # --- validaciones y errores ----------------------------------------------------------------------

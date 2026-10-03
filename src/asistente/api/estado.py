@@ -14,10 +14,15 @@ async def estado(
     siquiera valida token (401), y el widget lo trata igual que `habilitado: false`.
 
     `voz` informa qué puede hacer el servicio, no el LLM: el dictado depende del adaptador
-    STT configurado y de que responda; `respuesta` (TTS) llega en un paso posterior."""
+    STT configurado y de que responda; `respuesta` (TTS) llega en un paso posterior;
+    `max_audio_s` es el tope de duración que el widget usa para cortar la grabación."""
     dictado = svc.stt is not None and await svc.stt.disponible()
     return {
         "habilitado": True,
         "nombre_sistema": sesion.sistema.nombre,
-        "voz": {"dictado": dictado, "respuesta": False},
+        "voz": {
+            "dictado": dictado,
+            "respuesta": False,
+            "max_audio_s": svc.settings.voz_max_audio_s,
+        },
     }

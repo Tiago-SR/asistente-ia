@@ -75,5 +75,23 @@ services:
     ports:
       - "127.0.0.1:8202:8000"
 
+  # STT local opcional (dictado). Levantar con: docker compose --profile voz up
+  # Expone /v1/audio/transcriptions; el asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
+  # y STT_MODELO igual a WHISPER_MODELO (speaches elige el modelo por petición).
+  whisper:
+    profiles: ["voz"]
+    image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu}
+    environment:
+      # Descarga el modelo al arrancar (falla rápido si no se puede) en vez de en el primer dictado.
+      PRELOAD_MODELS: '["${WHISPER_MODELO:-Systran/faster-whisper-small}"]'
+      WHISPER__INFERENCE_DEVICE: ${WHISPER_DEVICE:-auto}
+      STT_MODEL_TTL: ${WHISPER_TTL_S:-300}   # -1 = mantener cargado
+      LOG_LEVEL: info
+    volumes:
+      - whisper-cache:/home/ubuntu/.cache/huggingface/hub   # modelos descargados
+    ports:
+      - "127.0.0.1:8300:8000"   # solo para depurar desde el host
+
 volumes:
   pgdata-dev:
+  whisper-cache:

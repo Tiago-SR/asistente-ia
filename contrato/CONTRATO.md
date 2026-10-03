@@ -269,7 +269,17 @@ El widget emite eventos DOM (`CustomEvent`, que burbujean y atraviesan el Shadow
 | `asistente:accion` | `{ tipo, url, etiqueta }` | Una tool devolvió una sugerencia `ui` (ver sección 3). Si el sistema llama a `preventDefault()`, el widget no muestra su botón y el sistema decide qué hacer (navegar, abrir un mapa, filtrar una tabla). Por defecto, solo se muestra un botón para URLs relativas del mismo origen. |
 | `asistente:estado` | `{ habilitado }` | Al decidir si el asistente está disponible. Si no lo está (`403` del token o sistema deshabilitado), el widget muestra un aviso en lugar del chat. |
 
-### 7.4 Seguridad
+### 7.4 Dictado por voz (opcional)
+
+Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), el widget muestra un botón de micrófono junto al campo de texto. Sin esa capacidad, el botón no aparece y el widget se comporta como siempre.
+
+- El usuario graba (`MediaRecorder`, con permiso del navegador); al detener, el widget envía el audio a `POST /v1/voz/transcribir` (mismo token y verificación de origen) y **pone el texto en el campo de entrada, sin enviarlo**: el usuario lo revisa y lo envía. La grabación se corta sola al llegar a `voz.max_audio_s`.
+- El navegador requiere un contexto seguro (HTTPS o `localhost`) para usar el micrófono; el sistema anfitrión debe servir la página así y no bloquear `microphone` en su `Permissions-Policy` (si la página va en un `<iframe>`, necesita `allow="microphone"`).
+- El audio no se guarda en el asistente; solo se registra su duración. Hay topes de tamaño y duración y un límite de dictados por minuto y usuario.
+
+`POST /v1/voz/transcribir`: cuerpo = audio crudo; `Content-Type` `audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg` o `audio/wav`; cabecera `X-Audio-Duracion-S`; query opcional `?idioma=`. Responde `{ "texto" }`. Errores: `503 voz_no_disponible`, `415 audio_tipo_no_permitido`, `413 audio_demasiado_grande` / `audio_demasiado_largo`, `422 audio_invalido`, `429 limite_excedido`, `502 voz_error`.
+
+### 7.5 Seguridad
 
 - El contenido del modelo (Markdown) se construye con nodos DOM, nunca con `innerHTML`; los enlaces del modelo solo admiten `http`, `https` y `mailto`.
 - El navegador solo ve el JWT de vida corta, nunca la clave de firma ni el token de manifiesto.

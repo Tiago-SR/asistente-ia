@@ -9,7 +9,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 _PERMITE = {
     b"access-control-allow-methods": b"GET, POST, DELETE, OPTIONS",
-    b"access-control-allow-headers": b"Authorization, Content-Type",
+    b"access-control-allow-headers": b"Authorization, Content-Type, X-Audio-Duracion-S",
     b"access-control-max-age": b"600",
 }
 

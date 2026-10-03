@@ -477,6 +477,7 @@ Eventos: `delta` (texto), `tool` (qué está consultando, legible), `ui` (sugere
 | `ASISTENTE_LOG_LEVEL` | `INFO` | logs estructurados |
 | `STT_PROVEEDOR` / `STT_BASE_URL` / `STT_MODELO` / `STT_API_KEY` | — | dictado (7.7); sin `STT_PROVEEDOR` queda deshabilitado |
 | `ASISTENTE_VOZ_MAX_AUDIO_KB` / `_S` | `2048` / `60` | topes del audio recibido |
+| `ASISTENTE_VOZ_MAX_POR_MIN` | `10` | rate limit del dictado por usuario |
 | *por sistema* | — | claves públicas/secretos/tokens de manifiesto referenciados en `sistemas.yaml` |
 
 Modelo económico para tareas simples (títulos de conversación, clasificación): opcional, configurable con el mismo mecanismo de proveedor/modelo (3.8).
@@ -485,6 +486,7 @@ Modelo económico para tareas simples (títulos de conversación, clasificación
 
 - **Independiente del LLM.** El agente solo ve texto: el audio se convierte antes y después. Cambiar de LLM no afecta a la voz, y no se sondea al modelo para saber si "escucha".
 - **Puertos `STT` y `TTS`** en `core/ports.py`, con adaptadores en `core/voz/` (mismo patrón que el LLM). El primer adaptador, `openai_compat`, habla con cualquier `/v1/audio/transcriptions`: un servidor Whisper local (contenedor opcional, perfil `voz`, sin sumar dependencias pesadas a la imagen del asistente) o un proveedor remoto; solo cambia `STT_BASE_URL`.
+- **Whisper local, primer uso:** `docker compose --profile voz up -d whisper` y, una sola vez, descargar el modelo al volumen `whisper-cache`: `curl -X POST localhost:8300/v1/models/<STT_MODELO>` (`PRELOAD_MODELS` no lo descargó en las pruebas). Sin el modelo, Whisper da 404 al transcribir; por eso `voz.dictado` exige que `STT_MODELO` figure en `/models`. El locale del token (`es-UY`) se reduce al código base (`es`) antes de enviarlo.
 - **Capacidades:** `/v1/estado` informa `voz.dictado` (hay adaptador STT configurado y responde) y `voz.respuesta` (TTS, pendiente). El widget muestra cada botón solo si su capacidad está activa.
 - **Dictado:** el widget graba con `MediaRecorder`, envía el audio a `POST /v1/voz/transcribir` (mismo token y verificación de origen) y **rellena el campo de texto**; el usuario revisa y envía. Sin envío automático.
 - **Privacidad:** el audio no se guarda; solo se registra la duración. Topes de tamaño y duración, tipos permitidos y rate limit por usuario.
