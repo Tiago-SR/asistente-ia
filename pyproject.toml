@@ -41,3 +41,7 @@ src = ["src", "tests"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.ruff.lint.per-file-ignores]
+# reutiliza fixtures de test_api.py por importación (el nombre del parámetro las "redefine")
+"tests/test_aislamiento.py" = ["F811"]

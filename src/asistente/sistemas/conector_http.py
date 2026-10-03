@@ -64,6 +64,8 @@ class ConectorHttp:
                     "X-Asistente-Request-Id": request_id,
                 },
                 timeout=tool.timeout_s or min(DEFAULT_TIMEOUT_S, sistema.conector.timeout_s),
+                # Nunca se reenvía el token del usuario a otro host, sea cual sea el cliente inyectado.
+                follow_redirects=False,
             )
         except httpx.TimeoutException:
             return _fallo("timeout", "el sistema no respondió a tiempo")

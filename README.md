@@ -11,7 +11,7 @@ Principios del MVP:
 - Cifras siempre trazables a una tool (nada inventado).
 - Proveedor de LLM intercambiable (formato neutro + adaptadores).
 
-> Estado: en construcción, Fase 0. Hoy solo existe el esqueleto del servicio (`/salud`). El diseño completo, las fases y el checklist están en [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md).
+> Estado: **Fase 1 completa** (asistente de texto, solo lectura). Hay registro de sistemas, auth JWT por sistema, conector HTTP, loop del agente con adaptador OpenAI-compatible, límites, auditoría y API `/v1/*` con SSE, con tests de aislamiento entre sistemas y usuarios (`tests/test_aislamiento.py`). Pendiente: widget y kit de integración (Fase 2). El diseño completo, las fases y el checklist están en [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md).
 
 ## Stack
 
@@ -42,6 +42,29 @@ curl localhost:8100/salud
 ```
 
 La documentación interactiva de la API está en <http://localhost:8100/docs>.
+
+### LLM local
+
+El servicio habla con cualquier endpoint OpenAI-compatible (`/v1/chat/completions` con streaming y tool calling). Para usar un `llama-server` en el host:
+
+```sh
+# en .env (el compose ya trae un default: http://host.docker.internal:8090/v1)
+LLM_BASE_URL=http://host.docker.internal:8090/v1
+ASISTENTE_MODELO_DEFAULT=<nombre del modelo>
+```
+
+`docker-compose.yml` define `extra_hosts: host.docker.internal:host-gateway` para que el contenedor llegue al host en Linux. El `llama-server` debe escuchar en una interfaz alcanzable desde Docker (`--host 0.0.0.0`, no solo `127.0.0.1`) y conviene firewall que lo limite a la red local. `LLM_BASE_URL` debe incluir el `/v1`.
+
+### Tests
+
+Dos sistemas mock en memoria y Postgres real (los tests de BD se saltan sin `ASISTENTE_DATABASE_URL`):
+
+```sh
+docker compose up -d postgres
+docker compose run --rm asistente sh -c 'ruff check src tests && pytest -q'
+```
+
+`tests/test_aislamiento.py` es el hito de la Fase 1: tokens entre sistemas, mismo `sub` en dos sistemas, ana vs. beto vía chat, prompt injection, redirecciones y `token_manifiesto`, tools de escritura, límites/cuotas y borrado.
 
 ### Comandos habituales
 

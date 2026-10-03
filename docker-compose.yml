@@ -10,6 +10,10 @@ services:
       ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: DEBUG
+      # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # llegar al host desde el contenedor en Linux
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
