@@ -4,23 +4,27 @@
  * Web Component sin dependencias ni build. Shadow DOM, sin innerHTML: todo el contenido
  * (incluido el Markdown del modelo) se construye con nodos DOM, así que no hay inyección.
  *
+ * Es una vista de chat a pantalla completa: ocupa el 100% del alto y ancho de su contenedor
+ * (el anfitrión le da tamaño, p. ej. style="display:block;height:100vh") y trae su propia barra
+ * lateral con el historial. No es un popup ni se superpone a la página.
+ *
  * Atributos:
  *   token-url   (obligatorio) ruta del sistema anfitrión que emite el token; se pide con
  *               las cookies de sesión del anfitrión. Responde {token, expira}.
  *   servidor    URL base del asistente. Por defecto, el origen desde el que se cargó este script.
- *   titulo      título de la cabecera. Por defecto, el nombre del sistema.
- *   modo        "flotante" (botón + panel, por defecto) | "incrustado" (ocupa su contenedor).
- *   abierto     (modo flotante) arranca con el panel abierto.
+ *   titulo      título de la barra superior. Por defecto, el nombre del sistema.
  *   placeholder texto del campo de entrada.
  *
  * Personalización por variables CSS (se heredan a través del Shadow DOM):
  *   --asistente-color, --asistente-color-texto, --asistente-fondo, --asistente-texto,
- *   --asistente-borde, --asistente-fuente, --asistente-radio, --asistente-ancho, --asistente-alto
+ *   --asistente-borde, --asistente-fuente, --asistente-radio,
+ *   --asistente-ancho-lateral (260px), --asistente-ancho-columna (760px)
  *
  * Eventos (CustomEvent, burbujean y atraviesan el Shadow DOM):
  *   asistente:accion   {detail: {tipo, url, etiqueta}} por cada sugerencia `ui` del sistema.
  *                      Si el anfitrión llama preventDefault(), el widget no muestra su botón.
- *   asistente:estado   {detail: {habilitado}} al decidir si se muestra u oculta.
+ *   asistente:estado   {detail: {habilitado}} al decidir si el asistente está disponible
+ *                      (si no lo está, el widget muestra un aviso en lugar del chat).
  */
 (() => {
   "use strict";
@@ -36,9 +40,9 @@
     enviar: "Enviar",
     nueva: "Nueva conversación",
     historial: "Historial",
-    cerrar: "Cerrar",
-    abrir: "Abrir asistente",
-    borrar: "Borrar",
+    borrar: "Borrar conversación",
+    confirmarBorrar: "¿Borrar esta conversación? No se puede deshacer.",
+    noDisponible: "El asistente no está disponible para tu usuario.",
     sinHistorial: "Todavía no hay conversaciones.",
     bienvenida: "Hola, ¿en qué te puedo ayudar?",
     pensando: "Pensando…",
@@ -155,7 +159,7 @@
   // ───────────────────────── Estilos ─────────────────────────
 
   const CSS = `
-    :host { all: initial; display: contents; }
+    :host { display: block; height: 100%; min-height: 360px; }
     * { box-sizing: border-box; }
     .raiz {
       --c: var(--asistente-color, #2f6f3e);
@@ -164,101 +168,124 @@
       --t: var(--asistente-texto, #1d2420);
       --b: var(--asistente-borde, #d9ded9);
       --suave: color-mix(in srgb, var(--t) 6%, var(--f));
+      --apagado: color-mix(in srgb, var(--t) 58%, var(--f));
       --r: var(--asistente-radio, 12px);
-      font: 14px/1.45 var(--asistente-fuente, system-ui, -apple-system, "Segoe UI", sans-serif);
-      color: var(--t);
+      display: flex; width: 100%; height: 100%; position: relative; overflow: hidden;
+      background: var(--f); color: var(--t);
+      font: 15px/1.55 var(--asistente-fuente, system-ui, -apple-system, "Segoe UI", sans-serif);
     }
-    .raiz[hidden], [hidden] { display: none !important; }
-    .flotante .lanzador {
-      position: fixed; right: 20px; bottom: 20px; z-index: 2147483000;
-      width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer;
-      background: var(--c); color: var(--ct); box-shadow: 0 4px 14px rgba(0,0,0,.25);
-      display: grid; place-items: center;
+    [hidden] { display: none !important; }
+    button { font: inherit; color: inherit; }
+    textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--c); outline-offset: 1px; }
+
+    .lateral {
+      width: var(--asistente-ancho-lateral, 260px); flex: none; display: flex; flex-direction: column;
+      background: var(--suave); border-right: 1px solid var(--b);
     }
-    .lanzador svg { width: 26px; height: 26px; }
-    .panel {
-      display: flex; flex-direction: column; background: var(--f); border: 1px solid var(--b);
-      border-radius: var(--r); overflow: hidden; position: relative;
+    .lateral-cab { padding: 12px; }
+    button.nueva {
+      width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer;
+      border: 1px solid var(--b); background: var(--f); border-radius: var(--r); font-weight: 600;
     }
-    .flotante .panel {
-      position: fixed; right: 20px; bottom: 88px; z-index: 2147483000;
-      width: min(var(--asistente-ancho, 380px), calc(100vw - 24px));
-      height: min(var(--asistente-alto, 560px), calc(100vh - 110px));
-      box-shadow: 0 10px 40px rgba(0,0,0,.28);
+    button.nueva:hover { border-color: var(--c); }
+    button.nueva svg { width: 18px; height: 18px; flex: none; }
+    .lista-titulo { padding: 8px 16px 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); }
+    .lista { list-style: none; margin: 0; padding: 4px 8px 12px; overflow-y: auto; flex: 1; }
+    .lista li { display: flex; align-items: center; border-radius: 8px; }
+    .lista li:hover, .lista li.activa { background: color-mix(in srgb, var(--t) 9%, var(--f)); }
+    .lista li.activa .abrir { font-weight: 600; }
+    .lista .abrir {
+      flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 9px 10px;
+      cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .incrustado .panel { width: 100%; height: var(--asistente-alto, 560px); }
-    .incrustado .lanzador, .incrustado .cerrar { display: none; }
-    header {
-      display: flex; align-items: center; gap: 4px; padding: 10px 12px;
-      background: var(--c); color: var(--ct);
+    .lista .borrar {
+      background: none; border: 0; cursor: pointer; color: var(--apagado); padding: 6px; margin-right: 4px;
+      border-radius: 6px; display: grid; place-items: center; opacity: 0;
     }
-    header h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    header button {
-      background: transparent; border: 0; color: inherit; cursor: pointer; padding: 6px;
-      border-radius: 6px; display: grid; place-items: center;
+    .lista li:hover .borrar, .lista li:focus-within .borrar, .lista li.activa .borrar { opacity: 1; }
+    .lista .borrar:hover { color: #8a1f1f; }
+    .lista .borrar svg { width: 16px; height: 16px; }
+    .lista .vacio-hist { display: block; padding: 10px; color: var(--apagado); font-size: 13px; }
+
+    .principal { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .barra { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--b); }
+    .barra h1 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .barra .menu { display: none; background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer; place-items: center; }
+    .barra .menu:hover { background: var(--suave); }
+    .barra svg { width: 20px; height: 20px; }
+
+    .scroll { flex: 1; overflow-y: auto; }
+    .columna {
+      max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto; padding: 24px 16px;
+      display: flex; flex-direction: column; gap: 20px;
     }
-    header button:hover, header button:focus-visible { background: rgba(255,255,255,.2); }
-    header svg { width: 18px; height: 18px; }
-    .mensajes { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-    .msg { max-width: 88%; padding: 8px 12px; border-radius: var(--r); overflow-wrap: anywhere; }
-    .msg.user { align-self: flex-end; background: var(--c); color: var(--ct); white-space: pre-wrap; }
-    .msg.assistant { align-self: flex-start; background: var(--suave); }
-    .msg.sistema { align-self: center; color: color-mix(in srgb, var(--t) 60%, var(--f)); font-size: 12px; text-align: center; }
-    .msg.error { align-self: stretch; max-width: 100%; background: #fdecec; color: #8a1f1f; }
+    .scroll.vacio { display: flex; }
+    .scroll.vacio .columna { flex: 1; width: 100%; justify-content: center; }
+    .bienvenida h2 { margin: 0; text-align: center; font-size: 26px; font-weight: 600; }
+
+    .msg { overflow-wrap: anywhere; }
+    .msg.user { align-self: flex-end; max-width: 85%; padding: 8px 14px; background: var(--suave); border-radius: calc(var(--r) * 1.5); white-space: pre-wrap; }
+    .msg.assistant { align-self: stretch; }
+    .msg.error { align-self: stretch; padding: 8px 12px; background: #fdecec; color: #8a1f1f; border-radius: var(--r); }
     .msg > :first-child { margin-top: 0; } .msg > :last-child { margin-bottom: 0; }
-    .msg p, .msg ul, .msg ol, .msg pre, .msg h3, .msg h4, .msg h5, .msg h6 { margin: 0 0 8px; }
-    .msg h3, .msg h4, .msg h5, .msg h6 { font-size: 14px; }
-    .msg ul, .msg ol { padding-left: 20px; }
-    .msg code { font-family: ui-monospace, monospace; font-size: 12.5px; background: rgba(0,0,0,.08); padding: 1px 4px; border-radius: 4px; }
-    .msg pre { background: rgba(0,0,0,.08); padding: 8px; border-radius: 6px; overflow-x: auto; }
+    .msg p, .msg ul, .msg ol, .msg pre, .msg h3, .msg h4, .msg h5, .msg h6 { margin: 0 0 10px; }
+    .msg h3, .msg h4, .msg h5, .msg h6 { font-size: 16px; }
+    .msg ul, .msg ol { padding-left: 22px; }
+    .msg code { font-family: ui-monospace, monospace; font-size: 13px; background: rgba(0,0,0,.07); padding: 1px 5px; border-radius: 4px; }
+    .msg pre { background: rgba(0,0,0,.07); padding: 10px; border-radius: 8px; overflow-x: auto; }
     .msg pre code { background: none; padding: 0; }
-    .msg a { color: inherit; text-decoration: underline; }
-    .tabla { overflow-x: auto; margin-bottom: 8px; }
-    .msg table { border-collapse: collapse; font-size: 13px; }
-    .msg th, .msg td { border: 1px solid var(--b); padding: 3px 8px; text-align: left; }
-    .estado { font-size: 12px; color: color-mix(in srgb, var(--t) 60%, var(--f)); font-style: italic; }
-    .acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .acciones a {
-      display: inline-block; padding: 4px 10px; border: 1px solid var(--c); color: var(--c);
+    .msg a { color: var(--c); text-decoration: underline; }
+    .tabla { overflow-x: auto; margin-bottom: 10px; }
+    .msg table { border-collapse: collapse; font-size: 14px; }
+    .msg th, .msg td { border: 1px solid var(--b); padding: 4px 10px; text-align: left; }
+    .msg th { background: var(--suave); }
+    .estado { font-size: 13px; color: var(--apagado); font-style: italic; }
+    .acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .msg .acciones a {
+      display: inline-block; padding: 4px 12px; border: 1px solid var(--c); color: var(--c);
       border-radius: 999px; text-decoration: none; font-size: 13px; background: var(--f);
     }
-    .acciones a:hover { background: var(--c); color: var(--ct); }
-    form { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--b); }
-    textarea {
-      flex: 1; resize: none; font: inherit; color: inherit; background: var(--f);
-      border: 1px solid var(--b); border-radius: 8px; padding: 8px; max-height: 120px;
+    .msg .acciones a:hover { background: var(--c); color: var(--ct); }
+
+    .entrada { padding: 0 16px 8px; }
+    .entrada form {
+      max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+      padding: 8px 8px 8px 16px; background: var(--f); border: 1px solid var(--b); border-radius: calc(var(--r) * 1.8);
     }
-    textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--c); outline-offset: 1px; }
+    .entrada form:focus-within { border-color: var(--c); }
+    textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; font: inherit; color: inherit; max-height: 200px; padding: 6px 0; }
     form button {
-      border: 0; border-radius: 8px; padding: 0 14px; background: var(--c); color: var(--ct);
-      cursor: pointer; font: inherit; font-weight: 600;
+      flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center;
+      background: var(--c); color: var(--ct); cursor: pointer;
     }
-    form button:disabled { opacity: .5; cursor: default; }
-    .pie { padding: 0 12px 8px; font-size: 11px; color: color-mix(in srgb, var(--t) 55%, var(--f)); text-align: center; }
-    .historial { position: absolute; inset: 0; top: 0; background: var(--f); display: flex; flex-direction: column; z-index: 2; }
-    .historial ul { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; }
-    .historial li { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--b); }
-    .historial li button.abrir { flex: 1; text-align: left; background: none; border: 0; padding: 10px 6px; cursor: pointer; font: inherit; color: inherit; }
-    .historial li button.abrir:hover { background: var(--suave); }
-    .historial li small { display: block; color: color-mix(in srgb, var(--t) 55%, var(--f)); }
-    .historial li button.borrar { background: none; border: 0; cursor: pointer; color: #8a1f1f; padding: 6px; font: inherit; }
-    .vacio { padding: 20px; text-align: center; color: color-mix(in srgb, var(--t) 60%, var(--f)); }
-    @media (max-width: 480px) {
-      .flotante .panel { right: 8px; left: 8px; bottom: 80px; width: auto; }
+    form button:disabled { opacity: .4; cursor: default; }
+    form button svg { width: 18px; height: 18px; }
+    .pie { padding-top: 6px; font-size: 11px; color: var(--apagado); text-align: center; }
+
+    .velo, .aviso { display: none; }
+    .sin-acceso .lateral, .sin-acceso .principal { display: none; }
+    .sin-acceso .aviso { display: grid; flex: 1; place-items: center; padding: 24px; text-align: center; color: var(--apagado); }
+
+    @media (max-width: 720px) {
+      .lateral { position: absolute; inset: 0 auto 0 0; z-index: 3; width: min(300px, 85%); transform: translateX(-100%); }
+      .menu-abierto .lateral { transform: none; box-shadow: 0 0 30px rgba(0,0,0,.3); }
+      .menu-abierto .velo { display: block; position: absolute; inset: 0; z-index: 2; background: rgba(0,0,0,.4); }
+      .barra .menu { display: grid; }
+      .bienvenida h2 { font-size: 22px; }
     }
-    @media (prefers-reduced-motion: no-preference) { .lanzador { transition: transform .15s; } .lanzador:hover { transform: scale(1.06); } }
+    @media (prefers-reduced-motion: no-preference) { .lateral { transition: transform .2s; } }
   `;
 
   const ICONO = {
-    chat: "M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
     nuevo: "M12 5v14M5 12h14",
-    reloj: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z",
+    menu: "M4 6h16M4 12h16M4 18h16",
     x: "M6 6l12 12M18 6L6 18",
+    enviar: "M12 19V5M5 12l7-7 7 7",
   };
   function icono(nombre) {
     const ns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("fill", nombre === "chat" ? "currentColor" : "none");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("fill", "none");
     svg.setAttribute("stroke", "currentColor"); svg.setAttribute("stroke-width", "2");
     svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
     svg.setAttribute("aria-hidden", "true");
@@ -311,24 +338,28 @@
     // — UI —
     _construir() {
       if (this._raiz) return;
-      const incrustado = this.getAttribute("modo") === "incrustado";
-      const r = this._raiz = el("div", { class: "raiz " + (incrustado ? "incrustado" : "flotante"), hidden: true });
+      const r = this._raiz = el("div", { class: "raiz", hidden: true });
       this.shadowRoot.append(el("style", { textContent: CSS }), r);
 
-      this._lanzador = el("button", { class: "lanzador", type: "button", title: TEXTOS.abrir, "aria-label": TEXTOS.abrir }, icono("chat"));
-      this._lanzador.addEventListener("click", () => this._alternar());
+      // barra lateral: nueva conversación + historial
+      const nueva = el("button", { class: "nueva", type: "button" }, icono("nuevo"), el("span", { textContent: TEXTOS.nueva }));
+      nueva.addEventListener("click", () => this._nueva());
+      this._lista = el("ul", { class: "lista" });
+      const lateral = el("aside", { class: "lateral", "aria-label": TEXTOS.historial },
+        el("div", { class: "lateral-cab" }, nueva),
+        el("div", { class: "lista-titulo", textContent: TEXTOS.historial }), this._lista);
+      const velo = el("div", { class: "velo" });
+      velo.addEventListener("click", () => this._menu(false));
 
-      this._titulo = el("h2", { textContent: this.getAttribute("titulo") || "Asistente" });
-      const btn = (clase, titulo, ic, fn) => {
-        const b = el("button", { class: clase, type: "button", title: titulo, "aria-label": titulo }, icono(ic));
-        b.addEventListener("click", fn); return b;
-      };
-      const cab = el("header", {}, this._titulo,
-        btn("nueva", TEXTOS.nueva, "nuevo", () => this._nueva()),
-        btn("hist", TEXTOS.historial, "reloj", () => this._verHistorial()),
-        btn("cerrar", TEXTOS.cerrar, "x", () => this._alternar(false)));
+      // columna principal: barra, mensajes, entrada
+      this._titulo = el("h1", { textContent: this.getAttribute("titulo") || "Asistente" });
+      const menu = el("button", { class: "menu", type: "button", title: TEXTOS.historial, "aria-label": TEXTOS.historial }, icono("menu"));
+      menu.addEventListener("click", () => this._menu());
+      const barra = el("header", { class: "barra" }, menu, this._titulo);
 
-      this._mensajes = el("div", { class: "mensajes", role: "log", "aria-live": "polite" });
+      this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
+      this._scroll = el("div", { class: "scroll" }, this._mensajes);
+
       this._entrada = el("textarea", {
         rows: 1, placeholder: this.getAttribute("placeholder") || TEXTOS.escribir,
         "aria-label": TEXTOS.escribir, maxLength: 4000,
@@ -338,35 +369,37 @@
       });
       this._entrada.addEventListener("input", () => {
         this._entrada.style.height = "auto";
-        this._entrada.style.height = Math.min(this._entrada.scrollHeight, 120) + "px";
+        this._entrada.style.height = Math.min(this._entrada.scrollHeight, 200) + "px";
       });
-      this._enviar = el("button", { type: "submit", textContent: TEXTOS.enviar });
+      this._enviar = el("button", { type: "submit", title: TEXTOS.enviar, "aria-label": TEXTOS.enviar }, icono("enviar"));
       const form = el("form", {}, this._entrada, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
+      const principal = el("main", { class: "principal" }, barra, this._scroll,
+        el("div", { class: "entrada" }, form, el("div", { class: "pie", textContent: TEXTOS.pie })));
 
-      this._panel = el("div", { class: "panel", role: "dialog", "aria-label": "Asistente" },
-        cab, this._mensajes, form, el("div", { class: "pie", textContent: TEXTOS.pie }));
-      this._panel.hidden = !incrustado && !this.hasAttribute("abierto");
-      r.append(this._lanzador, this._panel);
+      this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
+      r.append(lateral, velo, principal, this._aviso);
       this._mostrarBienvenida();
     }
 
-    _alternar(abrir) {
-      const mostrar = abrir === undefined ? this._panel.hidden : abrir;
-      this._panel.hidden = !mostrar;
-      if (mostrar) this._entrada.focus(); else this._lanzador.focus();
+    _menu(abrir) {
+      this._raiz.classList.toggle("menu-abierto", abrir === undefined ? !this._raiz.classList.contains("menu-abierto") : abrir);
     }
 
     _mostrarBienvenida() {
-      this._mensajes.replaceChildren(el("div", { class: "msg sistema", textContent: TEXTOS.bienvenida }));
+      this._mensajes.replaceChildren(el("div", { class: "bienvenida" }, el("h2", { textContent: TEXTOS.bienvenida })));
+      this._scroll.classList.add("vacio");
     }
 
     _burbuja(rol) {
       const b = el("div", { class: "msg " + rol });
+      const bienvenida = this._mensajes.querySelector(".bienvenida");
+      if (bienvenida) bienvenida.remove();
+      this._scroll.classList.remove("vacio");
       this._mensajes.append(b); this._bajar(); return b;
     }
 
-    _bajar() { this._mensajes.scrollTop = this._mensajes.scrollHeight; }
+    _bajar() { this._scroll.scrollTop = this._scroll.scrollHeight; }
 
     _error(codigo) {
       const b = this._burbuja("error");
@@ -390,8 +423,10 @@
           this._nombreSistema = e.nombre_sistema || "";
           if (!this.getAttribute("titulo") && this._nombreSistema) this._titulo.textContent = "Asistente · " + this._nombreSistema;
         }
-      } catch { /* sin acceso: el widget queda oculto */ }
-      this._raiz.hidden = !habilitado;
+      } catch { /* sin acceso: se muestra el aviso */ }
+      this._raiz.classList.toggle("sin-acceso", !habilitado);
+      this._raiz.hidden = false;
+      if (habilitado) { this._cargarHistorial(); this._entrada.focus(); }
       this.dispatchEvent(new CustomEvent("asistente:estado", { detail: { habilitado }, bubbles: true, composed: true }));
     }
 
@@ -425,46 +460,43 @@
       return r;
     }
 
-    // — conversaciones —
+    // — conversaciones (barra lateral) —
     _nueva() {
       if (this._ocupado) return;
-      this._convId = null; this._cerrarHistorial(); this._mostrarBienvenida(); this._entrada.focus();
+      this._convId = null; this._mostrarBienvenida(); this._pintarHistorial();
+      this._menu(false); this._entrada.focus();
     }
 
-    _cerrarHistorial() { if (this._hist) { this._hist.remove(); this._hist = null; } }
-
-    async _verHistorial() {
-      if (this._hist) return this._cerrarHistorial();
-      const lista = el("ul");
-      const cerrar = el("button", { type: "button", title: TEXTOS.cerrar, "aria-label": TEXTOS.cerrar }, icono("x"));
-      cerrar.addEventListener("click", () => this._cerrarHistorial());
-      const cab = el("header", {}, el("h2", { textContent: TEXTOS.historial }), cerrar);
-      this._hist = el("div", { class: "historial" }, cab, lista);
-      this._panel.append(this._hist);
+    async _cargarHistorial() {
       try {
         const r = await this._conToken((h) => fetch(this._servidor + "/v1/conversaciones", { headers: h }));
         if (!r.ok) throw new Error(r.status);
-        const convs = await r.json();
-        if (!convs.length) { lista.replaceWith(el("div", { class: "vacio", textContent: TEXTOS.sinHistorial })); return; }
-        for (const c of convs) lista.append(this._itemHistorial(c, lista));
-      } catch { lista.replaceWith(el("div", { class: "vacio", textContent: ERROR_GENERICO })); }
+        this._convs = await r.json();
+      } catch { this._convs = null; }
+      this._pintarHistorial();
     }
 
-    _itemHistorial(c, lista) {
-      const fecha = new Date(c.actualizada).toLocaleString();
-      const abrir = el("button", { class: "abrir", type: "button" }, c.titulo || "(sin título)", el("small", { textContent: fecha }));
+    _pintarHistorial() {
+      const aviso = (texto) => el("li", {}, el("span", { class: "vacio-hist", textContent: texto }));
+      if (this._convs === null) return this._lista.replaceChildren(aviso(ERROR_GENERICO));
+      if (!this._convs.length) return this._lista.replaceChildren(aviso(TEXTOS.sinHistorial));
+      this._lista.replaceChildren(...this._convs.map((c) => this._itemHistorial(c)));
+    }
+
+    _itemHistorial(c) {
+      const abrir = el("button", { class: "abrir", type: "button", title: c.titulo || "", textContent: c.titulo || "(sin título)" });
       abrir.addEventListener("click", () => this._abrir(c.id));
-      const borrar = el("button", { class: "borrar", type: "button", textContent: TEXTOS.borrar });
+      const borrar = el("button", { class: "borrar", type: "button", title: TEXTOS.borrar, "aria-label": TEXTOS.borrar }, icono("x"));
       borrar.addEventListener("click", async () => {
-        const r = await this._conToken((h) => fetch(`${this._servidor}/v1/conversaciones/${c.id}`, { method: "DELETE", headers: h }));
-        if (r.ok || r.status === 404) {
-          li.remove();
-          if (this._convId === c.id) this._nueva();
-          if (!lista.children.length) lista.replaceWith(el("div", { class: "vacio", textContent: TEXTOS.sinHistorial }));
-        }
+        if (!window.confirm(TEXTOS.confirmarBorrar)) return;
+        try {
+          const r = await this._conToken((h) => fetch(`${this._servidor}/v1/conversaciones/${c.id}`, { method: "DELETE", headers: h }));
+          if (!r.ok && r.status !== 404) return;
+        } catch { return; }
+        this._convs = this._convs.filter((x) => x.id !== c.id);
+        if (this._convId === c.id && !this._ocupado) this._nueva(); else this._pintarHistorial();
       });
-      const li = el("li", {}, abrir, borrar);
-      return li;
+      return el("li", { class: c.id === this._convId ? "activa" : "" }, abrir, borrar);
     }
 
     async _abrir(id) {
@@ -473,13 +505,13 @@
         const r = await this._conToken((h) => fetch(`${this._servidor}/v1/conversaciones/${id}`, { headers: h }));
         if (!r.ok) throw new Error(r.status);
         const d = await r.json();
-        this._convId = id; this._cerrarHistorial(); this._mensajes.replaceChildren();
+        this._convId = id; this._mensajes.replaceChildren(); this._mostrarBienvenida();
         for (const m of d.mensajes) {
           const b = this._burbuja(m.rol);
           if (m.rol === "assistant") markdown(m.texto, b); else b.textContent = m.texto;
         }
-        this._bajar();
-      } catch { this._cerrarHistorial(); this._error(); }
+        this._pintarHistorial(); this._menu(false); this._bajar();
+      } catch { this._error(); }
     }
 
     // — chat —
@@ -492,12 +524,11 @@
 
     _bloquear(si) {
       this._ocupado = si; this._enviar.disabled = si;
-      this._panel.setAttribute("aria-busy", String(si));
+      this._raiz.setAttribute("aria-busy", String(si));
     }
 
     async _enviarMensaje(texto) {
       this._bloquear(true);
-      if (!this._mensajes.querySelector(".msg:not(.sistema)")) this._mensajes.replaceChildren();
       this._burbuja("user").textContent = texto;
       const burbuja = this._burbuja("assistant");
       const estado = el("div", { class: "estado", textContent: TEXTOS.pensando });
@@ -516,6 +547,7 @@
       } finally {
         if (!burbuja.textContent.trim() && !burbuja.querySelector(".acciones")) burbuja.remove();
         this._bloquear(false); this._abort = null;
+        this._cargarHistorial();  // el turno puede haber creado o retitulado la conversación
       }
     }
 

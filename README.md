@@ -91,14 +91,14 @@ Luego reconstruir con `docker compose build asistente`. Si el lock queda con due
 
 ## Widget
 
-El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni build; código en `src/asistente/static/widget.js`). Un sistema lo integra con dos líneas:
+El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni build; código en `src/asistente/static/widget.js`). Es una **vista de chat a pantalla completa** (barra lateral con historial, columna de mensajes y entrada fija abajo), no una burbuja flotante: ocupa el 100% de su contenedor, así que el sistema lo coloca en una página o sección propia y le da alto. Se integra con dos líneas:
 
 ```html
 <script src="https://asistente.example.com/widget.js" defer></script>
-<asistente-chat servidor="https://asistente.example.com" token-url="/asistente/token"></asistente-chat>
+<asistente-chat style="display:block;height:100vh" servidor="https://asistente.example.com" token-url="/asistente/token"></asistente-chat>
 ```
 
-Atributos opcionales: `titulo`, `modo="incrustado"`, `abierto`, `placeholder`. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, …) y avisa al anfitrión con el evento `asistente:accion` (sugerencias `ui`). El origen de la página debe estar en `origenes_permitidos` del sistema.
+Atributos opcionales: `titulo`, `placeholder`. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, `--asistente-ancho-lateral`, `--asistente-ancho-columna`, …) y avisa al anfitrión con los eventos `asistente:accion` (sugerencias `ui`) y `asistente:estado` (si no está disponible para el usuario, muestra un aviso en lugar del chat). El origen de la página debe estar en `origenes_permitidos` del sistema.
 
 Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL` apunta al asistente, por defecto `http://localhost:8100`). Registrá el mock en `config/sistemas.yaml` con su origen en `origenes_permitidos`, levantalo con `uvicorn app:app --app-dir ejemplos/sistema-mock --port 8201` y abrí <http://localhost:8201/?usuario=ana>.
 

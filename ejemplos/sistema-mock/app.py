@@ -202,12 +202,12 @@ ASISTENTE_URL = os.getenv("MOCK_ASISTENTE_URL", "http://localhost:8100")
 _PAGINA = """<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{titulo}</title></head>
-<body style="font-family:system-ui;max-width:640px;margin:2rem auto;padding:0 1rem">
-<h1>{titulo}</h1>
-<p>{cuerpo}</p>
-<p><a href="/">Inicio</a> · usuario de prueba: <a href="/?usuario=ana">ana</a> · <a href="/?usuario=beto">beto</a></p>
+<body style="margin:0;height:100vh;display:flex;flex-direction:column;font-family:system-ui">
+<nav style="padding:8px 16px;font-size:13px;border-bottom:1px solid #d9ded9">
+<strong>{titulo}</strong> · {cuerpo} · usuario de prueba: <a href="/?usuario=ana">ana</a> · <a href="/?usuario=beto">beto</a>
+</nav>
 <script src="{asistente}/widget.js" defer></script>
-<asistente-chat servidor="{asistente}" token-url="/asistente/token?usuario={usuario}"></asistente-chat>
+<asistente-chat style="flex:1;min-height:0" servidor="{asistente}" token-url="/asistente/token?usuario={usuario}"></asistente-chat>
 </body></html>"""
 
 
