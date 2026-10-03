@@ -1,0 +1,43 @@
+# DESARROLLO. Uso: docker compose up --build
+# Producción: docker compose -f docker-compose.prod.yml up -d (ver docker-compose.prod.yml)
+services:
+  asistente:
+    build:
+      context: .
+      target: dev
+    env_file: .env
+    environment:
+      ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
+      ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
+      ASISTENTE_LOG_LEVEL: DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./prompts:/app/prompts:ro
+      - ./config:/config:ro
+    ports:
+      - "8100:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: asistente
+      POSTGRES_PASSWORD: asistente
+      POSTGRES_DB: asistente
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asistente"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # El sistema mock se agrega aquí cuando exista (ejemplos/sistema-mock/).
+
+volumes:
+  pgdata-dev:
