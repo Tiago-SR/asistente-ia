@@ -89,6 +89,19 @@ docker run --rm -v "$PWD":/app -w /app --entrypoint sh python:3.12-slim \
 
 Luego reconstruir con `docker compose build asistente`. Si el lock queda con dueño root, corregirlo con `sudo chown $USER uv.lock`.
 
+## Widget
+
+El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni build; código en `src/asistente/static/widget.js`). Un sistema lo integra con dos líneas:
+
+```html
+<script src="https://asistente.example.com/widget.js" defer></script>
+<asistente-chat servidor="https://asistente.example.com" token-url="/asistente/token"></asistente-chat>
+```
+
+Atributos opcionales: `titulo`, `modo="incrustado"`, `abierto`, `placeholder`. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, …) y avisa al anfitrión con el evento `asistente:accion` (sugerencias `ui`). El origen de la página debe estar en `origenes_permitidos` del sistema.
+
+Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL` apunta al asistente, por defecto `http://localhost:8100`). Registrá el mock en `config/sistemas.yaml` con su origen en `origenes_permitidos`, levantalo con `uvicorn app:app --app-dir ejemplos/sistema-mock --port 8201` y abrí <http://localhost:8201/?usuario=ana>.
+
 ## Producción
 
 Se usa `docker-compose.prod.yml`, que construye el target `prod` del `Dockerfile` (sin dependencias de desarrollo, usuario no-root, filesystem de solo lectura, Postgres sin puertos publicados).

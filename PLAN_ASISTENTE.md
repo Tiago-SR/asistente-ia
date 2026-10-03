@@ -50,7 +50,7 @@ El servicio es **agnóstico a la tecnología** de los sistemas consumidores: no 
 - Respuestas con **cifras trazables** a una tool (nada inventado).
 - Aislamiento estricto entre sistemas y entre usuarios; los permisos los aplica siempre el sistema dueño de los datos.
 - Streaming de respuestas por SSE.
-- Widget embebible (Web Component) independiente del framework del sistema.
+- Widget embebible (Web Component) independiente del framework del sistema, **solo en modo de pantalla completa** (vista de chat tipo Claude/ChatGPT; sin burbuja flotante ni popup).
 - **Sistema simulado** (mock) con datos ficticios para desarrollar y probar sin depender de ningún sistema real.
 
 ### Fuera del MVP (fases posteriores)
@@ -500,19 +500,25 @@ Se compone en tres capas, todas versionadas (`PROMPT_VERSION` + hash del dominio
 ## 9. Widget de chat
 
 - **Web Component** `<asistente-chat>` servido por el propio asistente (`/widget.js`), sin dependencia del framework del sistema anfitrión. Estilos encapsulados (Shadow DOM) y **personalizables por variables CSS** (colores, tipografía) para respetar la identidad de cada sistema.
+- **Un único modo: vista de chat a pantalla completa** (decisión de producto; se eliminan el modo flotante —botón + popup— y el incrustado de alto fijo). El componente ocupa **todo el espacio de su contenedor** (`width/height: 100%`); si el anfitrión lo coloca en una página dedicada (p. ej. `/asistente`) con el contenedor a `100vh`, es una vista completa. Estructura:
+  - Barra lateral con historial de conversaciones, "Nueva conversación" y borrar; en pantallas angostas se oculta tras un botón de menú.
+  - Columna central de mensajes (ancho máx. ~760 px), con scroll propio, y campo de entrada fijo abajo (Enter envía, Shift+Enter salto de línea, se desactiva mientras responde).
+  - Estado vacío con la bienvenida; indicador de las tools que se están consultando durante el turno.
+  - El anfitrión decide **dónde** vive (ruta propia, entrada de menú, pestaña); el widget no se superpone a su UI.
 - Integración en una página del sistema:
   ```html
   <script src="https://asistente.example.com/widget.js" defer></script>
   <asistente-chat
       servidor="https://asistente.example.com"
-      token-url="/asistente/token"></asistente-chat>
+      token-url="/asistente/token"
+      style="display:block;height:100vh"></asistente-chat>
   ```
 - Flujo de token: pide `token-url` (same-origin, con la sesión del sistema) → guarda `{token, expira}` en memoria (no en `localStorage`) → renueva si quedan < 60 s o al recibir `token_expirado`, y reintenta el mensaje una vez.
 - SSE con `fetch` + `ReadableStream` (permite cabecera `Authorization`; `EventSource` no).
 - Render de Markdown **sanitizado**; nunca `innerHTML` sin sanitizar.
 - Eventos `ui` → el widget dispara un `CustomEvent('asistente:accion', {detail})` en el DOM. El sistema anfitrión decide qué hacer (navegar, abrir un mapa, filtrar una tabla). El widget, por defecto, solo muestra un botón con la `etiqueta` para `tipo: "navegar"` a URLs relativas del mismo origen.
 - Historial de conversaciones, nueva conversación, borrar.
-- Se oculta si `/v1/estado` responde deshabilitado o si `token-url` devuelve 403.
+- Si `/v1/estado` responde deshabilitado o `token-url` devuelve 403, no muestra el chat sino un aviso breve de que el asistente no está disponible (el anfitrión también recibe `asistente:estado` para ocultar su entrada de menú).
 
 ---
 
@@ -667,7 +673,8 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - [ ] Tests: aislamiento sistemas/usuarios, JWT, solo lectura, manifiestos, conector, loop, límites, inyección
 
 **Fase 2**
-- [ ] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui`
+- [x] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui` (versión inicial con burbuja flotante)
+- [ ] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): barra lateral de historial, columna central, entrada fija; eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
 - [ ] Implementación de referencia PHP
 - [ ] Guía de diseño de tools
 - [ ] Verificador de conformidad completo

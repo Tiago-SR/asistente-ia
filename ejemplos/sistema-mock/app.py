@@ -20,7 +20,7 @@ import uuid
 
 import jwt
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 ID = os.getenv("MOCK_ID", "mock-a")
 NOMBRE = os.getenv("MOCK_NOMBRE", "Mock A")
@@ -194,3 +194,39 @@ async def ejecutar(
         return JSONResponse(_ok(est, "establecimientos"))
 
     return JSONResponse(_error("no_disponible", "no implementada"))
+
+
+# ── Página de demostración: integra el widget como lo haría cualquier sistema ──
+ASISTENTE_URL = os.getenv("MOCK_ASISTENTE_URL", "http://localhost:8100")
+
+_PAGINA = """<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{titulo}</title></head>
+<body style="font-family:system-ui;max-width:640px;margin:2rem auto;padding:0 1rem">
+<h1>{titulo}</h1>
+<p>{cuerpo}</p>
+<p><a href="/">Inicio</a> · usuario de prueba: <a href="/?usuario=ana">ana</a> · <a href="/?usuario=beto">beto</a></p>
+<script src="{asistente}/widget.js" defer></script>
+<asistente-chat servidor="{asistente}" token-url="/asistente/token?usuario={usuario}"></asistente-chat>
+</body></html>"""
+
+
+def _pagina(titulo: str, cuerpo: str, usuario: str) -> HTMLResponse:
+    from html import escape
+    return HTMLResponse(_PAGINA.format(
+        titulo=escape(titulo), cuerpo=escape(cuerpo), asistente=escape(ASISTENTE_URL),
+        usuario=escape(usuario),
+    ))
+
+
+@app.get("/", response_class=HTMLResponse)
+async def inicio(usuario: str = "ana") -> HTMLResponse:
+    return _pagina(NOMBRE, f"Sistema mock. Sesión simulada como «{usuario}».", usuario)
+
+
+@app.get("/establecimientos/{est_id}", response_class=HTMLResponse)
+async def establecimiento(est_id: str, usuario: str = "ana") -> HTMLResponse:
+    est = next((e for e in DATOS.get(usuario, []) if e["id"] == est_id), None)
+    if est is None:
+        raise HTTPException(404, "no encontrado")
+    return _pagina(est["nombre"], f"{est['superficie_ha']} ha de {est['cultivo']}.", usuario)
