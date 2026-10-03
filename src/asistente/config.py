@@ -28,3 +28,11 @@ class Settings(BaseSettings):
     max_turnos_historial: int = _env("ASISTENTE_MAX_TURNOS_HISTORIAL", 10)
     max_mensaje_chars: int = _env("ASISTENTE_MAX_MENSAJE_CHARS", 4000)
     heartbeat_s: float = _env("ASISTENTE_HEARTBEAT_S", 15.0)
+
+    # Voz (Fase 4). Sin STT_PROVEEDOR el dictado queda deshabilitado.
+    stt_proveedor: str | None = _env("STT_PROVEEDOR", None)
+    stt_base_url: str | None = _env("STT_BASE_URL", None)
+    stt_api_key: str | None = _env("STT_API_KEY", None)
+    stt_modelo: str | None = _env("STT_MODELO", None)
+    voz_max_audio_kb: int = _env("ASISTENTE_VOZ_MAX_AUDIO_KB", 2048)
+    voz_max_audio_s: int = _env("ASISTENTE_VOZ_MAX_AUDIO_S", 60)

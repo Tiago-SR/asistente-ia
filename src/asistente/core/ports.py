@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 from asistente.core.llm.base import Capacidades, Mensaje, OnDelta, Respuesta, ToolDef, Uso
 
-__all__ = ["LLM", "Auditoria", "Capacidades", "Conector", "Contexto", "LimiteExcedido", "Limites"]
+__all__ = ["LLM", "STT", "Auditoria", "Capacidades", "Conector", "Contexto", "LimiteExcedido", "Limites"]
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,14 @@ class LLM(Protocol):
         max_tokens: int,
         on_delta: OnDelta | None = None,
     ) -> Respuesta: ...
+
+
+class STT(Protocol):
+    """Voz a texto (Fase 4). Independiente del LLM: el agente solo ve el texto resultante."""
+
+    async def transcribir(self, audio: bytes, *, tipo_mime: str, idioma: str | None = None) -> str: ...
+
+    async def disponible(self) -> bool: ...
 
 
 class Conector(Protocol):

@@ -410,7 +410,8 @@ asistente-mvp/
 | `GET` | `/v1/conversaciones` | token de usuario | Conversaciones del usuario en ese sistema |
 | `GET` | `/v1/conversaciones/{id}` | token de usuario | Mensajes (solo texto visible) |
 | `DELETE` | `/v1/conversaciones/{id}` | token de usuario | Borrado definitivo |
-| `GET` | `/v1/estado` | token de usuario | `{habilitado, nombre_sistema}` para mostrar/ocultar el widget |
+| `GET` | `/v1/estado` | token de usuario | `{habilitado, nombre_sistema, voz: {dictado, respuesta}}` para mostrar/ocultar el widget y sus botones de voz |
+| `POST` | `/v1/voz/transcribir` | token de usuario | *(Fase 4, pendiente)* Audio → texto; ver 7.7 |
 | `GET` | `/widget.js` | pública | Bundle del widget (con cache y versión) |
 | `GET` | `/salud` | pública | Healthcheck del contenedor (BD, config cargada) |
 | `POST` | `/admin/recargar` | token admin (env) + red interna | Recarga `sistemas.yaml` y manifiestos |
@@ -474,9 +475,20 @@ Eventos: `delta` (texto), `tool` (qué está consultando, legible), `ui` (sugere
 | `ASISTENTE_MAX_RESULTADO_KB` | `50` | truncado de resultados de tools |
 | `ASISTENTE_ADMIN_TOKEN` | — | endpoints `/admin` |
 | `ASISTENTE_LOG_LEVEL` | `INFO` | logs estructurados |
+| `STT_PROVEEDOR` / `STT_BASE_URL` / `STT_MODELO` / `STT_API_KEY` | — | dictado (7.7); sin `STT_PROVEEDOR` queda deshabilitado |
+| `ASISTENTE_VOZ_MAX_AUDIO_KB` / `_S` | `2048` / `60` | topes del audio recibido |
 | *por sistema* | — | claves públicas/secretos/tokens de manifiesto referenciados en `sistemas.yaml` |
 
 Modelo económico para tareas simples (títulos de conversación, clasificación): opcional, configurable con el mismo mecanismo de proveedor/modelo (3.8).
+
+### 7.7 Voz (Fase 4, opción A)
+
+- **Independiente del LLM.** El agente solo ve texto: el audio se convierte antes y después. Cambiar de LLM no afecta a la voz, y no se sondea al modelo para saber si "escucha".
+- **Puertos `STT` y `TTS`** en `core/ports.py`, con adaptadores en `core/voz/` (mismo patrón que el LLM). El primer adaptador, `openai_compat`, habla con cualquier `/v1/audio/transcriptions`: un servidor Whisper local (contenedor opcional, perfil `voz`, sin sumar dependencias pesadas a la imagen del asistente) o un proveedor remoto; solo cambia `STT_BASE_URL`.
+- **Capacidades:** `/v1/estado` informa `voz.dictado` (hay adaptador STT configurado y responde) y `voz.respuesta` (TTS, pendiente). El widget muestra cada botón solo si su capacidad está activa.
+- **Dictado:** el widget graba con `MediaRecorder`, envía el audio a `POST /v1/voz/transcribir` (mismo token y verificación de origen) y **rellena el campo de texto**; el usuario revisa y envía. Sin envío automático.
+- **Privacidad:** el audio no se guarda; solo se registra la duración. Topes de tamaño y duración, tipos permitidos y rate limit por usuario.
+- **Respuesta por audio (TTS):** segundo paso, con botón por mensaje.
 
 ---
 
@@ -558,10 +570,14 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - **Hito:** dos sistemas mock registrados; cada usuario consulta sus datos y ninguna prueba logra cruzar sistemas ni usuarios.
 
 ### Fase 2 — Widget y kit de integración (≈ 1 semana)
+> La implementación PHP y el hito de punta a punta (página estática + PHP) están **en espera**.
+
 - Web Component, implementación de referencia PHP, guía de diseño de tools, verificador completo.
 - **Hito:** una página HTML estática + el ejemplo PHP integran el widget de punta a punta.
 
-### Fase 3 — Primera integración real (depende del equipo del sistema)
+### Fase 3 — Primera integración real (depende del equipo del sistema) — EN ESPERA
+> Aplazada: aún no se dispone del sistema SGAgro.
+
 - Entregar el kit al equipo de SGAgro (o primer sistema), acompañar el diseño de sus tools y su prompt de dominio.
 - Set de evaluación propio del sistema (sección 12.2), en un entorno de pruebas con datos no productivos.
 - **Hito:** verificador en verde + evaluación aceptable en el entorno de pruebas del sistema.
@@ -676,14 +692,21 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 **Fase 2**
 - [x] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui` (versión inicial con burbuja flotante)
 - [ ] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): columna central, entrada fija, solo conversación actual (historial oculto); eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
-- [ ] Implementación de referencia PHP
+- [ ] Implementación de referencia PHP — **EN ESPERA** (aplazada por decisión de producto)
 - [ ] Guía de diseño de tools
 - [ ] Verificador de conformidad completo
 
-**Fase 3**
+**Fase 3 — EN ESPERA** (aún no se dispone del sistema SGAgro)
 - [ ] Kit entregado al primer sistema real
 - [ ] Verificador en verde contra su entorno de pruebas
 - [ ] Set de evaluación del sistema y resultados registrados
 - [ ] Medición de costo por pregunta y por sistema
 
 **Fases 4–6:** ver sección 11; se detallan cuando cierre la Fase 3.
+
+**Fase 4 — Voz (opción A: pipeline por piezas)**
+- [x] Puerto `STT`, adaptador `openai_compat`, `SttFalso`, configuración y capacidad `voz` en `/v1/estado`
+- [ ] Endpoint `POST /v1/voz/transcribir` (límites de tamaño/duración, tipos, rate limit, sin guardar audio)
+- [ ] Servicio Whisper local opcional en docker-compose (perfil `voz`)
+- [ ] Widget: botón de micrófono (`MediaRecorder`) que rellena el campo; visible solo con `voz.dictado`
+- [ ] Puerto `TTS`, adaptadores y `POST /v1/voz/sintetizar`; botón de escuchar por mensaje

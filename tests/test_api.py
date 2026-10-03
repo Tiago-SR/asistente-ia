@@ -79,7 +79,7 @@ def llm():
 
 @pytest.fixture
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
-    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None):
+    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
@@ -99,7 +99,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
-            prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones,
+            prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt,
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")
@@ -177,7 +177,20 @@ async def test_delete_borra_y_luego_404(api, llm):
 
 async def test_estado(api):
     r = await api.get("/v1/estado", headers=auth())
-    assert r.json() == {"habilitado": True, "nombre_sistema": "MOCK-A"}
+    assert r.json() == {
+        "habilitado": True,
+        "nombre_sistema": "MOCK-A",
+        "voz": {"dictado": False, "respuesta": False},
+    }
+
+
+async def test_estado_informa_dictado_segun_el_stt(construir_app):
+    from asistente.core.voz.falso import SttFalso
+
+    for stt, esperado in [(SttFalso(), True), (SttFalso(disponible=False), False), (None, False)]:
+        async with construir_app(stt=stt) as c:
+            r = await c.get("/v1/estado", headers=auth())
+            assert r.json()["voz"] == {"dictado": esperado, "respuesta": False}
 
 
 # --- aislamiento (el hito del punto 5 se apoya acá) -----------------------------------------

@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from asistente.config import Settings
 from asistente.core.llm.openai_compat import OpenAICompat
-from asistente.core.ports import LLM, Auditoria, Limites
+from asistente.core.ports import LLM, STT, Auditoria, Limites
 from asistente.core.prompts import Prompts
+from asistente.core.voz.openai_compat import SttOpenAICompat
 from asistente.limits import LimitesPostgres
 from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.conector_http import ConectorHttp
@@ -38,6 +39,7 @@ class Servicios:
     llm_para: Callable[[Sistema], tuple[LLM, str]]
     sesiones: async_sessionmaker[AsyncSession] | None = None
     cierre: Callable[[], object] | None = None
+    stt: STT | None = None  # None = dictado deshabilitado
 
 
 def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
@@ -62,6 +64,16 @@ def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Si
     return llm_para
 
 
+def _fabrica_stt(settings: Settings) -> STT | None:
+    if not settings.stt_proveedor:
+        return None
+    if settings.stt_proveedor != "openai_compat":
+        raise ValueError(f"STT_PROVEEDOR no soportado: {settings.stt_proveedor}")
+    if not settings.stt_base_url or not settings.stt_modelo:
+        raise ValueError("STT_PROVEEDOR requiere STT_BASE_URL y STT_MODELO")
+    return SttOpenAICompat(settings.stt_base_url, settings.stt_modelo, settings.stt_api_key)
+
+
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
@@ -80,4 +92,5 @@ def construir(settings: Settings) -> Servicios:
         llm_para=_fabrica_llm(settings, registro),
         sesiones=sesiones,
         cierre=motor.dispose,
+        stt=_fabrica_stt(settings),
     )
