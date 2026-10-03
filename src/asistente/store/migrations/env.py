@@ -10,8 +10,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Los modelos se agregan en la Fase 1 (store/models.py); aquí irá su `metadata`.
-target_metadata = None
+from asistente.store.models import Base
+
+target_metadata = Base.metadata
 
 
 def _url() -> str:
