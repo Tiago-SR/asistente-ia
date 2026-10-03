@@ -11,7 +11,7 @@ Principios del MVP:
 - Cifras siempre trazables a una tool (nada inventado).
 - Proveedor de LLM intercambiable (formato neutro + adaptadores).
 
-> Estado: **Fase 1 completa** (asistente de texto, solo lectura). Hay registro de sistemas, auth JWT por sistema, conector HTTP, loop del agente con adaptador OpenAI-compatible, límites, auditoría y API `/v1/*` con SSE, con tests de aislamiento entre sistemas y usuarios (`tests/test_aislamiento.py`). Pendiente: widget y kit de integración (Fase 2). El diseño completo, las fases y el checklist están en [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md).
+> Estado: **Fase 2 en curso** (widget, verificador de conformidad y guía de diseño de tools listos; falta la referencia PHP). Fase 1 completa (asistente de texto, solo lectura). Hay registro de sistemas, auth JWT por sistema, conector HTTP, loop del agente con adaptador OpenAI-compatible, límites, auditoría y API `/v1/*` con SSE, con tests de aislamiento entre sistemas y usuarios (`tests/test_aislamiento.py`). El diseño completo, las fases y el checklist están en [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md).
 
 ## Stack
 
@@ -102,6 +102,23 @@ Atributos opcionales: `titulo`, `placeholder`. Se personaliza con variables CSS 
 
 Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL` apunta al asistente, por defecto `http://localhost:8100`). Registrá el mock en `config/sistemas.yaml` con su origen en `origenes_permitidos`, levantalo con `uvicorn app:app --app-dir ejemplos/sistema-mock --port 8201` y abrí <http://localhost:8201/?usuario=ana>.
 
+## Integrar un sistema (kit de integración)
+
+- [`contrato/CONTRATO.md`](contrato/CONTRATO.md): lo que debe implementar el sistema (token, manifiesto, ejecución), credenciales y widget.
+- [`contrato/GUIA_TOOLS.md`](contrato/GUIA_TOOLS.md): cómo diseñar las tools (elegirlas, describirlas, qué devolver, errores de negocio).
+- `ejemplos/sistema-mock/`: implementación de referencia con datos ficticios. `MOCK_DEFECTO=<nombre>` rompe una regla del contrato a propósito (lo usan los tests del verificador).
+- `herramientas/verificar_sistema.py`: verificador de conformidad; un sistema no se habilita en producción sin pasarlo. Los secretos se pasan por variables de entorno y no se imprimen:
+
+```sh
+V_MANIFIESTO=... V_SECRETO=... python herramientas/verificar_sistema.py \
+  --base-url http://localhost:8201 \
+  --token-url "http://localhost:8201/asistente/token?usuario=ana" \
+  --token-url-otro "http://localhost:8201/asistente/token?usuario=beto" \
+  --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+```
+
+Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md#65-verificar-la-integración). Los tests (`tests/test_verificador.py`) comprueban que detecta una variante rota del mock por cada comprobación.
+
 ## Producción
 
 Se usa `docker-compose.prod.yml`, que construye el target `prod` del `Dockerfile` (sin dependencias de desarrollo, usuario no-root, filesystem de solo lectura, Postgres sin puertos publicados).
@@ -124,5 +141,8 @@ src/asistente/           código del servicio
 tests/                   tests
 config/                  registro de sistemas (sistemas.yaml)
 prompts/                 prompt base y de dominio
+contrato/                contrato v1, schemas, OpenAPI y guía de tools
+ejemplos/sistema-mock/   sistema de referencia con datos ficticios
+herramientas/            verificador de conformidad
 PLAN_ASISTENTE.md        plan completo del proyecto
 ```

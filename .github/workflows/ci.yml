@@ -23,7 +23,12 @@ jobs:
           MOCK_ID=mock-b MOCK_SECRETO=secreto-b-9876543210-9876543210 MOCK_TOKEN_MANIFIESTO=man-b \
             uv run uvicorn app:app --app-dir ejemplos/sistema-mock --port 8202 &
           sleep 5
-          uv run python herramientas/verificar_sistema.py --base-url http://localhost:8201 \
-            --token-url "http://localhost:8201/asistente/token?usuario=ana" --token-manifiesto man-a
-          uv run python herramientas/verificar_sistema.py --base-url http://localhost:8202 \
-            --token-url "http://localhost:8202/asistente/token?usuario=beto" --token-manifiesto man-b
+          verificar() {  # id, secreto, usuario, otro usuario, puerto
+            V_MANIFIESTO=man-$1 V_SECRETO=$2 uv run python herramientas/verificar_sistema.py \
+              --base-url http://localhost:$5 \
+              --token-url "http://localhost:$5/asistente/token?usuario=$3" \
+              --token-url-otro "http://localhost:$5/asistente/token?usuario=$4" \
+              --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+          }
+          verificar a secreto-a-0123456789-0123456789 ana beto 8201
+          verificar b secreto-b-9876543210-9876543210 beto ana 8202

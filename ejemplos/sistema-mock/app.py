@@ -9,15 +9,19 @@ Configuración por variables de entorno:
   MOCK_SECRETO            secreto HS256 que firma/valida tokens   [secreto-mock-a]
   MOCK_AUDIENCIA          claim `aud`                             [asistente]
   MOCK_TOKEN_MANIFIESTO   credencial para leer el manifiesto      [manifiesto-mock-a]
+  MOCK_DEFECTO            rompe una regla del contrato a propósito, para probar el
+                          verificador (herramientas/verificar_sistema.py). Ver DEFECTOS.
 
 El login es de juguete: `GET /asistente/token?usuario=ana` emite un token para
 ese usuario sin pedir contraseña. Un sistema real usa su sesión normal.
 """
 
+import asyncio
 import os
 import time
 import uuid
 
+import jsonschema
 import jwt
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -28,6 +32,26 @@ SECRETO = os.getenv("MOCK_SECRETO", "secreto-mock-a")
 AUDIENCIA = os.getenv("MOCK_AUDIENCIA", "asistente")
 TOKEN_MANIFIESTO = os.getenv("MOCK_TOKEN_MANIFIESTO", "manifiesto-mock-a")
 VIDA_TOKEN_S = 600
+
+# Defectos deliberados (uno por comprobación del verificador). Sin MOCK_DEFECTO el mock es conforme.
+DEFECTOS = {
+    "token_vida_larga",         # el token dura 1 h
+    "manifiesto_publico",       # el manifiesto no pide credencial
+    "manifiesto_invalido",      # nombre de tool ilegal
+    "acepta_vencido",           # ejecución acepta tokens vencidos
+    "firma_no_verificada",      # ejecución no verifica la firma
+    "acepta_alg_none",          # ejecución acepta tokens sin firma (alg=none)
+    "acepta_token_manifiesto",  # ejecución acepta el token de manifiesto
+    "ignora_scope",             # ejecución no mira el scope (ni rechaza escrituras)
+    "params_sin_validar",       # no valida parámetros contra el schema
+    "filtra_ids_ajenos",        # resumen_establecimiento devuelve datos de otros usuarios
+    "respuesta_enorme",         # listar_establecimientos devuelve ~100 KB
+    "respuesta_con_geometria",  # incluye geometrías en los datos
+    "lento",                    # tarda 0,3 s por ejecución
+}
+DEFECTO = os.getenv("MOCK_DEFECTO", "")
+if DEFECTO and DEFECTO not in DEFECTOS:
+    raise RuntimeError(f"MOCK_DEFECTO desconocido: {DEFECTO}")
 
 # Datos ficticios: cada usuario ve solo sus establecimientos.
 DATOS: dict[str, list[dict]] = {
@@ -85,6 +109,9 @@ MANIFIESTO = {
     ],
 }
 
+if DEFECTO == "manifiesto_invalido":
+    MANIFIESTO["tools"][0]["nombre"] = "Listar-Mal"
+
 app = FastAPI(title=f"Sistema mock {ID}")
 
 
@@ -97,6 +124,21 @@ def _ok(datos: dict, fuente: str, ui: list | None = None) -> dict:
 
 def _error(error: str, detalle: str) -> dict:
     return {"ok": False, "error": error, "detalle": detalle}
+
+
+def _alg(token: str) -> str:
+    try:
+        return str(jwt.get_unverified_header(token).get("alg", "")).lower()
+    except jwt.PyJWTError:
+        return ""
+
+
+def _token_de_prueba() -> str:
+    """Solo para el defecto acepta_token_manifiesto: lo trata como un token de ana."""
+    ahora = int(time.time())
+    return jwt.encode(
+        {"iss": ID, "aud": AUDIENCIA, "sub": "ana", "iat": ahora, "exp": ahora + 60,
+         "jti": "x", "scope": "asistente:lectura"}, SECRETO, algorithm="HS256")
 
 
 def _bearer(authorization: str | None) -> str:
@@ -120,7 +162,7 @@ async def emitir_token(usuario: str) -> dict:
         "aud": AUDIENCIA,
         "sub": usuario,
         "iat": ahora,
-        "exp": ahora + VIDA_TOKEN_S,
+        "exp": ahora + (3600 if DEFECTO == "token_vida_larga" else VIDA_TOKEN_S),
         "jti": uuid.uuid4().hex,
         "scope": "asistente:lectura",
         "nombre": usuario.capitalize(),
@@ -135,7 +177,7 @@ async def emitir_token(usuario: str) -> dict:
 
 @app.get("/asistente/tools")
 async def manifiesto(authorization: str | None = Header(default=None)) -> dict:
-    if _bearer(authorization) != TOKEN_MANIFIESTO:
+    if DEFECTO != "manifiesto_publico" and _bearer(authorization) != TOKEN_MANIFIESTO:
         raise HTTPException(401, "credencial de manifiesto inválida")
     return MANIFIESTO
 
@@ -148,21 +190,27 @@ async def ejecutar(
 ) -> JSONResponse:
     token = _bearer(authorization)
     if token == TOKEN_MANIFIESTO:
-        raise HTTPException(403, "el token de manifiesto no sirve para ejecutar")
+        if DEFECTO != "acepta_token_manifiesto":
+            raise HTTPException(403, "el token de manifiesto no sirve para ejecutar")
+        token = _token_de_prueba()
+    opciones = {"require": ["exp", "iat", "sub", "jti"]}
+    if DEFECTO == "acepta_vencido":
+        opciones["verify_exp"] = False
+    if DEFECTO == "firma_no_verificada" or (DEFECTO == "acepta_alg_none" and _alg(token) == "none"):
+        opciones["verify_signature"] = False
     try:
         claims = jwt.decode(
-            token, SECRETO, algorithms=["HS256"], audience=AUDIENCIA, issuer=ID,
-            options={"require": ["exp", "iat", "sub", "jti"]},
+            token, SECRETO, algorithms=["HS256"], audience=AUDIENCIA, issuer=ID, options=opciones,
         )
     except jwt.PyJWTError as e:
         raise HTTPException(401, f"token inválido: {e}") from e
-    if claims.get("scope") != "asistente:lectura":
+    if DEFECTO != "ignora_scope" and claims.get("scope") != "asistente:lectura":
         raise HTTPException(403, "scope insuficiente")
 
     herramienta = next((t for t in MANIFIESTO["tools"] if t["nombre"] == nombre), None)
     if herramienta is None:
         return JSONResponse(_error("no_disponible", f"tool desconocida: {nombre}"))
-    if herramienta["efecto"] != "lectura":
+    if herramienta["efecto"] != "lectura" and DEFECTO != "ignora_scope":
         raise HTTPException(403, "escritura no permitida con scope de lectura")
 
     try:
@@ -172,11 +220,25 @@ async def ejecutar(
     if not isinstance(parametros, dict):
         return JSONResponse(_error("parametros_invalidos", "cuerpo debe ser {parametros: {...}}"))
 
+    if DEFECTO == "lento":
+        await asyncio.sleep(0.3)
+    if herramienta["efecto"] != "lectura":  # solo con el defecto ignora_scope: "elimina" sin pudor
+        return JSONResponse(_ok({"eliminado": True}, "establecimientos"))
+    if DEFECTO != "params_sin_validar":
+        try:
+            jsonschema.validate(parametros, herramienta["parametros"])
+        except jsonschema.ValidationError as e:
+            return JSONResponse(_error("parametros_invalidos", e.message[:200]))
+
     propios = DATOS.get(claims["sub"], [])
 
     if nombre == "listar_establecimientos":
         texto = str(parametros.get("texto", "")).lower()
         res = [e for e in propios if texto in e["nombre"].lower()]
+        if DEFECTO == "respuesta_enorme":
+            res = res + [{"id": f"x{i}", "nombre": "relleno " * 20} for i in range(600)]
+        if DEFECTO == "respuesta_con_geometria":
+            res = [{**e, "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 1]]]}} for e in res]
         ui = [
             {"tipo": "navegar", "url": f"/establecimientos/{e['id']}", "etiqueta": e["nombre"]}
             for e in res
@@ -187,7 +249,8 @@ async def ejecutar(
         est_id = parametros.get("id")
         if not isinstance(est_id, str):
             return JSONResponse(_error("parametros_invalidos", "`id` debe ser string"))
-        est = next((e for e in propios if e["id"] == est_id), None)
+        visibles = [e for ents in DATOS.values() for e in ents] if DEFECTO == "filtra_ids_ajenos" else propios
+        est = next((e for e in visibles if e["id"] == est_id), None)
         if est is None:
             # Igual que "no existe": no se revela si pertenece a otro usuario.
             return JSONResponse(_error("no_encontrado", "No existe o no tenés acceso"))

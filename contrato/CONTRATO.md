@@ -6,6 +6,8 @@ Archivos de referencia:
 
 - `schemas/*.schema.json`: JSON Schemas de cada mensaje.
 - `openapi.yaml`: descripción OpenAPI de los endpoints.
+- [`GUIA_TOOLS.md`](GUIA_TOOLS.md): cómo diseñar las tools (qué exponer, cómo describirlas, qué devolver).
+- `../herramientas/verificar_sistema.py`: verificador de conformidad (ver [6.5](#65-verificar-la-integración)).
 
 Principio: **el asistente nunca accede a la BD del sistema ni decide permisos.** Solo llama a tools con el token del usuario, y el sistema aplica sus propios permisos.
 
@@ -65,7 +67,7 @@ Reglas (si no se cumplen, la tool o el manifiesto se rechazan y se loguea):
 - Máximo 40 tools por sistema y 256 KB por manifiesto.
 - Se cachea con TTL configurable y se puede recargar a mano.
 
-La calidad de las descripciones determina la calidad del asistente: deben decir qué hace la tool, cuándo usarla y qué significan los parámetros.
+La calidad de las descripciones determina la calidad del asistente: deben decir qué hace la tool, cuándo usarla y qué significan los parámetros. Ver la [guía de diseño de tools](GUIA_TOOLS.md).
 
 ## 3. Ejecución de una tool
 
@@ -116,6 +118,7 @@ Recomendaciones:
 - Datos agregados y compactos, con unidades en el nombre del campo (`superficie_ha`, `rinde_kg_ha`) y fechas ISO 8601.
 - No devolver geometrías ni listas de miles de filas: resumir del lado del sistema.
 - El asistente trunca respuestas por encima de un límite configurable (p. ej. 50 KB) y se lo indica al modelo.
+- Más criterios y ejemplos buenos y malos en la [guía de diseño de tools](GUIA_TOOLS.md).
 
 ## 4. Salud (opcional)
 
@@ -188,7 +191,7 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **`base_url`:** el **backend** que sirve `/asistente/*`; el asistente lo llama de servidor a servidor. Si el asistente corre en Docker y el sistema en el host, usar `host.docker.internal:<puerto>` y que el sistema escuche en `0.0.0.0` (no solo `127.0.0.1`).
 - **`origenes_permitidos`:** orígenes exactos (esquema + host + puerto) de las **páginas** donde se inserta el widget. Se usan para CORS y se verifican contra el `Origin` de cada request. `http://localhost:8002` y `http://127.0.0.1:8002` son orígenes distintos.
 - **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
-- **Verificar la integración:** `python herramientas/verificar_sistema.py` contra el sistema, con la URL de emisión de token y el token de manifiesto (ver el encabezado del script).
+- **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 
 ### 6.4 Rotación y manejo
 
@@ -196,6 +199,30 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - Rotar de inmediato ante cualquier sospecha de filtración, y cuando alguien con acceso al valor deje el proyecto.
 - No poner estos valores en el repositorio, en tickets, en logs ni en el código del front. El navegador solo ve el JWT de vida corta, nunca la clave ni el token de manifiesto.
 - Un valor por sistema y por entorno: pruebas y producción no comparten claves.
+
+### 6.5 Verificar la integración
+
+`herramientas/verificar_sistema.py` comprueba el contrato contra un sistema en marcha. **Un sistema no se habilita en producción sin pasar el verificador.** Los secretos se pasan por variables de entorno y se ocultan en el reporte.
+
+```sh
+export V_MANIFIESTO=<token de manifiesto>
+export V_SECRETO=<clave de firma HS256>     # opcional, ver abajo
+python herramientas/verificar_sistema.py --base-url http://localhost:8201 \
+    --token-url "http://localhost:8201/asistente/token?usuario=ana" \
+    --token-url-otro "http://localhost:8201/asistente/token?usuario=beto" \
+    --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+```
+
+Comprueba: salud; token (schema, claims, `alg`, vida ≤ 15 min); manifiesto (credencial, schema, versión, nombres, límites); ejecución sin token, con token ilegible, firmado con otra clave, `alg=none` y con el token de manifiesto (deben rechazarse); parámetros inválidos (`parametros_invalidos`); ids inexistentes y de otro usuario (`no_encontrado`/`sin_acceso`); rechazo de escrituras con scope de lectura; y tiempos, tamaño y geometrías de las respuestas. Los **avisos** (descripciones cortas, respuestas lentas o grandes, geometrías) no hacen fallar.
+
+| Opción | Habilita |
+|---|---|
+| `--secreto-firma-env VAR` | token vencido (`401`), de otra audiencia (`401`) y con scope ajeno (`403`). Sin ella se omiten. Con claves `RS256`/`EdDSA`, `VAR` contiene la privada PEM y se indica `--algoritmo-firma` |
+| `--token-url-otro URL` o `--id-ajeno ID` | probar un id de otro usuario. Requiere una tool de lectura con un id obligatorio (`--tool-id` si hay varias) |
+| `--cabecera-token-env VAR` | enviar a la ruta de token una cabecera `Nombre: valor` (cookie de sesión, API key) leída del entorno |
+| `--max-kb`, `--max-ms` | topes de tamaño (50 KB) y de tiempo (por defecto, el `timeout_s` de la tool) |
+
+Imprime un reporte por secciones con un resumen y termina con código `0` si todo pasa, `1` si algo falla. Sirve igual en CI.
 
 ## 7. Widget de chat (interfaz para el usuario)
 
