@@ -358,3 +358,129 @@ def test_prompt_dominio_fuera_de_prompts_se_ignora(tmp_path):
     t, _ = Prompts(tmp_path).componer(sistema_nombre="S", prompt_dominio="../fuera.md",
                                       usuario_nombre=None, locale=None, hoy=date(2026, 1, 1))
     assert "SECRETO" not in t
+
+
+# --- dictado: POST /v1/voz/transcribir --------------------------------------------------------
+
+
+def voz(stt=None, **kw):
+    from asistente.core.voz.falso import SttFalso
+
+    return stt or SttFalso("¿cuántas hectáreas tengo?"), kw
+
+
+async def dictar(c, audio=b"AUDIO", tipo="audio/webm;codecs=opus", params="", headers=None, **kw):
+    h = {**auth(**kw), "Content-Type": tipo, **(headers or {})}
+    return await c.post(f"/v1/voz/transcribir{params}", content=audio, headers=h)
+
+
+async def test_dictado_ok_pasa_tipo_e_idioma(construir_app):
+    from asistente.core.voz.falso import SttFalso
+
+    stt = SttFalso("hola mundo")
+    async with construir_app(stt=stt) as c:
+        r = await dictar(c, params="?idioma=pt", headers={"X-Audio-Duracion-S": "3.5"})
+    assert r.status_code == 200 and r.json() == {"texto": "hola mundo"}
+    (ll,) = stt.llamadas
+    assert (ll.audio, ll.tipo_mime, ll.idioma) == (b"AUDIO", "audio/webm", "pt")
+
+
+async def test_dictado_exige_token_y_origen(construir_app):
+    from asistente.core.voz.falso import SttFalso
+
+    stt = SttFalso()
+    async with construir_app(stt=stt) as c:
+        r = await c.post("/v1/voz/transcribir", content=b"x", headers={"Content-Type": "audio/webm"})
+        assert r.status_code == 401
+        r = await dictar(c, headers={"Origin": "https://malo.example"})
+        assert r.status_code == 403 and r.json() == {"error": "origen_no_permitido"}
+        r = await dictar(c, headers={"Origin": ORIGEN_A})
+        assert r.status_code == 200
+    assert len(stt.llamadas) == 1
+
+
+async def test_dictado_sin_stt_es_503(api):
+    r = await dictar(api)
+    assert r.status_code == 503 and r.json() == {"error": "voz_no_disponible"}
+
+
+@pytest.mark.parametrize("tipo", ["text/plain", "application/json", "video/mp4"])
+async def test_dictado_tipo_no_permitido(construir_app, tipo):
+    from asistente.core.voz.falso import SttFalso
+
+    stt = SttFalso()
+    async with construir_app(stt=stt) as c:
+        r = await dictar(c, tipo=tipo)
+    assert r.status_code == 415 and r.json() == {"error": "audio_tipo_no_permitido"} and not stt.llamadas
+
+
+async def test_dictado_topes_de_tamano_y_duracion(construir_app, monkeypatch):
+    from asistente.core.voz.falso import SttFalso
+
+    stt = SttFalso()
+    async with construir_app(stt=stt) as c:
+        kb = 2048  # valor por defecto
+        r = await dictar(c, audio=b"x" * (kb * 1024 + 1))
+        assert r.status_code == 413 and r.json() == {"error": "audio_demasiado_grande"}
+        r = await dictar(c, audio=b"x" * (kb * 1024))
+        assert r.status_code == 200
+        r = await dictar(c, headers={"X-Audio-Duracion-S": "61"})
+        assert r.status_code == 413 and r.json() == {"error": "audio_demasiado_largo"}
+        for malo in ("abc", "nan", "-1"):
+            r = await dictar(c, headers={"X-Audio-Duracion-S": malo})
+            assert r.status_code == 422, malo
+    assert len(stt.llamadas) == 1
+
+
+async def test_dictado_tamano_sin_content_length_se_corta_leyendo(construir_app):
+    from asistente.core.voz.falso import SttFalso
+
+    async def trozos():
+        for _ in range(3):
+            yield b"x" * (1024 * 1024)
+
+    stt = SttFalso()
+    async with construir_app(stt=stt) as c:
+        r = await c.post("/v1/voz/transcribir", content=trozos(),
+                         headers={**auth(), "Content-Type": "audio/webm"})
+    assert r.status_code == 413 and not stt.llamadas
+
+
+async def test_dictado_cuerpo_vacio_es_422(construir_app):
+    from asistente.core.voz.falso import SttFalso
+
+    async with construir_app(stt=SttFalso()) as c:
+        r = await dictar(c, audio=b"")
+    assert r.status_code == 422 and r.json() == {"error": "audio_invalido"}
+
+
+async def test_dictado_errores_del_stt(construir_app):
+    from asistente.core.voz.base import AudioInvalido
+    from asistente.core.voz.falso import SttFalso
+
+    async with construir_app(stt=SttFalso(falla=True)) as c:
+        r = await dictar(c)
+    assert r.status_code == 502 and r.json() == {"error": "voz_error"}
+
+    class Rechaza(SttFalso):
+        async def transcribir(self, *a, **k):
+            raise AudioInvalido("no")
+
+    async with construir_app(stt=Rechaza()) as c:
+        r = await dictar(c)
+    assert r.status_code == 422 and r.json() == {"error": "audio_invalido"}
+
+
+async def test_dictado_rate_limit_por_usuario_y_aparte_del_chat(construir_app, llm):
+    from asistente.core.voz.falso import SttFalso
+
+    u1, u2 = sub(), sub()
+    llm.usar(texto("ok"))
+    async with construir_app(stt=SttFalso()) as c:
+        for _ in range(10):
+            assert (await dictar(c, usuario=u1)).status_code == 200
+        r = await dictar(c, usuario=u1)
+        assert r.status_code == 429 and r.json() == {"error": "limite_excedido"}
+        assert (await dictar(c, usuario=u2)).status_code == 200  # otro usuario, otro contador
+        # dictar no consume la cuota de mensajes del chat
+        assert sse(await chatear(c, usuario=u1))[-1][0] == "done"

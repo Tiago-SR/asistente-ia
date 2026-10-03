@@ -108,3 +108,7 @@ class Limites(Protocol):
         """Cuenta un mensaje del usuario; lanza `LimiteExcedido` si supera algún tope."""
 
     async def registrar_uso(self, ctx: Contexto, uso: Uso) -> None: ...
+
+    async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int) -> None:
+        """Cuenta un dictado del usuario (contador aparte del de mensajes); lanza
+        `LimiteExcedido("voz_min")` si supera el tope."""

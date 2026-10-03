@@ -20,6 +20,7 @@ services:
       - ./ejemplos:/app/ejemplos:ro
       - ./contrato:/app/contrato:ro
       - ./prompts:/app/prompts:ro
+      - ./herramientas:/app/herramientas:ro
       - ./config:/config:ro
     ports:
       - "8100:8000"

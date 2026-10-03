@@ -36,3 +36,4 @@ class Settings(BaseSettings):
     stt_modelo: str | None = _env("STT_MODELO", None)
     voz_max_audio_kb: int = _env("ASISTENTE_VOZ_MAX_AUDIO_KB", 2048)
     voz_max_audio_s: int = _env("ASISTENTE_VOZ_MAX_AUDIO_S", 60)
+    voz_max_por_min: int = _env("ASISTENTE_VOZ_MAX_POR_MIN", 10)
