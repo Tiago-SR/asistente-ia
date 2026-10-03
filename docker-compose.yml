@@ -13,6 +13,8 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
+      - ./ejemplos:/app/ejemplos:ro
+      - ./contrato:/app/contrato:ro
       - ./prompts:/app/prompts:ro
       - ./config:/config:ro
     ports:
