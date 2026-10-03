@@ -2,12 +2,13 @@
 
 import json
 import logging
-from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 from jsonschema import Draft202012Validator
 
+from asistente.core.llm.base import ToolDef
+from asistente.core.ports import ResultadoTool
 from asistente.sistemas.auth import Usuario
 from asistente.sistemas.manifiesto import CacheManifiestos, ManifiestoInvalido, Tool
 from asistente.sistemas.registro import RegistroSistemas
@@ -18,29 +19,8 @@ ERRORES_NEGOCIO = {"no_encontrado", "sin_acceso", "parametros_invalidos", "no_di
 DEFAULT_TIMEOUT_S = 15.0
 
 
-@dataclass(frozen=True)
-class ResultadoTool:
-    ok: bool
-    datos: Any = None
-    fuente: str | None = None
-    ui: list[dict] = field(default_factory=list)  # va al widget, no al modelo
-    error: str | None = None
-    detalle: str | None = None
-    truncado: bool = False
-
-    @property
-    def token_expirado(self) -> bool:
-        return self.error == "token_expirado"
-
-    def para_modelo(self) -> dict:
-        """Lo que ve el LLM: datos o error, sin `ui`."""
-        if not self.ok:
-            return {"ok": False, "error": self.error, "detalle": self.detalle}
-        return {"ok": True, "datos": self.datos, "fuente": self.fuente, "truncado": self.truncado}
-
-
-def _fallo(error: str, detalle: str) -> ResultadoTool:
-    return ResultadoTool(ok=False, error=error, detalle=detalle)
+def _fallo(error: str, detalle: str, status: int | None = None) -> ResultadoTool:
+    return ResultadoTool(ok=False, error=error, detalle=detalle, status_http=status)
 
 
 class ConectorHttp:
@@ -92,13 +72,24 @@ class ConectorHttp:
             return _fallo("error_sistema", "no se pudo contactar al sistema")
 
         if r.status_code == 401:
-            return _fallo("token_expirado", "token inválido o vencido")
+            return _fallo("token_expirado", "token inválido o vencido", 401)
         if r.status_code == 403:
-            return _fallo("sin_acceso", "el sistema rechazó el acceso")
+            return _fallo("sin_acceso", "el sistema rechazó el acceso", 403)
         if r.status_code != 200:  # incluye 3xx: no se siguen redirecciones
-            return _fallo("error_sistema", f"el sistema respondió HTTP {r.status_code}")
+            return _fallo("error_sistema", f"el sistema respondió HTTP {r.status_code}", r.status_code)
 
         return self._interpretar(r, sistema.conector.max_respuesta_bytes)
+
+    def para(self, usuario: Usuario, request_id: str) -> "ConectorDeUsuario":
+        return ConectorDeUsuario(self, usuario, request_id)
+
+    async def tools_de(self, sistema_id: str) -> list[ToolDef]:
+        try:
+            manifiesto = await self._manifiestos.obtener(sistema_id)
+        except ManifiestoInvalido as e:
+            log.error("sin manifiesto utilizable para %s: %s", sistema_id, e)
+            return []
+        return [ToolDef(t.nombre, t.descripcion, t.parametros) for t in manifiesto.tools_lectura()]
 
     async def _tool_de_lectura(self, sistema_id: str, nombre: str) -> Tool | None:
         try:
@@ -114,19 +105,19 @@ class ConectorHttp:
         try:
             cuerpo = r.json()
         except ValueError:
-            return _fallo("respuesta_invalida", "la respuesta no es JSON")
+            return _fallo("respuesta_invalida", "la respuesta no es JSON", r.status_code)
         if not isinstance(cuerpo, dict) or not isinstance(cuerpo.get("ok"), bool):
-            return _fallo("respuesta_invalida", "falta el campo booleano `ok`")
+            return _fallo("respuesta_invalida", "falta el campo booleano `ok`", r.status_code)
 
         if cuerpo["ok"] is False:
             error = cuerpo.get("error")
             if error not in ERRORES_NEGOCIO:
-                return _fallo("respuesta_invalida", f"código de error desconocido: {error!r}")
+                return _fallo("respuesta_invalida", f"código de error desconocido: {error!r}", r.status_code)
             detalle = cuerpo.get("detalle")
-            return _fallo(error, detalle[:1000] if isinstance(detalle, str) else "")
+            return _fallo(error, detalle[:1000] if isinstance(detalle, str) else "", r.status_code)
 
         if "datos" not in cuerpo:
-            return _fallo("respuesta_invalida", "falta `datos`")
+            return _fallo("respuesta_invalida", "falta `datos`", r.status_code)
         datos, truncado = _limitar(cuerpo["datos"], max_bytes)
         fuente = cuerpo.get("fuente")
         return ResultadoTool(
@@ -135,6 +126,8 @@ class ConectorHttp:
             fuente=fuente[:200] if isinstance(fuente, str) else None,
             ui=_ui_valida(cuerpo.get("ui")),
             truncado=truncado,
+            status_http=r.status_code,
+            bytes_respuesta=len(r.content),
         )
 
 
@@ -153,3 +146,16 @@ def _ui_valida(ui: Any) -> list[dict]:
     if not isinstance(ui, list):
         return []
     return [u for u in ui if isinstance(u, dict) and u.get("tipo") == "navegar"]
+
+
+class ConectorDeUsuario:
+    """`ConectorHttp` ligado a un usuario y una petición: implementa el puerto `Conector`."""
+
+    def __init__(self, conector: ConectorHttp, usuario: Usuario, request_id: str) -> None:
+        self._conector, self._usuario, self._request_id = conector, usuario, request_id
+
+    async def tools(self) -> list[ToolDef]:
+        return await self._conector.tools_de(self._usuario.sistema_id)
+
+    async def ejecutar(self, nombre: str, parametros: dict) -> ResultadoTool:
+        return await self._conector.ejecutar(self._usuario, nombre, parametros, self._request_id)
