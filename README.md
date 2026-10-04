@@ -31,7 +31,7 @@ cp .env.example .env
 cp config/sistemas.example.yaml config/sistemas.yaml
 
 # 3. Construir y levantar asistente + Postgres
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
 
 El servicio queda en <http://localhost:8100> con recarga automática al editar `src/`. Comprobación rápida:
@@ -53,15 +53,15 @@ LLM_BASE_URL=http://host.docker.internal:8090/v1
 ASISTENTE_MODELO_DEFAULT=<nombre del modelo>
 ```
 
-`docker-compose.yml` define `extra_hosts: host.docker.internal:host-gateway` para que el contenedor llegue al host en Linux. El `llama-server` debe escuchar en una interfaz alcanzable desde Docker (`--host 0.0.0.0`, no solo `127.0.0.1`) y conviene firewall que lo limite a la red local. `LLM_BASE_URL` debe incluir el `/v1`.
+`docker-compose.dev.yml` define `extra_hosts: host.docker.internal:host-gateway` para que el contenedor llegue al host en Linux. El `llama-server` debe escuchar en una interfaz alcanzable desde Docker (`--host 0.0.0.0`, no solo `127.0.0.1`) y conviene firewall que lo limite a la red local. `LLM_BASE_URL` debe incluir el `/v1`.
 
 ### Tests
 
 Dos sistemas mock en memoria y Postgres real (los tests de BD se saltan sin `ASISTENTE_DATABASE_URL`):
 
 ```sh
-docker compose up -d postgres
-docker compose run --rm asistente sh -c 'ruff check src tests && pytest -q'
+docker compose -f docker-compose.dev.yml up -d postgres
+docker compose -f docker-compose.dev.yml run --rm asistente sh -c 'ruff check src tests && pytest -q'
 ```
 
 `tests/test_aislamiento.py` es el hito de la Fase 1: tokens entre sistemas, mismo `sub` en dos sistemas, ana vs. beto vía chat, prompt injection, redirecciones y `token_manifiesto`, tools de escritura, límites/cuotas y borrado.
@@ -69,11 +69,11 @@ docker compose run --rm asistente sh -c 'ruff check src tests && pytest -q'
 ### Comandos habituales
 
 ```sh
-docker compose run --rm asistente pytest          # tests
-docker compose run --rm asistente ruff check .    # lint
-docker compose logs -f asistente                  # logs
-docker compose down                               # parar (conserva la BD)
-docker compose down -v                            # parar y borrar la BD de desarrollo
+docker compose -f docker-compose.dev.yml run --rm asistente pytest          # tests
+docker compose -f docker-compose.dev.yml run --rm asistente ruff check .    # lint
+docker compose -f docker-compose.dev.yml logs -f asistente                  # logs
+docker compose -f docker-compose.dev.yml down                               # parar (conserva la BD)
+docker compose -f docker-compose.dev.yml down -v                            # parar y borrar la BD de desarrollo
 ```
 
 Postgres de desarrollo se publica solo en `127.0.0.1:5432` (usuario, contraseña y base: `asistente`).
@@ -87,7 +87,7 @@ docker run --rm -v "$PWD":/app -w /app --entrypoint sh python:3.12-slim \
   -c 'pip install -q uv && uv lock'
 ```
 
-Luego reconstruir con `docker compose build asistente`. Si el lock queda con dueño root, corregirlo con `sudo chown $USER uv.lock`.
+Luego reconstruir con `docker compose -f docker-compose.dev.yml build asistente`. Si el lock queda con dueño root, corregirlo con `sudo chown $USER uv.lock`.
 
 ## Widget
 
@@ -121,12 +121,12 @@ Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md
 
 ## Producción
 
-Se usa `docker-compose.prod.yml`, que construye el target `prod` del `Dockerfile` (sin dependencias de desarrollo, usuario no-root, filesystem de solo lectura, Postgres sin puertos publicados).
+Se usa `docker-compose.yml` (el compose por defecto, el que toma Dockge), que construye el target `prod` del `Dockerfile` (sin dependencias de desarrollo, usuario no-root, filesystem de solo lectura, Postgres sin puertos publicados).
 
 ```sh
-cp .env.example .env.prod      # completar valores reales, incluido POSTGRES_PASSWORD
+cp .env.example .env           # completar valores reales, incluido POSTGRES_PASSWORD
 cp config/sistemas.example.yaml config/sistemas.yaml
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+docker compose up -d --build
 ```
 
 Requiere un proxy inverso con TLS delante, con el buffering desactivado para SSE. Ver detalles en la sección 13 del plan.
@@ -135,8 +135,8 @@ Requiere un proxy inverso con TLS delante, con el buffering desactivado para SSE
 
 ```
 Dockerfile               multi-stage: dev | prod
-docker-compose.yml       desarrollo
-docker-compose.prod.yml  producción
+docker-compose.yml       producción (por defecto, Dockge)
+docker-compose.dev.yml   desarrollo
 src/asistente/           código del servicio
 tests/                   tests
 config/                  registro de sistemas (sistemas.yaml)

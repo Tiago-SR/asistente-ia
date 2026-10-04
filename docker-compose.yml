@@ -1,97 +1,83 @@
-# DESARROLLO. Uso: docker compose up --build
-# Producción: docker compose -f docker-compose.prod.yml up -d (ver docker-compose.prod.yml)
+# PRODUCCIÓN. Uso:
+#   docker compose up -d --build        (lee ./.env; Dockge hace lo mismo)
+# Desarrollo: docker compose -f docker-compose.dev.yml up --build
+# Requiere un proxy inverso con TLS delante (nginx/Caddy/Traefik) que haga proxy a asistente:8000
+# con buffering desactivado para SSE. Postgres no se publica fuera de la red interna.
 services:
   asistente:
     build:
       context: .
-      target: dev
+      target: prod
+    image: asistente:${ASISTENTE_VERSION:-latest}
+    restart: unless-stopped
     env_file: .env
     environment:
-      ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
+      ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD}@postgres:5432/asistente
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
-      ASISTENTE_LOG_LEVEL: DEBUG
-      # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"   # llegar al host desde el contenedor en Linux
+      ASISTENTE_LOG_LEVEL: INFO
     volumes:
-      - ./src:/app/src
-      - ./tests:/app/tests
-      - ./ejemplos:/app/ejemplos:ro
-      - ./contrato:/app/contrato:ro
-      - ./prompts:/app/prompts:ro
-      - ./herramientas:/app/herramientas:ro
-      - ./config:/config:ro
-    ports:
-      - "8100:8000"
+      - ./config/sistemas.yaml:/config/sistemas.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    networks: [interna, publica]
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: asistente
-      POSTGRES_PASSWORD: asistente
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD}
       POSTGRES_DB: asistente
     volumes:
-      - pgdata-dev:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5433:5432"   # 5432 queda libre para el proyecto de pruebas (SGAgro)
+      - pgdata:/var/lib/postgresql/data
+    networks: [interna]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U asistente"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 
-  # Dos sistemas mock con ids y secretos distintos (tests de aislamiento).
-  mock-a:
-    build:
-      context: .
-      target: dev
-    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
-    environment:
-      MOCK_ID: mock-a
-      MOCK_NOMBRE: Mock A
-      MOCK_SECRETO: secreto-mock-a-0123456789-0123456789
-      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-a
-    volumes:
-      - ./ejemplos/sistema-mock:/mock:ro
-    ports:
-      - "127.0.0.1:8201:8000"
-
-  mock-b:
-    build:
-      context: .
-      target: dev
-    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
-    environment:
-      MOCK_ID: mock-b
-      MOCK_NOMBRE: Mock B
-      MOCK_SECRETO: secreto-mock-b-9876543210-9876543210
-      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-b
-    volumes:
-      - ./ejemplos/sistema-mock:/mock:ro
-    ports:
-      - "127.0.0.1:8202:8000"
-
-  # STT local opcional (dictado). Levantar con: docker compose --profile voz up
-  # Expone /v1/audio/transcriptions; el asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
-  # y STT_MODELO igual a WHISPER_MODELO (speaches elige el modelo por petición).
+  # STT local (dictado). El asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
+  # y STT_MODELO igual a WHISPER_MODELO. Sin puertos publicados. Necesita egress (red `publica`)
+  # para descargar el modelo; la primera vez, si no lo bajó solo:
+  #   docker compose exec whisper curl -X POST localhost:8000/v1/models/<STT_MODELO>
   whisper:
-    profiles: ["voz"]
     image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu}
+    restart: unless-stopped
     environment:
-      # Descarga el modelo al arrancar (falla rápido si no se puede) en vez de en el primer dictado.
       PRELOAD_MODELS: '["${WHISPER_MODELO:-Systran/faster-whisper-small}"]'
       WHISPER__INFERENCE_DEVICE: ${WHISPER_DEVICE:-auto}
       STT_MODEL_TTL: ${WHISPER_TTL_S:-300}   # -1 = mantener cargado
       LOG_LEVEL: info
     volumes:
-      - whisper-cache:/home/ubuntu/.cache/huggingface/hub   # modelos descargados
-    ports:
-      - "127.0.0.1:8300:8000"   # solo para depurar desde el host
+      - whisper-cache:/home/ubuntu/.cache/huggingface/hub
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks: [interna, publica]
+
+networks:
+  interna:
+    internal: true      # postgres sin salida a internet
+  publica: {}           # el proxy inverso se conecta aquí; asistente necesita egress al LLM y a los sistemas
 
 volumes:
-  pgdata-dev:
+  pgdata:
   whisper-cache:

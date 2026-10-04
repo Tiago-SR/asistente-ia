@@ -1,0 +1,97 @@
+# DESARROLLO. Uso: docker compose -f docker-compose.dev.yml up --build
+# Producción: docker-compose.yml (el compose por defecto)
+services:
+  asistente:
+    build:
+      context: .
+      target: dev
+    env_file: .env
+    environment:
+      ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
+      ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
+      ASISTENTE_LOG_LEVEL: DEBUG
+      # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # llegar al host desde el contenedor en Linux
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./ejemplos:/app/ejemplos:ro
+      - ./contrato:/app/contrato:ro
+      - ./prompts:/app/prompts:ro
+      - ./herramientas:/app/herramientas:ro
+      - ./config:/config:ro
+    ports:
+      - "8100:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: asistente
+      POSTGRES_PASSWORD: asistente
+      POSTGRES_DB: asistente
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"   # 5432 queda libre para el proyecto de pruebas (SGAgro)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asistente"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Dos sistemas mock con ids y secretos distintos (tests de aislamiento).
+  mock-a:
+    build:
+      context: .
+      target: dev
+    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
+    environment:
+      MOCK_ID: mock-a
+      MOCK_NOMBRE: Mock A
+      MOCK_SECRETO: secreto-mock-a-0123456789-0123456789
+      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-a
+    volumes:
+      - ./ejemplos/sistema-mock:/mock:ro
+    ports:
+      - "127.0.0.1:8201:8000"
+
+  mock-b:
+    build:
+      context: .
+      target: dev
+    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
+    environment:
+      MOCK_ID: mock-b
+      MOCK_NOMBRE: Mock B
+      MOCK_SECRETO: secreto-mock-b-9876543210-9876543210
+      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-b
+    volumes:
+      - ./ejemplos/sistema-mock:/mock:ro
+    ports:
+      - "127.0.0.1:8202:8000"
+
+  # STT local opcional (dictado). Levantar con: docker compose -f docker-compose.dev.yml --profile voz up
+  # Expone /v1/audio/transcriptions; el asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
+  # y STT_MODELO igual a WHISPER_MODELO (speaches elige el modelo por petición).
+  whisper:
+    profiles: ["voz"]
+    image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu}
+    environment:
+      # Descarga el modelo al arrancar (falla rápido si no se puede) en vez de en el primer dictado.
+      PRELOAD_MODELS: '["${WHISPER_MODELO:-Systran/faster-whisper-small}"]'
+      WHISPER__INFERENCE_DEVICE: ${WHISPER_DEVICE:-auto}
+      STT_MODEL_TTL: ${WHISPER_TTL_S:-300}   # -1 = mantener cargado
+      LOG_LEVEL: info
+    volumes:
+      - whisper-cache:/home/ubuntu/.cache/huggingface/hub   # modelos descargados
+    ports:
+      - "127.0.0.1:8300:8000"   # solo para depurar desde el host
+
+volumes:
+  pgdata-dev:
+  whisper-cache:
