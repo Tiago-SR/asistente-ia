@@ -396,7 +396,7 @@ asistente-mvp/
 ├── widget/                       # fuente del Web Component (TS)
 ├── ejemplos/
 │   ├── sistema-mock/             # sistema simulado con datos ficticios (dev y tests)
-│   └── php/                      # implementación de referencia del contrato, PHP sin framework
+│   └── sistema-php/              # implementación de referencia del contrato en PHP (router mínimo, portable a CI4)
 ├── herramientas/
 │   └── verificar_sistema.py      # verificador de conformidad del contrato
 ├── evals/                        # set de preguntas y resultados (con datos ficticios)
@@ -543,7 +543,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 
 1. **`contrato/CONTRATO.md`:** el contrato completo, ejemplos `curl`, tabla de errores y checklist de seguridad para el equipo del sistema.
 2. **Guía de diseño de tools:** cómo elegir tools (pocas, de alto nivel, salida agregada), cómo redactar descripciones ("cuándo usarla", "qué devuelve"), unidades en nombres de campo, una tool de listado con filtro `texto` por cada entidad principal para resolver nombres.
-3. **Implementación de referencia en PHP sin framework (`ejemplos/php/`):** emisión de token con `firebase/php-jwt`, manifiesto, ejecución con validación de token y scope, formato de errores. Pensada para adaptarse a CodeIgniter, Laravel o PHP plano.
+3. **Implementación de referencia en PHP sin framework (`ejemplos/sistema-php/`):** emisión de token con `firebase/php-jwt`, manifiesto, ejecución con validación de token y scope, formato de errores. Pensada para adaptarse a CodeIgniter, Laravel o PHP plano.
 4. **Sistema mock (`ejemplos/sistema-mock/`):** implementa el contrato con datos ficticios (dominio agro genérico: establecimientos, lotes, campañas, rendimientos). Sirve para desarrollar el asistente, para tests de integración y como segundo ejemplo de implementación.
 5. **Verificador (`herramientas/verificar_sistema.py <id>`):** contra un sistema registrado, comprueba:
    - manifiesto accesible, versión de contrato soportada, schema válido, límites de tamaño;
@@ -572,7 +572,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - **Hito:** dos sistemas mock registrados; cada usuario consulta sus datos y ninguna prueba logra cruzar sistemas ni usuarios.
 
 ### Fase 2 — Widget y kit de integración (≈ 1 semana)
-> La implementación PHP y el hito de punta a punta (página estática + PHP) están **en espera**.
+> La implementación PHP ya existe (primera versión, solo lectura). El hito de punta a punta (página estática + PHP + asistente) está pendiente de probarse.
 
 - Web Component, implementación de referencia PHP, guía de diseño de tools, verificador completo.
 - **Hito:** una página HTML estática + el ejemplo PHP integran el widget de punta a punta.
@@ -694,7 +694,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 **Fase 2**
 - [x] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui` (versión inicial con burbuja flotante)
 - [ ] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): columna central, entrada fija, solo conversación actual (historial oculto); eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
-- [ ] Implementación de referencia PHP — **EN ESPERA** (aplazada por decisión de producto)
+- [x] Implementación de referencia PHP (`ejemplos/sistema-php/`, router mínimo portable a CI4; primera versión solo lectura, verificador en verde con HS256 y RS256). Pendiente: tool de escritura de ejemplo, tercera tool y hito de punta a punta
 - [ ] Guía de diseño de tools
 - [ ] Verificador de conformidad completo
 

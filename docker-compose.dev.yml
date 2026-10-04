@@ -75,6 +75,26 @@ services:
     ports:
       - "127.0.0.1:8202:8000"
 
+  # Referencia PHP del contrato (ejemplos/sistema-php). HS256 con secretos ficticios de desarrollo.
+  # Página: http://localhost:8203/?usuario=ana. Para RS256 ver ejemplos/sistema-php/README.md.
+  sistema-php:
+    build:
+      context: ./ejemplos/sistema-php
+    environment:
+      APP_ENV: local            # habilita ?usuario=ana; NUNCA en producción
+      SISTEMA_ID: sistema-php
+      SISTEMA_NOMBRE: Sistema PHP
+      SISTEMA_ALG: ${PHP_ALG:-HS256}
+      SISTEMA_SECRETO: secreto-php-0123456789-0123456789-ab
+      SISTEMA_CLAVE_PRIVADA_ARCHIVO: ${PHP_CLAVE_PRIVADA_ARCHIVO:-}
+      SISTEMA_TOKEN_MANIFIESTO: manifiesto-php
+      ASISTENTE_URL: http://localhost:8100
+    volumes:
+      - ./ejemplos/sistema-php/src:/app/src:ro
+      - ./ejemplos/sistema-php/public:/app/public:ro
+    ports:
+      - "127.0.0.1:8203:8000"
+
   # STT local opcional (dictado). Levantar con: docker compose -f docker-compose.dev.yml --profile voz up
   # Expone /v1/audio/transcriptions; el asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
   # y STT_MODELO igual a WHISPER_MODELO (speaches elige el modelo por petición).

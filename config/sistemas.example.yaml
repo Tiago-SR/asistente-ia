@@ -1,1 +1,19 @@
-sistemas: []   # ver sección 5 de PLAN_ASISTENTE.md
+# Copiar a config/sistemas.yaml (fuera de git). Ver sección 6 del contrato.
+# Los secretos NUNCA van aquí: solo el nombre de la variable de entorno (en .env).
+sistemas:
+  # Referencia PHP (ejemplos/sistema-php), servicio `sistema-php` de docker-compose.dev.yml.
+  # .env del asistente: PHP_SECRETO=secreto-php-0123456789-0123456789-ab  PHP_MANIFEST_TOKEN=manifiesto-php
+  - id: sistema-php                       # = claim `iss`
+    nombre: "Sistema PHP"
+    base_url: http://sistema-php:8000     # servidor a servidor, red de compose
+    origenes_permitidos:
+      - http://localhost:8203             # origen de la página con el widget
+    auth:
+      algoritmo: HS256
+      secreto_env: PHP_SECRETO
+      audiencia: asistente                # = claim `aud`
+      # Variante RS256 (recomendada fuera de pruebas):
+      #   algoritmo: RS256
+      #   clave_publica_env: PHP_PUBKEY   # PEM de la clave pública; sin `secreto_env`
+    conector:
+      token_manifiesto_env: PHP_MANIFEST_TOKEN
