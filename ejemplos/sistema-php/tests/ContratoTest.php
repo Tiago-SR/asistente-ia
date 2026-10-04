@@ -102,8 +102,11 @@ final class ContratoTest extends TestCase
         $r = $this->ctl->manifiesto('Bearer ' . self::MANIFIESTO);
         $this->assertSame(200, $r->estado);
         $this->assertSame('1', $r->cuerpo['contrato']);
-        foreach ($r->cuerpo['tools'] as $t) {
-            $this->assertSame('lectura', $t['efecto']);
+        $efectos = array_column($r->cuerpo['tools'], 'efecto', 'nombre');
+        $this->assertSame('escritura', $efectos['eliminar_establecimiento']);
+        unset($efectos['eliminar_establecimiento']);
+        foreach ($efectos as $efecto) {
+            $this->assertSame('lectura', $efecto);
         }
     }
 
@@ -124,6 +127,35 @@ final class ContratoTest extends TestCase
         }
     }
 
+    public function testEscrituraSeRechazaConScopeDeLecturaYNoHaceNada(): void
+    {
+        $cuerpo = '{"parametros":{"id":"1"}}';
+        [$estado] = $this->ejecutar($this->jwt(), 'eliminar_establecimiento', $cuerpo);
+        $this->assertSame(403, $estado);
+        // aun con scope de escritura, la capa de lectura del ejemplo no la ejecuta y los datos siguen
+        [$estado] = $this->ejecutar($this->jwt(['scope' => 'asistente:escritura']), 'eliminar_establecimiento', $cuerpo);
+        $this->assertSame(403, $estado);
+        [, $c] = $this->ejecutar($this->jwt(), 'resumen_establecimiento', '{"parametros":{"id":"1"}}');
+        $this->assertTrue($c['ok']);
+    }
+
+    public function testResumenPorCultivoSumaSoloLoDelUsuario(): void
+    {
+        [, $c] = $this->ejecutar($this->jwt(['sub' => 'u-1001']), 'resumen_por_cultivo');
+        $this->assertSame([
+            ['superficie_ha' => 660.5, 'cultivo' => 'soja', 'establecimientos' => 2],
+            ['superficie_ha' => 210.0, 'cultivo' => 'maíz', 'establecimientos' => 1],
+        ], $c['datos']['por_cultivo']);
+        $this->assertSame(870.5, $c['datos']['superficie_total_ha']);
+        [, $c] = $this->ejecutar($this->jwt(['sub' => 'u-1002']), 'resumen_por_cultivo');
+        $this->assertSame(['trigo'], array_column($c['datos']['por_cultivo'], 'cultivo'));
+        $this->assertSame(88.2, $c['datos']['superficie_total_ha']);
+        [, $c] = $this->ejecutar($this->jwt(['sub' => 'u-9999']), 'resumen_por_cultivo');
+        $this->assertSame([], $c['datos']['por_cultivo']);
+        [, $c] = $this->ejecutar($this->jwt(), 'resumen_por_cultivo', '{"parametros":{"usuario_id":"u-1002"}}');
+        $this->assertSame('parametros_invalidos', $c['error']);
+    }
+
     public function testToolDesconocida(): void
     {
         [$estado, $c] = $this->ejecutar($this->jwt(), 'eliminar_todo');
@@ -135,7 +167,7 @@ final class ContratoTest extends TestCase
         $ana = $this->jwt(['sub' => 'u-1001']);
         $beto = $this->jwt(['sub' => 'u-1002']);
         [, $lista] = $this->ejecutar($ana);
-        $this->assertCount(2, $lista['datos']['establecimientos']);
+        $this->assertSame(['1', '2', '4'], array_column($lista['datos']['establecimientos'], 'id'));
         [, $lista] = $this->ejecutar($beto);
         $this->assertSame(['3'], array_column($lista['datos']['establecimientos'], 'id'));
         // id de ana (1) pedido por beto: igual que si no existiera

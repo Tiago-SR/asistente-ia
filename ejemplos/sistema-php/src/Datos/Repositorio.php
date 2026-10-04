@@ -22,6 +22,7 @@ final class Repositorio
         'u-1001' => [
             ['id' => '1', 'nombre' => 'El Matorral', 'superficie_ha' => 540.5, 'cultivo' => 'soja'],
             ['id' => '2', 'nombre' => 'La Esperanza', 'superficie_ha' => 210.0, 'cultivo' => 'maíz'],
+            ['id' => '4', 'nombre' => 'San Pedro', 'superficie_ha' => 120.0, 'cultivo' => 'soja'],
         ],
         'u-1002' => [
             ['id' => '3', 'nombre' => 'Los Ceibos', 'superficie_ha' => 88.2, 'cultivo' => 'trigo'],

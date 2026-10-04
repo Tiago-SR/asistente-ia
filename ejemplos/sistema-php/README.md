@@ -1,6 +1,6 @@
 # Sistema PHP de referencia
 
-Implementación del [contrato v1](../../contrato/CONTRATO.md) en PHP 8.2+ para que un equipo con CodeIgniter 4 (p. ej. SGAgro) la copie y adapte. **Primera versión: solo tools de lectura**, datos ficticios en memoria (ana y beto, los mismos del [mock Python](../sistema-mock/app.py)).
+Implementación del [contrato v1](../../contrato/CONTRATO.md) en PHP 8.2+ para que un equipo con CodeIgniter 4 (p. ej. SGAgro) la copie y adapte. Tools de ejemplo: dos de lectura y una de escritura (solo para la prueba de rechazo), datos ficticios en memoria (ana y beto, los mismos del [mock Python](../sistema-mock/app.py)).
 
 ## Por qué un router mínimo y no CI4
 
@@ -18,7 +18,7 @@ src/Auth/EmisorToken.php            emite el JWT (HS256 o RS256)
 src/Auth/ValidadorToken.php         firma, alg fijo, iss, aud, exp, claims obligatorios
 src/Tools/*                         tools de ejemplo (guía: ../../contrato/GUIA_TOOLS.md)
 src/Datos/Repositorio.php           datos ficticios (aquí iría tu base de datos)
-tests/ContratoTest.php              rechazos de token, aislamiento, scope, parámetros
+tests/ContratoTest.php              rechazos de token, aislamiento, scope, escritura, parámetros
 ```
 
 ## Ejecutar
@@ -81,6 +81,15 @@ Otras variables: `SISTEMA_ID` (= `iss` = `id` del registro), `SISTEMA_AUDIENCIA`
 5. Reemplazá `Repositorio` por tus modelos y escribí tus tools siguiendo la [guía](../../contrato/GUIA_TOOLS.md). Cada una queda en `src/Tools/` e implementa `Herramienta`; se registra en `Fabrica` (en CI4, `Config\Services`).
 6. Ejecutá el verificador contra el sistema real (con `--cabecera-token-env` para la cookie de sesión) antes de habilitarlo.
 
-## Pendiente
+## Tools de ejemplo
 
-Tools de escritura de ejemplo (para la prueba de rechazo del verificador), tercera tool agregada y verificación de punta a punta con el asistente real.
+| Tool | Efecto | Qué muestra |
+|---|---|---|
+| `listar_establecimientos` | lectura | listado con filtro `texto` y acciones `ui` |
+| `resumen_establecimiento` | lectura | búsqueda por id: "no existe" y "es de otro" dan el mismo `no_encontrado` |
+| `resumen_por_cultivo` | lectura | agregada del lado del sistema (`superficie_ha` por cultivo + total), sin parámetros ni geometrías |
+| `eliminar_establecimiento` | **escritura** | figura en el manifiesto y el controlador la rechaza con `403` con scope de lectura; aunque se ejecutara no hace nada. Existe para que el verificador compruebe esa capa |
+
+## Probado de punta a punta
+
+Con `docker-compose.dev.yml` (asistente, Postgres y `sistema-php`) y la entrada `sistema-php` en `config/sistemas.yaml` (origen `http://localhost:8203`): ana y beto reciben su token del sistema, cada uno ve solo sus datos, sus conversaciones son distintas y `GET`/`DELETE /v1/conversaciones/{id}` o `POST /v1/chat` con el id del otro dan `404`. Igual con RS256 (`clave_publica_env`): el token sale con `alg: RS256` y un HS256 firmado con otro secreto da `401`. Esa prueba se hizo con un LLM falso (que pide `resumen_por_cultivo` y repite su resultado), así que valida el circuito y no la calidad de las respuestas del modelo.

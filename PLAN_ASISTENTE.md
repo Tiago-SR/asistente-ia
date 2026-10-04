@@ -572,7 +572,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - **Hito:** dos sistemas mock registrados; cada usuario consulta sus datos y ninguna prueba logra cruzar sistemas ni usuarios.
 
 ### Fase 2 — Widget y kit de integración (≈ 1 semana)
-> La implementación PHP ya existe (primera versión, solo lectura). El hito de punta a punta (página estática + PHP + asistente) está pendiente de probarse.
+> La implementación PHP está completa (3 tools de ejemplo: 2 de lectura agregadas y 1 de escritura para la prueba de rechazo). Probada de punta a punta por API (tokens, manifiesto, chat, aislamiento) con HS256 y RS256; falta ver la página con el widget en un navegador y con un LLM real.
 
 - Web Component, implementación de referencia PHP, guía de diseño de tools, verificador completo.
 - **Hito:** una página HTML estática + el ejemplo PHP integran el widget de punta a punta.
@@ -694,7 +694,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 **Fase 2**
 - [x] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui` (versión inicial con burbuja flotante)
 - [ ] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): columna central, entrada fija, solo conversación actual (historial oculto); eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
-- [x] Implementación de referencia PHP (`ejemplos/sistema-php/`, router mínimo portable a CI4; primera versión solo lectura, verificador en verde con HS256 y RS256). Pendiente: tool de escritura de ejemplo, tercera tool y hito de punta a punta
+- [x] Implementación de referencia PHP (`ejemplos/sistema-php/`, router mínimo portable a CI4; verificador en verde con HS256 y RS256, incluida la prueba de escritura → 403; ana y beto de punta a punta con el asistente: datos y conversaciones separados, ids ajenos → 404). Pendiente: probar la página con el widget en navegador y con un LLM real
 - [ ] Guía de diseño de tools
 - [ ] Verificador de conformidad completo
 
