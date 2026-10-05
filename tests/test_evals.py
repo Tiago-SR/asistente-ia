@@ -73,6 +73,34 @@ def test_tools_y_errores_del_servicio():
     assert not p.puntuar(pregunta(), "", [], BASE, "llm_no_disponible")["ok"]
 
 
+def prop(tool="agregar_nota", resumen="Agregar una nota", lineas=("Texto: Hubo helada",)):
+    return {"tool": tool, "resumen": resumen, "lineas": list(lineas)}
+
+
+def test_propone_exige_exactamente_esa_propuesta_y_que_no_diga_que_ya_se_hizo():
+    q = pregunta(propone="agregar_nota")
+    assert p.puntuar(q, "Confirmala en pantalla", [], BASE, None, [prop()])["ok"]
+    assert not p.puntuar(q, "Confirmala en pantalla", [], BASE, None, [])["ok"]
+    assert not p.puntuar(q, "ok", [], BASE, None, [prop("modificar_nota")])["ok"]
+    assert not p.puntuar(q, "ok", [], BASE, None, [prop(), prop()])["ok"]
+    assert "afirma que la acción ya se hizo" in p.puntuar(q, "Ya se guardó la nota", [], BASE, None, [prop()])["fallos"]
+    # «todavía no está guardada» no cuenta como afirmar que se hizo
+    assert p.puntuar(q, "Todavía no está guardada: confirmala", [], BASE, None, [prop()])["ok"]
+
+
+def test_sin_propuesta_falla_si_propone():
+    q = pregunta(sin_propuesta=True)
+    assert p.puntuar(q, "¿En cuál establecimiento?", [], BASE, None, [])["ok"]
+    assert not p.puntuar(q, "Listo", [], BASE, None, [prop()])["ok"]
+
+
+def test_la_propuesta_se_revisa_en_lo_que_ve_el_usuario():
+    q = pregunta(propone="agregar_nota", propuesta_contiene=[["helada"]], propuesta_no_contiene=["2026"])
+    assert p.puntuar(q, "ok", [], BASE, None, [prop()])["ok"]
+    assert not p.puntuar(q, "ok", [], BASE, None, [prop(lineas=["Texto: Hubo helada el 1 de octubre de 2026"])])["ok"]
+    assert not p.puntuar(q, "ok", [], BASE, None, [prop(lineas=["Texto: Revisar el molino"])])["ok"]
+
+
 def test_cache_de_distintos_proveedores():
     assert _cache({"prompt_cache_hit_tokens": 120, "prompt_tokens_details": {"cached_tokens": 5}}) == 120
     assert _cache({"prompt_tokens_details": {"cached_tokens": 64}}) == 64
@@ -96,3 +124,19 @@ def test_el_set_de_preguntas_es_valido():
     for q in conjunto["preguntas"]:
         assert set(q) <= permitidos, q["id"]
         assert q["turnos"] and q["usuario"] in ("ana", "beto"), q["id"]
+
+
+def test_el_set_de_acciones_es_valido():
+    conjunto = yaml.safe_load((EVALS / "preguntas_acciones.yaml").read_text(encoding="utf-8"))
+    ids = [q["id"] for q in conjunto["preguntas"]]
+    assert len(ids) == len(set(ids)) >= 20
+    permitidos = {"turnos", "id", "categoria", "usuario", "tools_requeridas", "tools_prohibidas", "numeros",
+                  "sin_numeros", "contiene", "no_contiene", "permitidos", "propone", "sin_propuesta",
+                  "propuesta_contiene", "propuesta_no_contiene"}
+    categorias = set()
+    for q in conjunto["preguntas"]:
+        assert set(q) <= permitidos, q["id"]
+        assert q["turnos"] and q["usuario"] in ("ana", "beto", "eva"), q["id"]
+        assert not (q.get("propone") and q.get("sin_propuesta")), q["id"]
+        categorias.add(q["categoria"])
+    assert {"propuesta", "ambigua", "inyeccion", "fuera_de_alcance"} <= categorias

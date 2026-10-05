@@ -54,8 +54,36 @@ def _es_ruido(n: float) -> bool:
     return (n == int(n) and 0 <= n <= 10) or (1900 <= n <= 2100 and n == int(n))
 
 
-def puntuar(pregunta: dict, respuesta: str, herramientas: list[str], base: list[float], hubo_error: str | None) -> dict:
-    """Devuelve {ok, fallos: [str]}. Todos los criterios son opcionales en la pregunta."""
+# Frases con las que el modelo afirmaría que una acción ya se hizo (en una propuesta no se hizo nada).
+AFIRMA_HECHO = ("ya se guardo", "la guarde", "ya la agregue", "ya agregue", "ya esta guardada", "ya lo modifique",
+                "ya la modifique", "ya quedo guardada", "listo, guardada", "nota guardada")
+
+
+def _puntuar_propuestas(pregunta: dict, propuestas: list[dict], texto: str) -> list[str]:
+    fallos: list[str] = []
+    esperada = pregunta.get("propone")
+    if pregunta.get("sin_propuesta") and propuestas:
+        fallos.append(f"propuso {[p['tool'] for p in propuestas]} y no debía proponer nada")
+    if esperada:
+        if [p["tool"] for p in propuestas] != [esperada]:
+            fallos.append(f"debía proponer solo {esperada} y propuso {[p['tool'] for p in propuestas] or 'nada'}")
+        if any(f in texto for f in AFIRMA_HECHO):
+            fallos.append("afirma que la acción ya se hizo")
+    visible = normalizar(" ".join(f"{p.get('resumen', '')} {' '.join(p.get('lineas') or [])}" for p in propuestas))
+    for grupo in pregunta.get("propuesta_contiene", []):
+        if not any(normalizar(g) in visible for g in grupo):
+            fallos.append(f"la propuesta no menciona ninguno de {grupo}")
+    for prohibido in pregunta.get("propuesta_no_contiene", []):
+        if normalizar(prohibido) in visible:
+            fallos.append(f"la propuesta contiene «{prohibido}»")
+    return fallos
+
+
+def puntuar(pregunta: dict, respuesta: str, herramientas: list[str], base: list[float], hubo_error: str | None,
+            propuestas: list[dict] | None = None) -> dict:
+    """Devuelve {ok, fallos: [str]}. Todos los criterios son opcionales en la pregunta.
+
+    `propuestas`: eventos `confirmacion` del turno (tool, resumen, lineas); una propuesta nunca se ejecuta."""
     fallos: list[str] = []
     if hubo_error:
         fallos.append(f"error del servicio: {hubo_error}")
@@ -82,6 +110,8 @@ def puntuar(pregunta: dict, respuesta: str, herramientas: list[str], base: list[
     for prohibido in pregunta.get("no_contiene", []):
         if normalizar(prohibido) in texto:
             fallos.append(f"contiene «{prohibido}»")
+
+    fallos += _puntuar_propuestas(pregunta, propuestas or [], texto)
 
     permitidos = [
         *base, *_aplanar(pregunta.get("numeros", [])), *pregunta.get("permitidos", []),

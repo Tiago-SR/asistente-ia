@@ -72,6 +72,7 @@ docker compose -f docker-compose.dev.yml run --rm asistente sh -c 'ruff check sr
 docker compose -f docker-compose.dev.yml run --rm asistente pytest          # tests
 docker compose -f docker-compose.dev.yml run --rm asistente ruff check .    # lint
 docker compose -f docker-compose.dev.yml run --rm asistente python evals/correr.py   # evals contra el LLM real (cuesta tokens)
+docker compose -f docker-compose.dev.yml run --rm asistente python evals/correr.py --preguntas evals/preguntas_acciones.yaml   # evals de acciones (mock-a; ver cabecera del archivo)
 docker compose -f docker-compose.dev.yml logs -f asistente                  # logs
 docker compose -f docker-compose.dev.yml down                               # parar (conserva la BD)
 docker compose -f docker-compose.dev.yml down -v                            # parar y borrar la BD de desarrollo
@@ -150,7 +151,7 @@ contrato/                contrato v1, schemas, OpenAPI y guía de tools
 ejemplos/sistema-mock/   sistema de referencia con datos ficticios
 ejemplos/sistema-php/    referencia PHP del contrato
 tests_e2e/               e2e del widget en navegador (Playwright MCP)
-evals/                   preguntas, corredor y línea base por modelo (resultados/)
+evals/                   preguntas (lectura y acciones), corredor y línea base por modelo (resultados/)
 herramientas/            verificador de conformidad y banco de pruebas de audio
 PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
 PRUEBA_MANUAL_VOZ.md     checklist de la prueba manual de voz en navegadores reales
@@ -166,7 +167,7 @@ DISENO_FASE5.md          diseño en papel de las acciones con confirmación (Fas
 - **Prueba manual de voz en otros navegadores y dispositivos (aplazada por el usuario; la voz queda como está):** voces es-UY/es-ES, lectura automática, móvil, Safari y Edge. Checklist y formato de reporte en [`PRUEBA_MANUAL_VOZ.md`](PRUEBA_MANUAL_VOZ.md). El eco de los parlantes sigue aplazado (no hay detector de energía).
 - **Respaldo remoto de voz (opcional):** solo si algún cliente no puede enviar audio a Google o se quiere una voz más natural. El STT ya entra por `STT_*`; un TTS requeriría un puerto `TTS` y `POST /v1/voz/sintetizar`. Comparativa de proveedores en [`PROVEEDORES_VOZ.md`](PROVEEDORES_VOZ.md).
 - **Fase 3, primer sistema real (SGAgro; en espera, falta el sistema):** entregar el kit, acompañar el diseño de sus tools y su prompt de dominio, verificador en verde contra su entorno de pruebas, set de evals propio y costo por pregunta y por sistema.
-- **Fase 5, acciones con confirmación (implementada en servicio, mock y widget; contrato en la sección 8, diseño y decisiones en [`DISENO_FASE5.md`](DISENO_FASE5.md)):** el modelo solo propone; el sistema valida y resume sin efectos, el usuario confirma con un clic y el sistema emite un token de escritura de un solo uso atado a la tool y a los parámetros. **Falta:** la referencia PHP (`propuesta`, token de escritura, ejecución idempotente), las comprobaciones de la sección 8 en `verificar_sistema.py` (hoy las cubre `tests/test_mock_acciones.py`), preguntas de evals que terminen en propuesta (y probarlas con el modelo real), restaurar la tarjeta pendiente tras recargar la página, y una acción real de SGAgro. Deshacer (`reversible_con`) y borrar quedan fuera.
+- **Fase 5, acciones con confirmación (implementada en servicio, mock y widget; contrato en la sección 8, diseño y decisiones en [`DISENO_FASE5.md`](DISENO_FASE5.md)):** el modelo solo propone; el sistema valida y resume sin efectos, el usuario confirma con un clic y el sistema emite un token de escritura de un solo uso atado a la tool y a los parámetros. Evals propios en `evals/preguntas_acciones.yaml` (contra mock-a; propuesta sin ejecución, ambiguas que piden un dato, borrar, inyección en los datos; línea base de `deepseek-flash` 21/21). **Falta:** la referencia PHP (`propuesta`, token de escritura, ejecución idempotente), las comprobaciones de la sección 8 en `verificar_sistema.py` (hoy las cubre `tests/test_mock_acciones.py`), restaurar la tarjeta pendiente tras recargar la página, y una acción real de SGAgro. Deshacer (`reversible_con`) y borrar quedan fuera.
 - **Fase 6, proactivo (a evaluar):** webhooks del sistema hacia el asistente o consultas programadas; requiere cola o cron en el contenedor.
 - **Despliegue en el VPS (en espera):** kit listo y probado en local. Hito: stack tras el proxy con TLS, `/admin` y `/docs` cerrados, SSE sin buffering y widget probado contra el dominio real. Los backups quedan en el mismo VPS por ahora.
 

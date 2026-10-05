@@ -122,7 +122,7 @@ async def test_proponer_no_escribe_y_confirmar_si(acc, llm, mock_a, ana, cliente
     assert tools == ["agregar_nota#propuesta", "agregar_nota"]
     conv = ev[-1][1]["conversacion_id"]
     hist = (await acc.get(f"/v1/conversaciones/{conv}", headers=auth(usuario=ana))).json()["mensajes"]
-    assert hist[-1]["texto"].startswith("Acción realizada: Agregar una nota")
+    assert hist[-1]["texto"].startswith("[Aviso del sistema] Acción realizada: Agregar una nota")
 
 
 async def test_modificar_muestra_antes_y_despues(acc, llm, mock_a, ana, cliente_mocks):
@@ -225,7 +225,7 @@ async def test_cancelar(acc, llm, mock_a, ana, cliente_mocks):
     assert len(mock_a.NOTAS[ana]) == 1
     conv = ev[-1][1]["conversacion_id"]
     hist = (await acc.get(f"/v1/conversaciones/{conv}", headers=auth(usuario=ana))).json()["mensajes"]
-    assert hist[-1]["texto"].startswith("Acción cancelada por el usuario")
+    assert hist[-1]["texto"].startswith("[Aviso del sistema] Acción cancelada por el usuario")
 
 
 # --- el token y el aislamiento ------------------------------------------------------------------------

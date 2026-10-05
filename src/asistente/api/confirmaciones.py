@@ -49,6 +49,11 @@ def _no_pendiente(a: Accion) -> JSONResponse:
     return JSONResponse({"error": "accion_no_pendiente", "estado": a.estado}, status_code=409)
 
 
+# Marca del resultado de una acción en el historial: va con rol «assistant» (así lo ve el widget), y el
+# prompt base le dice al modelo que es un dato verificado del sistema y no algo que él afirmó.
+AVISO = "[Aviso del sistema]"
+
+
 async def _anotar(svc: Servicios, sesion: Sesion, a: Accion, texto: str) -> None:
     """El resultado entra al historial para que el modelo sepa qué pasó con su propuesta."""
     if a.conversacion_id is None:
@@ -75,7 +80,7 @@ async def cancelar(
     u = sesion.usuario
     if not await _acciones(svc).cancelar(u.sistema_id, u.usuario_ref, accion_id):
         return _no_pendiente(await _propia(svc, sesion, accion_id))
-    await _anotar(svc, sesion, accion, f"Acción cancelada por el usuario: {accion.resumen}")
+    await _anotar(svc, sesion, accion, f"{AVISO} Acción cancelada por el usuario: {accion.resumen}. No se guardó nada.")
     return {"estado": "cancelada"}
 
 
@@ -119,8 +124,10 @@ async def confirmar(
     if r.ok:
         mensaje = r.datos.get("mensaje") if isinstance(r.datos, dict) else None
         mensaje = mensaje[:MAX_MENSAJE] if isinstance(mensaje, str) and mensaje else "Hecho."
-        await _anotar(svc, sesion, reclamada, f"Acción realizada: {reclamada.resumen}")
+        await _anotar(svc, sesion, reclamada, f"{AVISO} Acción realizada: {reclamada.resumen}")
         return {"estado": "ejecutada", "ok": True, "mensaje": mensaje, "ui": r.ui}
+    extra = (" El dato cambió desde la propuesta: vuelve a consultarlo antes de proponer de nuevo."
+             if r.error == "conflicto" else "")
     await _anotar(svc, sesion, reclamada,
-                  f"La acción no se pudo realizar ({r.error}): {reclamada.resumen}")
+                  f"{AVISO} La acción NO se realizó ({r.error}): {reclamada.resumen}. No se guardó nada.{extra}")
     return {"estado": "fallida", "ok": False, "error": r.error, "detalle": (r.detalle or "")[:MAX_MENSAJE]}

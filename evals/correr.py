@@ -60,7 +60,7 @@ class Cliente:
     def _turno(self, token: str, mensaje: str, conversacion: str | None) -> dict:
         cuerpo = {"mensaje": mensaje, **({"conversacion_id": conversacion} if conversacion else {})}
         cabeceras = {"Authorization": f"Bearer {token}", "Origin": self.origen}
-        res = {"texto": "", "tools": [], "iteraciones": 1, "error": None, "uso": {}, "conversacion": conversacion,
+        res = {"texto": "", "tools": [], "propuestas": [], "iteraciones": 1, "error": None, "uso": {}, "conversacion": conversacion,
                "latencia_s": 0.0, "primer_token_s": None}
         inicio = time.monotonic()
         with self.http.stream("POST", f"{self.asistente}/v1/chat", json=cuerpo, headers=cabeceras) as r:
@@ -75,6 +75,8 @@ class Cliente:
                 elif evento == "tool":
                     res["iteraciones"] += 1
                     res["tools"] += [h.removeprefix("Consultando ") for h in datos["herramientas"]]
+                elif evento == "confirmacion":
+                    res["propuestas"].append({k: datos.get(k) for k in ("tool", "resumen", "lineas")})
                 elif evento == "error":
                     res["error"] = datos["codigo"]
                 elif evento == "token_expirado":
@@ -98,22 +100,23 @@ def costo(uso: dict, tarifa: dict | None, horario: str) -> float | None:
 
 def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | None) -> dict:
     token = cli.token(p["usuario"])
-    conv, total, herramientas, ultimo = None, {"tokens_in": 0, "tokens_out": 0, "tokens_in_cache": 0}, [], None
+    conv, total, herramientas, propuestas, ultimo = None, {"tokens_in": 0, "tokens_out": 0, "tokens_in_cache": 0}, [], [], None
     latencia = iteraciones = 0
     for mensaje in p["turnos"]:
         ultimo = cli.turno(token, mensaje, conv)
         conv = ultimo["conversacion"]
         herramientas += ultimo["tools"]
+        propuestas += ultimo["propuestas"]
         latencia += ultimo["latencia_s"]
         iteraciones += ultimo["iteraciones"]
         for k in total:
             total[k] += ultimo["uso"].get(k, 0)
         if ultimo["error"]:
             break
-    puntaje = puntuar(p, ultimo["texto"], herramientas, base, ultimo["error"])
+    puntaje = puntuar(p, ultimo["texto"], herramientas, base, ultimo["error"], propuestas)
     return {
         "id": p["id"], "categoria": p["categoria"], "usuario": p["usuario"], "turnos": p["turnos"],
-        "ok": puntaje["ok"], "fallos": puntaje["fallos"], "respuesta": ultimo["texto"], "tools": herramientas,
+        "ok": puntaje["ok"], "fallos": puntaje["fallos"], "respuesta": ultimo["texto"], "tools": herramientas, "propuestas": propuestas,
         "iteraciones": iteraciones, "latencia_s": round(latencia, 2), "primer_token_s": ultimo["primer_token_s"],
         "uso": total,
         "costo_usd": {h: costo(total, tarifa, h) for h in ("valle", "pico")} if tarifa else None,
@@ -166,6 +169,7 @@ def informe_md(modelo: str, fecha: str, resumen: dict, resultados: list[dict], n
     for r in fallidas:
         lineas += [f"### {r['id']} ({r['categoria']}, {r['usuario']}): {r['turnos'][-1]}",
                    *[f"- {f}" for f in r["fallos"]], f"- Tools: {r['tools'] or 'ninguna'}",
+                   *([f"- Propuestas: {r['propuestas']}"] if r.get("propuestas") else []),
                    f"- Respuesta: {r['respuesta'][:400]!r}", ""]
     return "\n".join(lineas)
 
@@ -173,9 +177,12 @@ def informe_md(modelo: str, fecha: str, resumen: dict, resultados: list[dict], n
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--asistente", default=os.environ.get("EVAL_ASISTENTE", "http://asistente:8000"))
-    ap.add_argument("--token-url", default=os.environ.get("EVAL_TOKEN_URL", "http://sistema-php:8000/asistente/token"))
-    ap.add_argument("--origen", default=os.environ.get("EVAL_ORIGEN", "http://localhost:8203"),
-                    help="Origin que se envía; debe estar en origenes_permitidos del sistema")
+    ap.add_argument("--preguntas", default=str(AQUI / "preguntas.yaml"),
+                    help="archivo de preguntas (p. ej. evals/preguntas_acciones.yaml, contra mock-a)")
+    ap.add_argument("--token-url", default=os.environ.get("EVAL_TOKEN_URL"),
+                    help="por defecto, el `token_url` del archivo de preguntas")
+    ap.add_argument("--origen", default=os.environ.get("EVAL_ORIGEN"),
+                    help="Origin que se envía; debe estar en origenes_permitidos del sistema (por defecto, el del archivo)")
     ap.add_argument("--modelo", default=os.environ.get("ASISTENTE_MODELO_DEFAULT"),
                     help="nombre del modelo del asistente (solo etiqueta y tarifa; por defecto ASISTENTE_MODELO_DEFAULT)")
     ap.add_argument("--solo", help="ids separados por coma (p. ej. q02,q09)")
@@ -186,14 +193,17 @@ def main() -> int:
     if not args.modelo:
         ap.error("falta --modelo (o ASISTENTE_MODELO_DEFAULT)")
 
-    conjunto = yaml.safe_load((AQUI / "preguntas.yaml").read_text(encoding="utf-8"))
+    ruta = Path(args.preguntas)
+    conjunto = yaml.safe_load(ruta.read_text(encoding="utf-8"))
+    token_url = args.token_url or conjunto.get("token_url", "http://sistema-php:8000/asistente/token")
+    origen = args.origen or conjunto.get("origen", "http://localhost:8203")
     preguntas = conjunto["preguntas"]
     if args.solo:
         ids = set(args.solo.split(","))
         preguntas = [p for p in preguntas if p["id"] in ids]
     tarifa = (yaml.safe_load((AQUI / "precios.yaml").read_text(encoding="utf-8")) or {}).get(args.modelo)
 
-    cli = Cliente(args.asistente, args.token_url, args.origen, args.timeout)
+    cli = Cliente(args.asistente, token_url, origen, args.timeout)
     resultados = []
     for p in preguntas:
         try:
@@ -213,7 +223,8 @@ def main() -> int:
     fecha = ahora.strftime("%Y-%m-%d_%H%M")
     salida = Path(args.salida)
     salida.mkdir(parents=True, exist_ok=True)
-    base = salida / f"{args.modelo}_{fecha}"
+    sufijo = "" if ruta.name == "preguntas.yaml" else "_" + ruta.stem.removeprefix("preguntas_")
+    base = salida / f"{args.modelo}{sufijo}_{fecha}"
     base.with_suffix(".json").write_text(
         json.dumps({"modelo": args.modelo, "fecha": ahora.isoformat(timespec="seconds"), "nota": args.nota,
                     "resumen": resumen, "resultados": resultados}, ensure_ascii=False, indent=1), encoding="utf-8")
