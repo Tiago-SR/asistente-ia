@@ -473,6 +473,7 @@ Eventos: `delta` (texto), `tool` (qué está consultando, legible), `ui` (sugere
 | `ASISTENTE_MAX_OUTPUT_TOKENS` | `1500` | tope de salida |
 | `ASISTENTE_TIMEOUT_TURNO_S` | `120` | tope por turno |
 | `ASISTENTE_MAX_RESULTADO_KB` | `50` | truncado de resultados de tools |
+| `ASISTENTE_PURGA_INTERVALO_S` | `86400` | cada cuánto se purgan conversaciones vencidas (0 = desactivada) |
 | `ASISTENTE_ADMIN_TOKEN` | — | endpoints `/admin` |
 | `ASISTENTE_LOG_LEVEL` | `INFO` | logs estructurados |
 | `STT_PROVEEDOR` / `STT_BASE_URL` / `STT_MODELO` / `STT_API_KEY` | — | dictado (7.7); sin `STT_PROVEEDOR` queda deshabilitado |
@@ -692,10 +693,10 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - [x] `sistemas/registro.py` + validación del YAML
 - [x] `sistemas/auth.py` (RS256/EdDSA/HS256, `aud`, `exp`, tolerancia, rechazo de `none`)
 - [x] `sistemas/manifiesto.py` + `conector_http.py`
-- [~] `core/` (ports incl. `LLM`, agent, tools, events, prompts). Falta el test de arquitectura (`core/` no importa `api/`, `sistemas/` ni `store/`, 12.1)
+- [x] `core/` (ports incl. `LLM`, agent, tools, events, prompts) y test de arquitectura (`tests/test_arquitectura.py`: `core/` no importa `api/`, `sistemas/` ni `store/`)
 - [x] `core/llm/` formato neutro + adaptador `openai_compat` + tests de contrato de adaptador
 - [ ] Evals corridos contra el modelo elegido como línea base (no existe `evals/` todavía)
-- [~] `store/` modelos + migraciones hechos; `Repo.purgar` existe y está probado, pero **nada lo invoca en producción** (falta el cron/tarea de retención de 30 días)
+- [x] `store/` modelos + migraciones; purga de retención: `retencion.py` recorre los sistemas del registro con su `retencion_dias` al arrancar y cada `ASISTENTE_PURGA_INTERVALO_S` (86400; 0 = desactivada), desde el `lifespan`. Solo cubre sistemas habilitados y válidos
 - [x] `limits.py` (rate limit + cuotas)
 - [x] API `/v1/chat` (SSE), conversaciones, estado, `/salud`, `/admin/*`
 - [x] Tests: aislamiento sistemas/usuarios, JWT, solo lectura, manifiestos, conector, loop, límites, inyección

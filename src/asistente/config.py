@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     max_mensaje_chars: int = _env("ASISTENTE_MAX_MENSAJE_CHARS", 4000)
     heartbeat_s: float = _env("ASISTENTE_HEARTBEAT_S", 15.0)
 
+    # Purga de retención: cada cuántos segundos (0 = desactivada).
+    purga_intervalo_s: float = _env("ASISTENTE_PURGA_INTERVALO_S", 86400.0)
+
     # Voz (Fase 4). Sin STT_PROVEEDOR el dictado queda deshabilitado.
     stt_proveedor: str | None = _env("STT_PROVEEDOR", None)
     stt_base_url: str | None = _env("STT_BASE_URL", None)

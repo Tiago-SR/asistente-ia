@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from asistente.api import admin, chat, conversaciones, estado, voz, widget
 from asistente.api.cors import CorsSistemas
 from asistente.api.errores import ErrorApi, manejar_error_api
 from asistente.config import Settings
+from asistente.retencion import bucle_purga
 from asistente.servicios import Servicios, construir
 
 log = logging.getLogger(__name__)
@@ -27,9 +29,15 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
             app.state.servicios = construir(settings)
         else:
             app.state.servicios = servicios
+        purga = None
+        if propio and app.state.servicios.settings.purga_intervalo_s > 0:
+            svc = app.state.servicios
+            purga = asyncio.create_task(bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s))
         try:
             yield
         finally:
+            if purga:
+                purga.cancel()
             svc = app.state.servicios
             if propio and svc.cierre:
                 await svc.cierre()
