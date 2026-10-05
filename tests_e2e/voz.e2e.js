@@ -18,6 +18,8 @@ async (page) => {
     await p.setViewportSize({ width: 1280, height: 800 });
     await p.route("**/__voz.wav", async (r) => r.fulfill({ response: await r.fetch({ url: WAV_URL }) }));
     await p.addInitScript((modo) => {
+      // Este e2e prueba el STT del servidor: sin Web Speech el widget cae en él (ver voz-navegador.e2e.js para el otro camino).
+      window.SpeechRecognition = window.webkitSpeechRecognition = undefined;
       navigator.mediaDevices.getUserMedia = async () => {
         const ac = new AudioContext();
         const dest = ac.createMediaStreamDestination();

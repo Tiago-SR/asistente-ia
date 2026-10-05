@@ -17,7 +17,8 @@ Fuera de la suite pytest (`tests/`). Son funciones de Playwright que se ejecutan
 |---|---|---|
 | `widget.e2e.js` | sí | carga, streaming SSE, cifras de la tool, historial de la conversación actual tras recargar, aislamiento ana/beto (incluido `GET /v1/conversaciones/{id}` ajeno → 404), tabla Markdown y sanitizado de `<script>`, `onerror` y `javascript:` (SSE fabricado) |
 | `layout.e2e.js` | no (SSE fabricado) | vista completa a 1280 y 390 px: widget a todo el ancho, columna central centrada, entrada fija abajo, sin desborde horizontal, sin lateral/menú/elementos `fixed`, `modo`/`abierto` ignorados, nueva conversación, página sin avisos de PHP |
-| `voz.e2e.js` | sí (la respuesta) | dictado: botón de micrófono, grabación real con `MediaRecorder` sobre un micrófono simulado, transcripción con whisper, el campo se rellena sin enviar, el texto dictado se envía y trae la cifra de la tool (660,5), y el aviso de "sin texto" con audio en silencio |
+| `voz-navegador.e2e.js` | no (todo simulado) | dictado con `SpeechRecognition` (parcial, final al campo sin enviar, errores de red y silencio), respuesta hablada con `speechSynthesis` (botón por mensaje, lectura automática por oraciones, preferencia recordada, silenciar al dictar, voz es-ES de respaldo) y `voz-motor="servidor"`. Simula las APIs de voz: no juzga su calidad (para eso, `herramientas/probar_audio`) |
+| `voz.e2e.js` | sí (la respuesta) | dictado con el STT del **servidor** (desactiva Web Speech): botón de micrófono, grabación real con `MediaRecorder` sobre un micrófono simulado, transcripción con whisper, el campo se rellena sin enviar, el texto dictado se envía y trae la cifra de la tool (660,5), y el aviso de "sin texto" con audio en silencio |
 
 ## Voz (`voz.e2e.js`)
 

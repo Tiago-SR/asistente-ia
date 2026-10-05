@@ -1,7 +1,7 @@
 # PLAN — Asistente conversacional multi-sistema (MVP)
 
 > Repositorio: `~/dev/asistente-mvp`
-> Estado: **plan, sin implementar**. Nada de este documento está construido todavía.
+> Estado (2026-10-05): Fases 0, 1 y 2 completas (servicio de texto, solo lectura, widget, kit de integración y referencia PHP). Fase 4 (voz) en curso: el widget dicta y lee las respuestas con la voz del navegador (decisión 2026-10-05); pendiente el modo manos libres («Jarvis»). Fase 3 (primer sistema real) y el despliegue en el VPS nuevo, en espera. El kit de despliegue (`deploy/`) y el CI ya están listos.
 > Origen: empezó como un módulo para STMGIS; se reorientó a un **servicio independiente** que se conecta a N sistemas externos. El primer consumidor previsto es SGAgro (PHP / CodeIgniter 4), del que **no se asume nada** más allá de que puede exponer endpoints HTTP.
 > Inspiración: asistente de voz tipo "KAI" (co-CEO con IA), adaptado a datos de sistemas de gestión.
 
@@ -411,7 +411,7 @@ asistente-mvp/
 | `GET` | `/v1/conversaciones/{id}` | token de usuario | Mensajes (solo texto visible) |
 | `DELETE` | `/v1/conversaciones/{id}` | token de usuario | Borrado definitivo |
 | `GET` | `/v1/estado` | token de usuario | `{habilitado, nombre_sistema, voz: {dictado, respuesta}}` para mostrar/ocultar el widget y sus botones de voz |
-| `POST` | `/v1/voz/transcribir` | token de usuario | *(Fase 4, pendiente)* Audio → texto; ver 7.7 |
+| `POST` | `/v1/voz/transcribir` | token de usuario | Audio → texto (dictado); ver 7.7 |
 | `GET` | `/widget.js` | pública | Bundle del widget (con cache y versión) |
 | `GET` | `/salud` | pública | Healthcheck del contenedor (BD, config cargada) |
 | `POST` | `/admin/recargar` | token admin (env) + red interna | Recarga `sistemas.yaml` y manifiestos |
@@ -486,11 +486,12 @@ Modelo económico para tareas simples (títulos de conversación, clasificación
 
 - **Independiente del LLM.** El agente solo ve texto: el audio se convierte antes y después. Cambiar de LLM no afecta a la voz, y no se sondea al modelo para saber si "escucha".
 - **Puertos `STT` y `TTS`** en `core/ports.py`, con adaptadores en `core/voz/` (mismo patrón que el LLM). El primer adaptador, `openai_compat`, habla con cualquier `/v1/audio/transcriptions`: un servidor Whisper local (contenedor opcional, perfil `voz`, sin sumar dependencias pesadas a la imagen del asistente) o un proveedor remoto; solo cambia `STT_BASE_URL`.
-- **Whisper local, primer uso:** `docker compose --profile voz up -d whisper` y, una sola vez, descargar el modelo al volumen `whisper-cache`: `curl -X POST localhost:8300/v1/models/<STT_MODELO>` (`PRELOAD_MODELS` no lo descargó en las pruebas). Sin el modelo, Whisper da 404 al transcribir; por eso `voz.dictado` exige que `STT_MODELO` figure en `/models`. El locale del token (`es-UY`) se reduce al código base (`es`) antes de enviarlo.
-- **Capacidades:** `/v1/estado` informa `voz.dictado` (hay adaptador STT configurado y responde) y `voz.respuesta` (TTS, pendiente). El widget muestra cada botón solo si su capacidad está activa.
-- **Dictado:** el widget graba con `MediaRecorder`, envía el audio a `POST /v1/voz/transcribir` (mismo token y verificación de origen) y **rellena el campo de texto**; el usuario revisa y envía. Sin envío automático.
+- **Camino principal: voz del navegador (Web Speech), decidido el 2026-10-05.** El widget dicta con `SpeechRecognition` y lee con `speechSynthesis`, sin pasar por el servidor (en Chrome, el audio del dictado lo procesa Google: aceptado por ahora). Lo que sigue de esta sección describe el camino por servidor, que queda como **alternativa** (`voz-motor="servidor"`) y respaldo si el navegador no tiene Web Speech.
+- **Whisper local (speaches): descartado como STT** (el modelo `small` transcribe mal el vocabulario agrícola). El servicio sigue en el compose, opcional (perfil `voz`), solo como referencia y para el banco de pruebas. Notas de uso: `docker compose --profile voz up -d whisper` y, una sola vez, descargar el modelo al volumen `whisper-cache`: `curl -X POST localhost:8300/v1/models/<STT_MODELO>` (`PRELOAD_MODELS` no lo descargó en las pruebas). Sin el modelo, Whisper da 404 al transcribir; por eso `voz.dictado` exige que `STT_MODELO` figure en `/models`. El locale del token (`es-UY`) se reduce al código base (`es`) antes de enviarlo.
+- **Capacidades:** `/v1/estado` informa `voz.dictado` (hay adaptador STT del **servidor** configurado y responde) y `voz.respuesta` (TTS del servidor, no existe: siempre `false`). El dictado y la lectura con la voz del navegador no dependen de `/v1/estado`: el widget los habilita según lo que ofrezca el navegador.
+- **Dictado:** con el navegador, `SpeechRecognition` (texto parcial y final al campo). Con el servidor, el widget graba con `MediaRecorder`, envía el audio a `POST /v1/voz/transcribir` (mismo token y verificación de origen). En ambos casos **rellena el campo de texto**; el usuario revisa y envía. Sin envío automático.
 - **Privacidad:** el audio no se guarda; solo se registra la duración. Topes de tamaño y duración, tipos permitidos y rate limit por usuario.
-- **Respuesta por audio (TTS):** segundo paso, con botón por mensaje.
+- **Respuesta por audio (TTS):** hecha del lado del cliente con `speechSynthesis` (botón por mensaje, interruptor de lectura automática, lectura por oraciones). Un TTS del servidor (`POST /v1/voz/sintetizar`, puerto `TTS`) **no existe** y solo se construye si hace falta un respaldo remoto (cliente que no pueda usar Google, o voz más natural).
 
 ---
 
@@ -584,9 +585,16 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - Set de evaluación propio del sistema (sección 12.2), en un entorno de pruebas con datos no productivos.
 - **Hito:** verificador en verde + evaluación aceptable en el entorno de pruebas del sistema.
 
+### Despliegue en el VPS nuevo — EN ESPERA
+> Aplazado (2026-10-04). El kit está listo y probado en local; falta ejecutarlo en el VPS.
+
+- Kit: `deploy/VPS.md` (paso a paso), `deploy/deploy.sh` (build etiquetado, espera de salud, rollback con bajada de migraciones), `deploy/backup.sh`, ejemplos de Caddy y nginx, composes por entorno y CI (tests con Postgres, PHP, imagen prod).
+- **Hito:** stack arriba detrás del proxy con TLS, `/admin` y `/docs` cerrados, SSE sin buffering y el widget probado contra el dominio real (12.3).
+
 ### Fase 4 — Voz y experiencia KAI (≈ 1–2 semanas)
 - A. Pipeline por piezas (STT → agente → TTS) en el mismo servicio; B. framework en tiempo real (LiveKit Agents / Pipecat) como componente aparte que reutiliza `core/`; C. plataforma gestionada.
 - Recomendación inicial: A para validar, B si latencia/interrupciones lo exigen.
+- **Estado (2026-10-05):** hecho el dictado y la respuesta hablada con la voz del navegador (mejores que Whisper `small` y Kokoro en la prueba manual); el audio del dictado va a Google en Chrome (aceptado por ahora). Hay un modelo de LLM elegido. **Falta:** probar a mano en Chrome real, el modo manos libres («Jarvis», con interrupción por voz) y, opcionalmente, un proveedor remoto de respaldo (`PROVEEDORES_VOZ.md`). Un STT compatible con `/v1/audio/*` entra cambiando `STT_BASE_URL`/`STT_MODELO`; si no, se escribe un adaptador en `core/voz/`.
 
 ### Fase 5 — Acciones con confirmación
 - Habilitar tools `efecto: escritura` por sistema y por tool.
@@ -625,6 +633,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 
 ## 13. Despliegue, operación y costos
 
+- **Kit y CI:** `deploy/` (guía, `deploy.sh` con rollback, `backup.sh`, Caddy/nginx de ejemplo) y `.github/workflows/ci.yml` (tests con Postgres, PHPUnit + verificador contra la referencia PHP, build y humo de la imagen prod). Los backups quedan en `backups/` del propio VPS por ahora (sin copia externa).
 - **Contenedores:** `asistente` (FastAPI/uvicorn) + `postgres`. En desarrollo, además, `sistema-mock`. Configuración por variables de entorno y `sistemas.yaml` montado como volumen de solo lectura.
 - **Exposición:** detrás de un proxy inverso con TLS, en un dominio propio (p. ej. `asistente.<dominio>`). Solo `/v1/*`, `/widget.js` y `/salud` públicos; `/admin/*` solo desde red interna.
 - **Escalado:** stateless salvo Postgres (conversaciones, contadores) → se pueden levantar varias réplicas. Si el rate limit en Postgres se vuelve cuello de botella, pasar a Redis.
@@ -657,14 +666,14 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 ## 15. Preguntas abiertas
 
 1. **Retención:** ¿cuántos días por defecto y se guardan los `tool_result` completos o solo el texto final? (propuesta: 30 días, truncar resultados).
-2. **Privacidad y consentimiento:** ¿quién informa a los clientes de cada sistema y cómo se habilita por cliente? ¿Algún cliente exige que los datos no salgan a un LLM externo?
-3. **Proveedor y modelo de producción:** ¿cuál (remoto de pago, autoalojado, otro)? Se decide con los evals (12.2), costo y privacidad. Para pruebas: ¿qué modelo gratuito/local (Ollama, tier gratis de algún proveedor)?
+2. **Privacidad y consentimiento:** ¿quién informa a los clientes de cada sistema y cómo se habilita por cliente? ¿Algún cliente exige que los datos no salgan a un LLM externo? *(Voz: se aceptó, por ahora, que el audio del dictado vaya a Google en Chrome; un cliente que no pueda usa `voz-motor="servidor"`. Falta decidir cómo se informa.)*
+3. **Proveedor y modelo de producción:** *(el modelo de LLM a usar ya está elegido; falta registrar cuál y correr los evals 12.2 como línea base.)* Pregunta original: ¿cuál (remoto de pago, autoalojado, otro)? Se decide con los evals (12.2), costo y privacidad. Para pruebas: ¿qué modelo gratuito/local (Ollama, tier gratis de algún proveedor)?
 3b. **API key y facturación:** si el proveedor es de pago, ¿cuenta del equipo? ¿se factura el uso a cada sistema según el costo medido?
 4. **Manifiesto por usuario:** ¿basta un manifiesto global por sistema (permisos aplicados al ejecutar) o algunos sistemas necesitarán ocultar tools según el rol? (propuesta MVP: global).
 5. **Algoritmo de firma:** ¿se exige asimétrico (RS256/EdDSA) o se acepta HS256 para sistemas legados?
-6. **Dónde se hospeda el contenedor** (VPS propio, nube) y quién lo opera.
+6. **Dónde se hospeda el contenedor:** en un VPS con Docker (hay uno de prueba; el nuevo está pendiente). Falta definir quién lo opera.
 7. **Idioma/regionalización:** ¿solo español? ¿`locale` por usuario o por sistema?
-8. **Voz (fase 4):** ¿opción A, B o C? ¿presupuesto por minuto de audio?
+8. **Voz (fase 4):** *(resuelto en parte)* opción A, con la voz del navegador como camino principal ($0 por minuto de audio). Abierto: si el modo manos libres justifica pasar a B (tiempo real) y si hace falta un proveedor remoto de respaldo.
 9. **Acciones (fase 5):** ¿cuáles valen la pena y quién las autoriza en cada sistema?
 
 ---
@@ -674,29 +683,29 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 **Fase 0**
 - [x] `contrato/CONTRATO.md`, `schemas/`, `openapi.yaml`
 - [x] Sistema mock con datos ficticios (`ejemplos/sistema-mock/`, dos instancias en docker-compose)
-- [x] Esqueleto FastAPI, Dockerfile, docker-compose, Alembic, CI
+- [x] Esqueleto FastAPI, Dockerfile, docker-compose, Alembic, CI (ampliado: tests con Postgres, PHP e imagen prod)
 - [x] `.env.example` y `config/sistemas.example.yaml` sin secretos
 - [x] Verificador básico (`herramientas/verificar_sistema.py`): 21/21 contra ambos mocks
 - [~] Decisiones: retención 30 días, manifiesto global, HS256 solo legados, modelo de pruebas local/gratuito. Pendiente: privacidad por cliente (pregunta 2) y API key si se usa proveedor de pago
 
 **Fase 1**
-- [ ] `sistemas/registro.py` + validación del YAML
-- [ ] `sistemas/auth.py` (RS256/EdDSA/HS256, `aud`, `exp`, tolerancia, rechazo de `none`)
-- [ ] `sistemas/manifiesto.py` + `conector_http.py`
-- [ ] `core/` (ports incl. `LLM`, agent, tools, events, prompts) + test de dependencias
-- [ ] `core/llm/` formato neutro + adaptador `openai_compat` + tests de contrato de adaptador
-- [ ] Evals corridos contra el modelo de pruebas (gratuito/local) como línea base
-- [ ] `store/` modelos + migraciones + purga
-- [ ] `limits.py` (rate limit + cuotas)
-- [ ] API `/v1/chat` (SSE), conversaciones, estado, `/salud`, `/admin/*`
-- [ ] Tests: aislamiento sistemas/usuarios, JWT, solo lectura, manifiestos, conector, loop, límites, inyección
+- [x] `sistemas/registro.py` + validación del YAML
+- [x] `sistemas/auth.py` (RS256/EdDSA/HS256, `aud`, `exp`, tolerancia, rechazo de `none`)
+- [x] `sistemas/manifiesto.py` + `conector_http.py`
+- [~] `core/` (ports incl. `LLM`, agent, tools, events, prompts). Falta el test de arquitectura (`core/` no importa `api/`, `sistemas/` ni `store/`, 12.1)
+- [x] `core/llm/` formato neutro + adaptador `openai_compat` + tests de contrato de adaptador
+- [ ] Evals corridos contra el modelo elegido como línea base (no existe `evals/` todavía)
+- [~] `store/` modelos + migraciones hechos; `Repo.purgar` existe y está probado, pero **nada lo invoca en producción** (falta el cron/tarea de retención de 30 días)
+- [x] `limits.py` (rate limit + cuotas)
+- [x] API `/v1/chat` (SSE), conversaciones, estado, `/salud`, `/admin/*`
+- [x] Tests: aislamiento sistemas/usuarios, JWT, solo lectura, manifiestos, conector, loop, límites, inyección
 
 **Fase 2**
 - [x] Web Component (`/widget.js`) con token, SSE, Markdown sanitizado, historial, eventos `ui` (versión inicial con burbuja flotante)
 - [x] Rediseñar el widget como **vista de chat a pantalla completa** (único modo): columna central, entrada fija, solo conversación actual (historial oculto); eliminar modos `flotante`/`incrustado` y atributos `modo`/`abierto`; actualizar README, mock y tests
 - [x] Implementación de referencia PHP (`ejemplos/sistema-php/`, router mínimo portable a CI4; verificador en verde con HS256 y RS256, incluida la prueba de escritura → 403; ana y beto de punta a punta con el asistente: datos y conversaciones separados, ids ajenos → 404; página con el widget probada en navegador con LLM real, ver `tests_e2e/`)
-- [ ] Guía de diseño de tools
-- [ ] Verificador de conformidad completo
+- [x] Guía de diseño de tools (`contrato/GUIA_TOOLS.md`)
+- [x] Verificador de conformidad completo (43 comprobaciones; en CI contra los mocks y la referencia PHP)
 
 **Fase 3 — EN ESPERA** (aún no se dispone del sistema SGAgro)
 - [ ] Kit entregado al primer sistema real
@@ -708,7 +717,12 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 
 **Fase 4 — Voz (opción A: pipeline por piezas)**
 - [x] Puerto `STT`, adaptador `openai_compat`, `SttFalso`, configuración y capacidad `voz` en `/v1/estado`
-- [ ] Endpoint `POST /v1/voz/transcribir` (límites de tamaño/duración, tipos, rate limit, sin guardar audio)
-- [ ] Servicio Whisper local opcional en docker-compose (perfil `voz`)
-- [ ] Widget: botón de micrófono (`MediaRecorder`) que rellena el campo; visible solo con `voz.dictado`
-- [ ] Puerto `TTS`, adaptadores y `POST /v1/voz/sintetizar`; botón de escuchar por mensaje
+- [x] Endpoint `POST /v1/voz/transcribir` (límites de tamaño/duración, tipos, rate limit, sin guardar audio)
+- [x] Servicio Whisper local opcional en docker-compose (perfil `voz`) — hecho, pero **descartado como STT de producción por calidad**
+- [x] Widget: botón de micrófono (`MediaRecorder`) que rellena el campo; visible solo con `voz.dictado` (e2e en `tests_e2e/voz.e2e.js`)
+- [x] **Decisión (2026-10-05):** voz del navegador (Web Speech) como camino principal. En pruebas manuales, el `SpeechRecognition` transcribe mucho mejor que Whisper `small` y la voz es-ES de `speechSynthesis` suena mejor que Kokoro local. Se acepta, por ahora, que en Chrome el audio del dictado se procese en Google (pregunta abierta 2: si un cliente no puede, usa `voz-motor="servidor"`). Detalle en `PROVEEDORES_VOZ.md`
+- [x] Widget: dictado con `SpeechRecognition` (texto parcial, final al campo sin enviar, errores de red/silencio/permiso); el STT del servidor queda como alternativa (`voz-motor`) y como respaldo si el navegador no tiene Web Speech
+- [x] Widget: respuesta hablada con `speechSynthesis` (botón de escuchar por mensaje, interruptor de lectura automática recordado en la pestaña, lectura por oraciones mientras llega el texto, se calla al dictar o enviar, voz `idioma` → es-ES → cualquiera en español); e2e `voz-navegador.e2e.js` y tests de las utilidades de voz en `tests/test_widget.py`
+- [ ] Probar a mano en Chrome real: voces disponibles en es-UY/es-ES, lectura automática, dictado seguido de lectura, comportamiento en móvil y en Safari/Edge
+- [ ] **Modo "Jarvis"** (manos libres): conversación continua (dictado → envío automático → respuesta hablada → vuelve a escuchar), con detección de voz por energía en el cliente para interrumpir la voz del asistente (validada en `herramientas/probar_audio`) y cuidado con el eco de los parlantes. Decidir el alcance (¿envío automático al terminar de hablar?, ¿palabra de activación?)
+- [ ] **Respaldo remoto (opcional):** elegir un STT/TTS de proveedor (ElevenLabs, OpenAI, Deepgram… ver `PROVEEDORES_VOZ.md`) para los clientes que no puedan enviar audio a Google o para una voz más natural; el STT ya entra por `STT_*`, el TTS requeriría el puerto `TTS` y `POST /v1/voz/sintetizar`

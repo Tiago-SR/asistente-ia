@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -33,7 +34,16 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
             if propio and svc.cierre:
                 await svc.cierre()
 
-    app = FastAPI(title="Asistente", version="0.1.0", lifespan=lifespan)
+    # /docs y /openapi.json solo con ASISTENTE_DOCS=1 (dev); en prod no se exponen.
+    docs = os.environ.get("ASISTENTE_DOCS") == "1"
+    app = FastAPI(
+        title="Asistente",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if docs else None,
+    )
     app.state.servicios = servicios
     app.add_exception_handler(ErrorApi, manejar_error_api)
     app.add_middleware(CorsSistemas)

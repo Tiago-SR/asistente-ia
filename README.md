@@ -11,7 +11,7 @@ Principios del MVP:
 - Cifras siempre trazables a una tool (nada inventado).
 - Proveedor de LLM intercambiable (formato neutro + adaptadores).
 
-> Estado: **Fase 2 en curso** (widget, verificador de conformidad y guía de diseño de tools listos; falta la referencia PHP). Fase 1 completa (asistente de texto, solo lectura). Hay registro de sistemas, auth JWT por sistema, conector HTTP, loop del agente con adaptador OpenAI-compatible, límites, auditoría y API `/v1/*` con SSE, con tests de aislamiento entre sistemas y usuarios (`tests/test_aislamiento.py`). El diseño completo, las fases y el checklist están en [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md).
+> Estado: Fases 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools y referencia PHP). **Fase 4 (voz) en curso**: el widget dicta y habla con la voz del navegador (Web Speech); falta el modo manos libres («Jarvis») y decidir el proveedor remoto de respaldo. Despliegue en el VPS nuevo, en espera. Hay registro de sistemas, auth JWT por sistema, conector HTTP, loop del agente con adaptador OpenAI-compatible, límites, auditoría y API `/v1/*` con SSE, con tests de aislamiento entre sistemas y usuarios (`tests/test_aislamiento.py`). El diseño completo, las fases y el checklist están en [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md).
 
 ## Stack
 
@@ -41,7 +41,7 @@ curl localhost:8100/salud
 # {"ok":true}
 ```
 
-La documentación interactiva de la API está en <http://localhost:8100/docs>.
+La documentación interactiva de la API está en <http://localhost:8100/docs> (solo dev: en prod `/docs` está apagado).
 
 ### LLM local
 
@@ -76,7 +76,7 @@ docker compose -f docker-compose.dev.yml down                               # pa
 docker compose -f docker-compose.dev.yml down -v                            # parar y borrar la BD de desarrollo
 ```
 
-Postgres de desarrollo se publica solo en `127.0.0.1:5432` (usuario, contraseña y base: `asistente`).
+Postgres de desarrollo se publica solo en `127.0.0.1:5433` (usuario, contraseña y base: `asistente`).
 
 ### Cambiar dependencias
 
@@ -98,7 +98,7 @@ El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni bui
 <asistente-chat style="display:block;height:100vh" servidor="https://asistente.example.com" token-url="/asistente/token"></asistente-chat>
 ```
 
-Atributos opcionales: `titulo`, `placeholder`. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, `--asistente-ancho-lateral`, `--asistente-ancho-columna`, …) y avisa al anfitrión con los eventos `asistente:accion` (sugerencias `ui`) y `asistente:estado` (si no está disponible para el usuario, muestra un aviso en lugar del chat). El origen de la página debe estar en `origenes_permitidos` del sistema.
+Atributos opcionales: `titulo`, `placeholder`, `idioma` (voz, por defecto `es-UY`), `voz` (nombre de una voz del navegador) y `voz-motor` (`auto` | `navegador` | `servidor`). **Voz:** el widget dicta con el reconocimiento del navegador (en Chrome el audio se procesa en Google; `voz-motor="servidor"` lo evita usando el STT del asistente) y lee las respuestas con las voces del navegador (botón por mensaje e interruptor de lectura automática). Detalle en la sección 7.4 del contrato. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, `--asistente-ancho-lateral`, `--asistente-ancho-columna`, …) y avisa al anfitrión con los eventos `asistente:accion` (sugerencias `ui`) y `asistente:estado` (si no está disponible para el usuario, muestra un aviso en lugar del chat). El origen de la página debe estar en `origenes_permitidos` del sistema.
 
 Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL` apunta al asistente, por defecto `http://localhost:8100`). Registrá el mock en `config/sistemas.yaml` con su origen en `origenes_permitidos`, levantalo con `uvicorn app:app --app-dir ejemplos/sistema-mock --port 8201` y abrí <http://localhost:8201/?usuario=ana>.
 
@@ -108,6 +108,7 @@ Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL
 - [`contrato/GUIA_TOOLS.md`](contrato/GUIA_TOOLS.md): cómo diseñar las tools (elegirlas, describirlas, qué devolver, errores de negocio).
 - `ejemplos/sistema-mock/`: implementación de referencia con datos ficticios. `MOCK_DEFECTO=<nombre>` rompe una regla del contrato a propósito (lo usan los tests del verificador).
 - `ejemplos/sistema-php/`: implementación de referencia en PHP 8.2+ (router mínimo, portable a CodeIgniter 4), con tests PHPUnit y su [README](ejemplos/sistema-php/README.md). Servicio `sistema-php` en `docker-compose.dev.yml` (puerto 8203).
+- `herramientas/probar_audio/`: banco de pruebas de audio, independiente del servicio. `python3 herramientas/probar_audio/servidor.py` y abrir <http://127.0.0.1:8400> (Chrome o Edge). Prueba el micrófono con detección de voz por energía, la transcripción con su latencia, el TTS en streaming, la interrupción y un modo eco. También puede usar el reconocimiento y la síntesis de voz del propio navegador (sin clave) para compararlos. Usa por defecto el speaches local (`--profile voz`); para otro proveedor, `STT_BASE_URL`/`STT_MODELO`/`STT_API_KEY` y `TTS_*` (cualquier endpoint compatible con OpenAI). La cabecera de `servidor.py` lista todas las variables.
 - `herramientas/verificar_sistema.py`: verificador de conformidad; un sistema no se habilita en producción sin pasarlo. Los secretos se pasan por variables de entorno y no se imprimen:
 
 ```sh
@@ -122,15 +123,15 @@ Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md
 
 ## Producción
 
-Se usa `docker-compose.yml` (el compose por defecto, el que toma Dockge), que construye el target `prod` del `Dockerfile` (sin dependencias de desarrollo, usuario no-root, filesystem de solo lectura, Postgres sin puertos publicados).
+Guía completa para una VPS nueva (host, DNS, proxy con TLS, backups, rollback): [`deploy/VPS.md`](deploy/VPS.md). Resumen:
 
 ```sh
-cp .env.example .env           # completar valores reales, incluido POSTGRES_PASSWORD
+cp .env.example .env                                   # completar: POSTGRES_PASSWORD, ASISTENTE_ADMIN_TOKEN, LLM_*
 cp config/sistemas.example.yaml config/sistemas.yaml
-docker compose up -d --build
+deploy/deploy.sh                                       # build etiquetado + up + espera salud (backup previo si ya hay BD)
 ```
 
-Requiere un proxy inverso con TLS delante, con el buffering desactivado para SSE. Ver detalles en la sección 13 del plan.
+`docker-compose.yml` es la base (imagen `prod`: sin dependencias de desarrollo, no-root, solo lectura, Postgres sin puertos, logs rotados, Whisper opcional con `COMPOSE_PROFILES=voz`); `docker-compose.prod.yml` publica el puerto en loopback y `docker-compose.proxy-externo.yml` conecta a un Caddy en la red `web`. Dockge usa el `docker-compose.yml` y el `.env` del stack. Hace falta un proxy con TLS, sin buffering (SSE) y sin exponer `/admin` ni `/docs`: ejemplos en `deploy/Caddyfile.example` y `deploy/nginx.conf.example`. Un `.env` por host (no se versiona).
 
 ## Estructura
 
@@ -138,12 +139,16 @@ Requiere un proxy inverso con TLS delante, con el buffering desactivado para SSE
 Dockerfile               multi-stage: dev | prod
 docker-compose.yml       producción (por defecto, Dockge)
 docker-compose.dev.yml   desarrollo
+docker-compose.prod.yml  override: puerto en loopback (VPS con proxy en el host)
+deploy/                  VPS.md, deploy.sh, backup.sh, Caddyfile y nginx de ejemplo
 src/asistente/           código del servicio
 tests/                   tests
 config/                  registro de sistemas (sistemas.yaml)
 prompts/                 prompt base y de dominio
 contrato/                contrato v1, schemas, OpenAPI y guía de tools
 ejemplos/sistema-mock/   sistema de referencia con datos ficticios
+ejemplos/sistema-php/    referencia PHP del contrato
+tests_e2e/               e2e del widget en navegador (Playwright MCP)
 herramientas/            verificador de conformidad
 PLAN_ASISTENTE.md        plan completo del proyecto
 ```

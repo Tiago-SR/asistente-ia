@@ -259,6 +259,9 @@ El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessi
 | `servidor` | URL base del asistente. |
 | `titulo` | Título de la barra superior. Por defecto, "Asistente · {nombre del sistema}". |
 | `placeholder` | Texto del campo de entrada. |
+| `idioma` | Idioma de la voz (BCP 47). Por defecto `es-UY`; si el sistema no tiene voces de ese idioma, el widget usa `es-ES` o la primera en español disponible. |
+| `voz` | Nombre exacto de una voz del navegador, para forzarla. |
+| `voz-motor` | `auto` (por defecto), `navegador` o `servidor`: qué usa el dictado (ver [7.4](#74-voz-opcional)). |
 
 Colores, tipografía y anchos se personalizan con variables CSS definidas en el elemento o en un ancestro: `--asistente-color`, `--asistente-color-texto`, `--asistente-fondo`, `--asistente-texto`, `--asistente-borde`, `--asistente-fuente`, `--asistente-radio`, `--asistente-ancho-lateral` (reservada para cuando se active el historial) y `--asistente-ancho-columna`.
 
@@ -269,9 +272,20 @@ El widget emite eventos DOM (`CustomEvent`, que burbujean y atraviesan el Shadow
 | `asistente:accion` | `{ tipo, url, etiqueta }` | Una tool devolvió una sugerencia `ui` (ver sección 3). Si el sistema llama a `preventDefault()`, el widget no muestra su botón y el sistema decide qué hacer (navegar, abrir un mapa, filtrar una tabla). Por defecto, solo se muestra un botón para URLs relativas del mismo origen. |
 | `asistente:estado` | `{ habilitado }` | Al decidir si el asistente está disponible. Si no lo está (`403` del token o sistema deshabilitado), el widget muestra un aviso en lugar del chat. |
 
-### 7.4 Dictado por voz (opcional)
+### 7.4 Voz (opcional)
 
-Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), el widget muestra un botón de micrófono junto al campo de texto. Sin esa capacidad, el botón no aparece y el widget se comporta como siempre.
+#### Voz del navegador (camino por defecto)
+
+El widget usa la **Web Speech API** del navegador, sin configurar nada en el servidor:
+
+- **Dictado:** `SpeechRecognition`. El botón de micrófono aparece si el navegador la ofrece (Chrome, Edge, Safari). Muestra el texto parcial mientras se habla y deja el final **en el campo de entrada, sin enviarlo**. Lo procesa el servicio de voz del propio navegador: **en Chrome, el audio se envía a Google**. Un sistema cuyos usuarios no deban enviar audio a un tercero debe fijar `voz-motor="servidor"` (ver abajo).
+- **Respuesta hablada:** `speechSynthesis`, con las voces instaladas en el dispositivo del usuario (cada usuario oye lo que su sistema tenga). Cada respuesta del asistente trae un botón para escucharla, y la barra superior tiene un interruptor para leerlas automáticamente (se recuerda en la pestaña). La lectura empieza por oraciones completas, antes de que termine la respuesta; se quitan el Markdown, los enlaces y el código. Dictar, enviar un mensaje o apagar el interruptor la detienen.
+- **Voz elegida:** la de `voz` si existe; si no, la del `idioma` pedido; si no, `es-ES`; si no, cualquiera en español. Sin ninguna voz en español, el navegador usa la suya por defecto.
+- **Sin garantías de servicio:** son APIs del navegador; su calidad, disponibilidad y versión no las controla el asistente.
+
+#### STT del servidor (alternativa)
+
+Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), el widget puede dictar con él. Es lo que se usa si el navegador no tiene `SpeechRecognition`, o siempre con `voz-motor="servidor"` (el audio no va a Google, sino al proveedor configurado en el asistente). Con `voz-motor="navegador"` solo se usa el del navegador. Sin ninguna de las dos opciones, el botón no aparece y el widget se comporta como siempre.
 
 - El usuario graba (`MediaRecorder`, con permiso del navegador); al detener, el widget envía el audio a `POST /v1/voz/transcribir` (mismo token y verificación de origen) y **pone el texto en el campo de entrada, sin enviarlo**: el usuario lo revisa y lo envía. La grabación se corta sola al llegar a `voz.max_audio_s`.
 - El navegador requiere un contexto seguro (HTTPS o `localhost`) para usar el micrófono; el sistema anfitrión debe servir la página así y no bloquear `microphone` en su `Permissions-Policy` (si la página va en un `<iframe>`, necesita `allow="microphone"`).

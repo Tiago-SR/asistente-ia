@@ -1,0 +1,19 @@
+# Caddy con TLS automático (Let's Encrypt). Dos formas de usarlo:
+#  a) Caddy en el host:  asistente en 127.0.0.1:8000 (docker-compose.prod.yml) -> reverse_proxy 127.0.0.1:8000
+#  b) Caddy en otro stack de compose, red `web`: docker-compose.proxy-externo.yml -> reverse_proxy asistente:8000
+asistente.midominio.com {
+	# /admin y la documentación no se exponen. Operación por el host (127.0.0.1:8000) o ssh.
+	@cerrado path /admin* /docs* /openapi.json
+	respond @cerrado 404
+
+	request_body {
+		max_size 4MB   # dictado: audio crudo
+	}
+
+	reverse_proxy 127.0.0.1:8000 {
+		flush_interval -1   # SSE: sin buffering
+		transport http {
+			read_timeout 1h
+		}
+	}
+}

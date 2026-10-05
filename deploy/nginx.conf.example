@@ -1,7 +1,16 @@
-# /etc/nginx/sites-available/asistente  (TLS p. ej. con certbot --nginx)
+# /etc/nginx/sites-available/asistente  (usa docker-compose.prod.yml: el servicio escucha en 127.0.0.1:8000)
+# 1) Con solo el bloque :80, `certbot --nginx -d asistente.midominio.com` agrega el TLS y la redirección.
+# 2) Públicos: /v1/*, /widget.js y /salud. /admin y la documentación quedan cerrados desde fuera.
 server {
     listen 80;
     server_name asistente.midominio.com;
+
+    client_max_body_size 4m;   # dictado: audio crudo
+
+    # Operación solo por el host (ssh + curl http://127.0.0.1:8000/admin/...) o una red interna.
+    location ~ ^/(admin|docs|openapi\.json) {
+        return 404;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -10,10 +19,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
         # SSE: sin buffering
         proxy_buffering off;
+        proxy_cache off;
         proxy_read_timeout 3600s;
-        # dictado: audio crudo
-        client_max_body_size 4m;
     }
 }

@@ -15,6 +15,13 @@
  *   servidor    URL base del asistente. Por defecto, el origen desde el que se cargó este script.
  *   titulo      título de la barra superior. Por defecto, el nombre del sistema.
  *   placeholder texto del campo de entrada.
+ *   idioma      idioma de la voz (BCP 47). Por defecto "es-UY"; sin voces de ese idioma se usa es-ES o la
+ *               primera en español que tenga el sistema.
+ *   voz         nombre exacto de una voz del navegador (speechSynthesis) para forzarla.
+ *   voz-motor   "auto" (por defecto), "navegador" o "servidor". El dictado usa el reconocimiento de voz del
+ *               navegador (Web Speech; en Chrome el audio lo procesa el servicio de Google) y, si no existe,
+ *               el STT del asistente (POST /v1/voz/transcribir). "servidor" evita enviar el audio a Google.
+ *               La respuesta hablada usa siempre las voces del navegador (speechSynthesis).
  *
  * Personalización por variables CSS (se heredan a través del Shadow DOM):
  *   --asistente-color, --asistente-color-texto, --asistente-fondo, --asistente-texto,
@@ -57,6 +64,11 @@
     dictar: "Dictar",
     detener: "Detener grabación",
     transcribiendo: "Transcribiendo…",
+    escuchando: "Escuchando…",
+    escuchar: "Escuchar la respuesta",
+    callar: "Dejar de escuchar",
+    leerAuto: "Leer las respuestas en voz alta",
+    noLeerAuto: "Dejar de leer en voz alta",
     pie: "Las respuestas pueden contener errores; verificá los datos importantes.",
   };
   const ERRORES = {
@@ -82,6 +94,8 @@
     mic_denegado: "No hay permiso para usar el micrófono.",
     mic_no_disponible: "No se encontró un micrófono.",
     sin_texto: "No se entendió nada. Probá de nuevo.",
+    reco_red: "No se pudo contactar el servicio de reconocimiento de voz del navegador.",
+    reco_error: "No se pudo reconocer la voz. Probá de nuevo.",
   };
   // Formatos que acepta POST /v1/voz/transcribir, en orden de preferencia.
   const TIPOS_GRABACION = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
@@ -89,6 +103,44 @@
 
   function puedeGrabar() {
     return !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  }
+  // Voz del navegador (Web Speech API). Se consulta en cada uso: la disponibilidad puede cambiar (voces que cargan tarde).
+  const reconocimiento = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  function puedeHablar() {
+    return "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance === "function";
+  }
+  const CLAVE_LEER = "asistente:leer-en-voz-alta";
+
+  // Markdown -> texto para leer en voz alta (sin símbolos, enlaces, código ni separadores de tabla).
+  function textoParaVoz(md) {
+    return String(md)
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/^\s*\|?[\s:|-]{3,}\|?\s*$/gm, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/(\w)_(\w)/g, "$1 $2")
+      .replace(/[`*_#>]+/g, "")
+      .replace(/^\s*[-+]\s+/gm, "")
+      .replace(/\s*\|\s*/g, ", ")
+      .replace(/^, | ?,\s*$/gm, "")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{2,}/g, "\n")
+      .trim();
+  }
+  // Índice (exclusivo) del último final de oración completo de `texto` a partir de `desde`; `desde` si no hay.
+  function ultimoCorte(texto, desde) {
+    const re = /[.!?…]+["')\]]?(?=\s)|\n/g;
+    re.lastIndex = desde;
+    let corte = desde, m;
+    while ((m = re.exec(texto))) corte = m.index + m[0].length;
+    return corte;
+  }
+  // Voz por nombre; si no, la del idioma pedido; si no, es-ES; si no, cualquiera en español.
+  function elegirVoz(voces, idioma, nombre) {
+    if (nombre) { const v = voces.find((x) => x.name === nombre); if (v) return v; }
+    const norm = (l) => String(l || "").replace("_", "-").toLowerCase();
+    const pedido = norm(idioma), base = pedido.slice(0, 2);
+    const es = voces.filter((v) => norm(v.lang).startsWith(base));
+    return es.find((v) => norm(v.lang) === pedido) || es.find((v) => norm(v.lang) === "es-es") || es[0] || null;
   }
 
   // ───────────────────────── Markdown → nodos DOM (sin innerHTML) ─────────────────────────
@@ -238,10 +290,16 @@
     .principal { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .barra { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--b); }
     .barra h1 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .barra .menu, .barra .accion { background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
+    .barra .menu, .barra .accion, .barra .altavoz { background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
     .barra .menu { display: none; }
-    .barra .menu:hover, .barra .accion:hover { background: var(--suave); }
+    .barra .menu:hover, .barra .accion:hover, .barra .altavoz:hover { background: var(--suave); }
     .barra svg { width: 20px; height: 20px; }
+    .barra .altavoz.activa { color: var(--c); }
+    .barra .altavoz[hidden] { display: none; }
+    .voz-acciones { margin-top: 6px; }
+    .escuchar { width: 28px; height: 28px; border: 1px solid var(--b); border-radius: 50%; background: transparent; color: var(--apagado); cursor: pointer; display: inline-grid; place-items: center; padding: 0; }
+    .escuchar:hover, .escuchar.hablando { color: var(--c); border-color: var(--c); }
+    .escuchar svg { width: 14px; height: 14px; }
 
     .scroll { flex: 1; overflow-y: auto; }
     .columna {
@@ -321,6 +379,7 @@
     enviar: "M12 19V5M5 12l7-7 7 7",
     mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
     parar: "M7 7h10v10H7z",
+    altavoz: "M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
   };
   function icono(nombre) {
     const ns = "http://www.w3.org/2000/svg";
@@ -346,6 +405,7 @@
 
   class AsistenteChat extends HTMLElement {
     static get observedAttributes() { return ["token-url", "servidor"]; }
+    static get _utiles() { return { textoParaVoz, ultimoCorte, elegirVoz }; }  // para los tests
 
     constructor() {
       super();
@@ -355,6 +415,10 @@
       this._abort = null;
       this._iniciado = false;
       this._nombreSistema = "";
+      this._dictadoServidor = false;
+      this._reco = null;
+      this._leerAuto = false;
+      this._leidoHasta = 0;
       this.attachShadow({ mode: "open" });
     }
 
@@ -370,6 +434,8 @@
     disconnectedCallback() {
       if (this._abort) this._abort.abort();
       this._detenerGrabacion(true);
+      this._detenerReco(true);
+      this._pararVoz();
     }
 
     attributeChangedCallback(nombre, viejo, nuevo) {
@@ -400,7 +466,12 @@
       menu.addEventListener("click", () => this._menu());
       const otra = el("button", { class: "accion", type: "button", title: TEXTOS.nueva, "aria-label": TEXTOS.nueva }, icono("nuevo"));
       otra.addEventListener("click", () => this._nueva());
-      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, otra]));
+      // lectura automática de las respuestas: visible solo si el navegador tiene síntesis de voz
+      this._altavoz = el("button", { class: "altavoz", type: "button", hidden: true }, icono("altavoz"));
+      this._altavoz.addEventListener("click", () => this._conmutarLeerAuto());
+      try { this._leerAuto = sessionStorage.getItem(CLAVE_LEER) === "1"; } catch { /* sin storage */ }
+      this._pintarAltavoz();
+      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._altavoz, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
       this._scroll = el("div", { class: "scroll" }, this._mensajes);
@@ -472,10 +543,11 @@
           this._nombreSistema = e.nombre_sistema || "";
           const voz = e.voz || {};
           this._maxAudioS = Number(voz.max_audio_s) > 0 ? Number(voz.max_audio_s) : 60;
-          this._mic.hidden = !(voz.dictado === true && puedeGrabar());
+          this._dictadoServidor = voz.dictado === true && puedeGrabar();
           if (!this.getAttribute("titulo") && this._nombreSistema) this._titulo.textContent = "Asistente · " + this._nombreSistema;
         }
       } catch { /* sin acceso: se muestra el aviso */ }
+      this._actualizarVoz();
       this._raiz.classList.toggle("sin-acceso", !habilitado);
       this._raiz.hidden = false;
       if (habilitado) { this._cargarHistorial(); this._entrada.focus(); this._restaurar(); }
@@ -579,7 +651,7 @@
         this._convId = id; this._mensajes.replaceChildren(); this._mostrarBienvenida();
         for (const m of d.mensajes) {
           const b = this._burbuja(m.rol);
-          if (m.rol === "assistant") markdown(m.texto, b); else b.textContent = m.texto;
+          if (m.rol === "assistant") { markdown(m.texto, b); this._botonEscuchar(b, m.texto); } else b.textContent = m.texto;
         }
         this._recordar(); this._pintarHistorial(); this._menu(false); this._bajar();
       } catch {
@@ -589,7 +661,136 @@
 
     // — dictado: graba, transcribe y rellena el campo (sin enviar) —
     _conmutarDictado() {
-      if (this._grabador) this._detenerGrabacion(false); else this._iniciarGrabacion();
+      this._pararVoz();                                   // al dictar, el asistente se calla
+      if (this._reco) { this._detenerReco(false); return; }
+      if (this._grabador) { this._detenerGrabacion(false); return; }
+      if (this._motorDictado() === "navegador") this._iniciarReco(); else this._iniciarGrabacion();
+    }
+
+    // "navegador" | "servidor" | null según el atributo voz-motor y lo disponible.
+    _motorDictado() {
+      const pref = (this.getAttribute("voz-motor") || "auto").toLowerCase();
+      const navegador = !!reconocimiento(), servidor = this._dictadoServidor;
+      if (pref === "servidor") return servidor ? "servidor" : null;
+      if (pref === "navegador") return navegador ? "navegador" : null;
+      return navegador ? "navegador" : (servidor ? "servidor" : null);
+    }
+
+    _actualizarVoz() {
+      this._mic.hidden = !this._motorDictado();
+      this._altavoz.hidden = !puedeHablar();
+    }
+
+    _marcarMic(grabando) {
+      this._mic.classList.toggle("grabando", grabando);
+      const t = grabando ? TEXTOS.detener : TEXTOS.dictar;
+      this._mic.title = t; this._mic.setAttribute("aria-label", t);
+      this._mic.replaceChildren(icono(grabando ? "parar" : "mic"));
+    }
+
+    _anadirAlCampo(texto) {
+      const actual = this._entrada.value;
+      this._entrada.value = (actual && !/\s$/.test(actual) ? actual + " " : actual) + texto;
+      this._entrada.dispatchEvent(new Event("input"));
+      this._entrada.focus();
+    }
+
+    // Dictado con el reconocimiento de voz del navegador (Web Speech): sin servidor ni grabación propia.
+    _iniciarReco() {
+      const SR = reconocimiento();
+      if (!SR || this._ocupado) return;
+      this._avisarVoz("");
+      const r = new SR();
+      r.lang = this.getAttribute("idioma") || "es-UY";
+      r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      let final = "", fallo = false;
+      r.onstart = () => { this._marcarMic(true); this._avisarVoz(TEXTOS.escuchando); };
+      r.onresult = (e) => {
+        let parcial = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i];
+          if (res.isFinal) final += res[0].transcript; else parcial += res[0].transcript;
+        }
+        this._avisarVoz(parcial ? "… " + parcial : TEXTOS.escuchando);
+      };
+      r.onerror = (e) => {
+        fallo = true;
+        const codigo = { "not-allowed": "mic_denegado", "service-not-allowed": "mic_denegado", "audio-capture": "mic_no_disponible",
+          "network": "reco_red", "no-speech": "sin_texto" }[e.error];
+        if (e.error === "aborted") this._avisarVoz("");
+        else this._avisarVoz(ERRORES_VOZ[codigo] || ERRORES_VOZ.reco_error, true);
+      };
+      r.onend = () => {
+        if (this._reco === r) this._reco = null;
+        this._marcarMic(false);
+        if (fallo) return;
+        const texto = final.trim();
+        if (!texto) { this._avisarVoz(ERRORES_VOZ.sin_texto, true); return; }
+        this._anadirAlCampo(texto);
+        this._avisarVoz("");
+      };
+      this._reco = r;
+      try { r.start(); }
+      catch { this._reco = null; this._marcarMic(false); this._avisarVoz(ERRORES_VOZ.reco_error, true); }
+    }
+
+    _detenerReco(cancelar) {
+      const r = this._reco;
+      if (!r) return;
+      try { cancelar ? r.abort() : r.stop(); } catch { /* ya terminó */ }
+    }
+
+    // — respuesta hablada (speechSynthesis) —
+    _conmutarLeerAuto() {
+      this._leerAuto = !this._leerAuto;
+      try { sessionStorage.setItem(CLAVE_LEER, this._leerAuto ? "1" : "0"); } catch { /* sin storage */ }
+      if (!this._leerAuto) this._pararVoz();
+      this._pintarAltavoz();
+    }
+
+    _pintarAltavoz() {
+      const t = this._leerAuto ? TEXTOS.noLeerAuto : TEXTOS.leerAuto;
+      this._altavoz.title = t; this._altavoz.setAttribute("aria-label", t);
+      this._altavoz.setAttribute("aria-pressed", String(this._leerAuto));
+      this._altavoz.classList.toggle("activa", this._leerAuto);
+    }
+
+    // Encola `texto` (ya sin Markdown); varias llamadas se leen en orden. `alTerminar` al acabar esta pieza.
+    _decir(texto, alTerminar) {
+      if (!puedeHablar() || !texto.trim()) { if (alTerminar) alTerminar(); return; }
+      const u = new window.SpeechSynthesisUtterance(texto);
+      const idioma = this.getAttribute("idioma") || "es-UY";
+      const v = elegirVoz(window.speechSynthesis.getVoices(), idioma, this.getAttribute("voz"));
+      if (v) { u.voice = v; u.lang = v.lang; } else u.lang = idioma;
+      if (alTerminar) { u.onend = alTerminar; u.onerror = alTerminar; }
+      window.speechSynthesis.speak(u);
+    }
+
+    _pararVoz() {
+      if (puedeHablar()) window.speechSynthesis.cancel();
+      if (this._raiz) for (const b of this._raiz.querySelectorAll(".escuchar.hablando")) b.classList.remove("hablando");
+    }
+
+    // Lee lo que ya forma oraciones completas del texto acumulado (o todo, con `fin`): empieza a hablar antes de que termine la respuesta.
+    _leerIncremental(md, fin) {
+      const plano = textoParaVoz(md);
+      const hasta = fin ? plano.length : ultimoCorte(plano, this._leidoHasta);
+      if (hasta > this._leidoHasta) { this._decir(plano.slice(this._leidoHasta, hasta)); this._leidoHasta = hasta; }
+    }
+
+    // Botón "escuchar" al pie de una respuesta (solo texto: no altera el texto de la burbuja).
+    _botonEscuchar(burbuja, md) {
+      if (!puedeHablar() || !md.trim()) return;
+      const boton = el("button", { type: "button", class: "escuchar", title: TEXTOS.escuchar, "aria-label": TEXTOS.escuchar }, icono("altavoz"));
+      boton.addEventListener("click", () => {
+        const hablando = boton.classList.contains("hablando");
+        this._pararVoz();
+        if (hablando) return;
+        boton.classList.add("hablando");
+        this._decir(textoParaVoz(md), () => boton.classList.remove("hablando"));
+      });
+      burbuja.append(el("div", { class: "voz-acciones" }, boton));
+      this._bajar();   // el botón suma alto al final: se mantiene el final de la conversación a la vista
     }
 
     _avisarVoz(texto, esError = false) {
@@ -620,9 +821,7 @@
         flujo.getTracks().forEach((t) => t.stop());
         clearTimeout(this._tope);
         this._grabador = null;
-        this._mic.classList.remove("grabando");
-        this._mic.title = TEXTOS.dictar; this._mic.setAttribute("aria-label", TEXTOS.dictar);
-        this._mic.replaceChildren(icono("mic"));
+        this._marcarMic(false);
         if (cancelada) { this._avisarVoz(""); return; }
         const blob = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
         this._transcribir(blob, (Date.now() - inicio) / 1000);
@@ -630,9 +829,7 @@
       this._grabador = grabador;
       this._cancelarFn = () => { cancelada = true; };
       grabador.start();
-      this._mic.classList.add("grabando");
-      this._mic.title = TEXTOS.detener; this._mic.setAttribute("aria-label", TEXTOS.detener);
-      this._mic.replaceChildren(icono("parar"));
+      this._marcarMic(true);
       // Corta al llegar al tope del servidor (con un margen para que el header no lo supere).
       this._tope = setTimeout(() => this._detenerGrabacion(false), Math.max(1, this._maxAudioS - 1) * 1000);
     }
@@ -661,10 +858,7 @@
         }
         const texto = String((await r.json()).texto ?? "").trim();
         if (!texto) { this._avisarVoz(ERRORES_VOZ.sin_texto, true); return; }
-        const actual = this._entrada.value;
-        this._entrada.value = (actual && !/\s$/.test(actual) ? actual + " " : actual) + texto;
-        this._entrada.dispatchEvent(new Event("input"));
-        this._entrada.focus();
+        this._anadirAlCampo(texto);
         this._avisarVoz("");
       } catch {
         this._avisarVoz(ERROR_GENERICO, true);
@@ -687,6 +881,7 @@
     }
 
     async _enviarMensaje(texto) {
+      this._pararVoz();
       this._bloquear(true);
       this._burbuja("user").textContent = texto;
       const burbuja = this._burbuja("assistant");
@@ -723,6 +918,8 @@
         burbuja.remove(); this._error(codigo); return "error";
       }
       let acumulado = "", resultado = "ok";
+      this._leidoHasta = 0;
+      const leer = this._leerAuto && puedeHablar();
       const pintar = () => {
         const acciones = burbuja.querySelector(".acciones");
         burbuja.replaceChildren(); markdown(acumulado, burbuja);
@@ -732,7 +929,9 @@
       await leerSSE(r.body, (evento, datos) => {
         switch (evento) {
           case "delta":
-            acumulado += datos.texto || ""; pintar(); break;
+            acumulado += datos.texto || ""; pintar();
+            if (leer) this._leerIncremental(acumulado, false);
+            break;
           case "tool":
             estado.textContent = TEXTOS.consultando + "… " + (datos.herramientas || []).join(", ");
             if (!estado.isConnected) burbuja.append(estado);
@@ -747,6 +946,10 @@
         }
       });
       estado.remove();
+      if (resultado === "ok" && acumulado.trim()) {
+        if (leer) this._leerIncremental(acumulado, true);
+        this._botonEscuchar(burbuja, acumulado);
+      }
       return resultado;
     }
 

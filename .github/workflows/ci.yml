@@ -7,12 +7,30 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: asistente
+          POSTGRES_PASSWORD: asistente
+          POSTGRES_DB: asistente
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U asistente" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@localhost:5432/asistente
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen --group dev
       - run: uv run ruff check .
-      - run: uv run pytest
+      - name: Tests (con Postgres; ninguno de BD ni de aislamiento puede quedar saltado)
+        run: |
+          uv run pytest -q -rs | tee pytest.log
+          if grep -q "sin ASISTENTE_DATABASE_URL" pytest.log; then
+            echo "::error::hay tests de BD saltados"; exit 1
+          fi
 
       # Hito de la Fase 0: el verificador pasa contra los dos mocks.
       - name: Verificador contra los mocks
@@ -32,3 +50,60 @@ jobs:
           }
           verificar a secreto-a-0123456789-0123456789 ana beto 8201
           verificar b secreto-b-9876543210-9876543210 beto ana 8202
+
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen --group dev
+      - name: PHPUnit
+        run: |
+          docker build --target test -t sistema-php-test ejemplos/sistema-php
+          docker run --rm sistema-php-test
+      - name: Verificador contra la referencia PHP
+        run: |
+          docker build -t sistema-php ejemplos/sistema-php
+          docker run -d --name sistema-php -p 8203:8000 \
+            -e APP_ENV=local -e SISTEMA_ID=sistema-php -e SISTEMA_NOMBRE="Sistema PHP" \
+            -e SISTEMA_ALG=HS256 -e SISTEMA_SECRETO=secreto-php-0123456789-0123456789-ab \
+            -e SISTEMA_TOKEN_MANIFIESTO=manifiesto-php sistema-php
+          for _ in $(seq 1 20); do curl -sf localhost:8203/asistente/salud && break; sleep 1; done
+          V_MANIFIESTO=manifiesto-php V_SECRETO=secreto-php-0123456789-0123456789-ab \
+            uv run python herramientas/verificar_sistema.py \
+              --base-url http://localhost:8203 \
+              --token-url "http://localhost:8203/asistente/token?usuario=ana" \
+              --token-url-otro "http://localhost:8203/asistente/token?usuario=beto" \
+              --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+      - if: failure()
+        run: docker logs sistema-php
+
+  # La imagen que se despliega: construye el target prod, valida los composes y arranca el stack.
+  imagen-prod:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-solo-para-pruebas
+      ASISTENTE_PUERTO: "8099"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar composes
+        run: |
+          cp .env.example .env   # los composes lo exigen (env_file)
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.proxy-externo.yml config -q
+          docker compose -f docker-compose.dev.yml config -q
+          COMPOSE_PROFILES=voz docker compose -f docker-compose.yml config -q
+      - name: Levantar el stack de producción
+        run: |
+          cp config/sistemas.example.yaml config/sistemas.yaml
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait --wait-timeout 120
+      - name: Humo
+        run: |
+          curl -sf localhost:8099/salud
+          curl -sf localhost:8099/widget.js >/dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8099/docs)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8099/openapi.json)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8099/admin/sistemas)" = 503   # sin token configurado
+      - if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=80

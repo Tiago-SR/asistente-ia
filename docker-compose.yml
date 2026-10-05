@@ -1,9 +1,16 @@
 # BASE de producción (genérica). Uso:
-#   docker compose up -d --build        (lee ./.env; Dockge hace lo mismo)
+#   docker compose up -d --build        (lee ./.env; Dockge hace lo mismo). Uso real: deploy/deploy.sh
+# Convención: un único .env por host (dev y prod son máquinas distintas); no se versiona.
 # Desarrollo: docker compose -f docker-compose.dev.yml up --build
 # Requiere un proxy inverso con TLS delante: docker-compose.prod.yml (VPS genérica, puerto en loopback) o docker-compose.proxy-externo.yml (proxy en red `web`).
 # Debe hacer proxy a asistente:8000
 # con buffering desactivado para SSE. Postgres no se publica fuera de la red interna.
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   asistente:
     build:
@@ -11,6 +18,7 @@ services:
       target: prod
     image: asistente:${ASISTENTE_VERSION:-latest}
     restart: unless-stopped
+    logging: *logs
     env_file: .env
     environment:
       ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD}@postgres:5432/asistente
@@ -39,6 +47,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logs
     environment:
       POSTGRES_USER: asistente
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD}
@@ -52,12 +61,14 @@ services:
       timeout: 3s
       retries: 10
 
-  # STT local (dictado). El asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
+  # STT local (dictado, perfil `voz`). El asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
   # y STT_MODELO igual a WHISPER_MODELO. Sin puertos publicados. Necesita egress (red `publica`)
   # para descargar el modelo; la primera vez, si no lo bajó solo:
   #   docker compose exec whisper curl -X POST localhost:8000/v1/models/<STT_MODELO>
   whisper:
-    image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu}
+    profiles: ["voz"]   # opt-in: COMPOSE_PROFILES=voz en .env (o --profile voz). Sin STT no consume 2 GB
+    logging: *logs
+    image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8}
     restart: unless-stopped
     environment:
       PRELOAD_MODELS: '["${WHISPER_MODELO:-Systran/faster-whisper-small}"]'

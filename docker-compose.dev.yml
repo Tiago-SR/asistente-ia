@@ -10,6 +10,7 @@ services:
       ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: DEBUG
+      ASISTENTE_DOCS: "1"   # /docs y /openapi.json
       # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
     extra_hosts:
@@ -100,7 +101,7 @@ services:
   # y STT_MODELO igual a WHISPER_MODELO (speaches elige el modelo por petición).
   whisper:
     profiles: ["voz"]
-    image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu}
+    image: ${WHISPER_IMAGEN:-ghcr.io/speaches-ai/speaches:latest-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8}
     environment:
       # Descarga el modelo al arrancar (falla rápido si no se puede) en vez de en el primer dictado.
       PRELOAD_MODELS: '["${WHISPER_MODELO:-Systran/faster-whisper-small}"]'
