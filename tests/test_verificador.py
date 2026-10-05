@@ -31,6 +31,7 @@ def configuracion(**cambios) -> "verificador.Config":
         "secreto_firma": f"secreto-mock-v-{'x' * 32}",
         "token_url_otro": "http://mock-v/asistente/token?usuario=beto",
         "max_ms": 150,
+        "acciones": {"agregar_nota": {"establecimiento_id": "1", "texto": "Nota del verificador"}},
     }
     base.update(cambios)
     return verificador.Config(**base)
@@ -47,7 +48,9 @@ def fallos(informe) -> list[str]:
 def test_el_mock_conforme_pasa_sin_omitir_nada(monkeypatch):
     informe = verificar(montar(monkeypatch))
     assert informe.conforme, fallos(informe)
-    assert informe.cuenta(verificador.OMITIDO) == 1  # resumen_establecimiento exige id y no se ejecuta sola
+    # resumen_establecimiento exige id y no se ejecuta sola; el conflicto de una modificación no se fuerza
+    assert informe.cuenta(verificador.OMITIDO) == 2
+    assert any(s == "Acciones con confirmación" and e == verificador.OK for s, e, _, _ in informe.entradas)
     assert "CONFORME" in informe.texto()
 
 
@@ -65,6 +68,13 @@ DEFECTOS = {
     "filtra_ids_ajenos": "id de otro usuario",
     "respuesta_enorme": "tamaño de la respuesta",
     "lento": "tiempo de respuesta",
+    # sección 8 (acciones con confirmación)
+    "propuesta_con_efectos": "la propuesta no tiene efectos",
+    "ph_ignorado": "parámetros distintos a los propuestos",
+    "replay_aceptado": "una sola vez",
+    "token_otra_tool": "usado en modificar_nota",
+    "sin_idempotencia": "Idempotency-Key repetida",
+    "token_escritura_largo": "vida del token de escritura",
 }
 
 
@@ -96,6 +106,42 @@ def test_sin_datos_opcionales_omite_en_vez_de_fallar(monkeypatch):
     omitidos = [t for _, e, t, _ in informe.entradas if e == verificador.OMITIDO]
     assert any("token vencido" in t for t in omitidos)
     assert any("id de otro usuario" in t for t in omitidos)
+
+
+def omitidos(informe) -> list[str]:
+    return [t for _, e, t, _ in informe.entradas if e == verificador.OMITIDO]
+
+
+def test_sin_parametros_de_accion_no_escribe_y_lo_informa(monkeypatch):
+    cliente = montar(monkeypatch)
+    informe = verificar(cliente, acciones={})
+    assert informe.conforme
+    assert any("--accion" in d for _, e, _, d in informe.entradas if e == verificador.OMITIDO)
+
+
+def test_sistema_de_solo_lectura_omite_las_acciones(monkeypatch):
+    monkeypatch.setenv("MOCK_DEFECTO", "")
+    mock = cargar_mock(monkeypatch, "mock-v")
+    mock.MANIFIESTO["tools"] = [t for t in mock.MANIFIESTO["tools"] if t["efecto"] == "lectura"]
+    informe = verificar(TestClient(mock.app, base_url="http://mock-v"))
+    assert informe.conforme, fallos(informe)
+    assert any("no declara acciones" in t for t in omitidos(informe))
+
+
+def test_las_comprobaciones_de_acciones_escriben_una_sola_vez_en_un_sistema_conforme(monkeypatch):
+    monkeypatch.setenv("MOCK_DEFECTO", "")
+    mock = cargar_mock(monkeypatch, "mock-v")
+    informe = verificar(TestClient(mock.app, base_url="http://mock-v"))
+    assert informe.conforme, fallos(informe)
+    assert len(mock.NOTAS["ana"]) == 2
+
+
+def test_cli_rechaza_accion_que_no_es_json(monkeypatch):
+    monkeypatch.setenv("V_MANIFIESTO", MANIFIESTO)
+    with pytest.raises(SystemExit) as e:
+        verificador.main(["--base-url", "http://x", "--token-url", "http://x/t",
+                          "--token-manifiesto-env", "V_MANIFIESTO", "--accion", "agregar_nota=no-json"])
+    assert e.value.code == 2
 
 
 def test_id_ajeno_explicito(monkeypatch):

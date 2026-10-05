@@ -12,6 +12,9 @@ Comprobaciones opcionales (sin los datos necesarios se informan como OMITIDO):
   --id-ajeno ID                 id de otro usuario (alternativa a --token-url-otro)
   --cabecera-token-env VAR      cabecera "Nombre: valor" (cookie, API key…) que exige la ruta
                                 de token; el valor se lee del entorno y nunca se imprime
+  --accion NOMBRE='{json}'      parámetros válidos de una tool con `confirmacion` (repetible).
+                                Activa las comprobaciones de la sección 8, que EJECUTAN una
+                                escritura real: usar solo un entorno de pruebas
 
 Los secretos se leen de variables de entorno y se ocultan en todo el reporte. Solo necesita
 httpx, jsonschema y pyjwt. Sale con código 1 si algún chequeo falla (2 si los argumentos
@@ -118,6 +121,7 @@ class Config:
     algoritmo_firma: str = "HS256"
     id_ajeno: str | None = None
     tool_id: str | None = None
+    acciones: dict[str, dict] = field(default_factory=dict)  # tool con confirmación → parámetros válidos
     max_kb: int = 50
     max_ms: int | None = None                  # por defecto, el `timeout_s` de cada tool
     timeout: float = 20
@@ -215,11 +219,13 @@ class Verificador:
         return f"error de red: {r.error}" if r.error else f"status {r.status} {r.texto[:100]}"
 
     def _ejecutar(self, nombre: str, token: str | None, parametros=None, crudo: str | None = None,
-                  ) -> Resp:
+                  clave: str | None = None) -> Resp:
         cab = {"X-Asistente-Contrato": "1", "Content-Type": "application/json",
                "X-Asistente-Request-Id": uuid.uuid4().hex}
         if token is not None:
             cab["Authorization"] = f"Bearer {token}"
+        if clave:
+            cab["Idempotency-Key"] = clave
         cuerpo = crudo if crudo is not None else json.dumps({"parametros": parametros or {}})
         url = self.base + self.cfg.ruta_ejecucion.format(nombre=nombre)
         return self._http("POST", url, headers=cab, content=cuerpo)
@@ -256,6 +262,7 @@ class Verificador:
             self._parametros(tools, token)
             self._ids_ajenos(tools, token)
             self._escrituras(tools, token)
+            self._acciones(tools, token)
         except _Corte:
             pass
         return self.inf
@@ -480,6 +487,164 @@ class Verificador:
             r = self._ejecutar(t["nombre"], token)
             self._chk(r.status == 403, f"escritura {t['nombre']} con scope de lectura → 403", self._estado(r))
 
+    # ── acciones con confirmación (sección 8) ───────────────────────────────
+    def _acciones(self, tools: list[dict], token: str) -> None:
+        self.inf.seccion = "Acciones con confirmación"
+        acciones = [t for t in tools if t.get("efecto") == "escritura" and t.get("confirmacion")]
+        if not acciones:
+            self._nota(OMITIDO, "el sistema no declara acciones con confirmación (opcional)")
+            return
+        ttl_malos = [t["nombre"] for t in acciones
+                     if not 10 <= t["confirmacion"].get("ttl_s", 120) <= 300]
+        self._chk(not ttl_malos, "`confirmacion.ttl_s` entre 10 y 300", ", ".join(ttl_malos))
+        elegida = next((t for t in acciones if t["nombre"] in self.cfg.acciones), None)
+        if elegida is None:
+            self._nota(OMITIDO, "propuesta, token de escritura, huella, replay e idempotencia",
+                       "requiere --accion NOMBRE='{json}' (ejecuta una escritura real: entorno de pruebas)")
+            return
+        nombre, params = elegida["nombre"], self.cfg.acciones[elegida["nombre"]]
+        otra = next((t for t in acciones if t["nombre"] != nombre), None)
+
+        antes = self._instantanea(tools, token)
+        r = self._proponer(nombre, token, params)
+        propuesta = r.cuerpo if isinstance(r.cuerpo, dict) else {}
+        if not self._chk(r.status == 200 and not (e := _errores(_schema("propuesta-respuesta.schema.json"), r.cuerpo))
+                         and propuesta.get("ok") is True,
+                         f"{nombre}: la propuesta cumple el schema",
+                         e if r.status == 200 else self._estado(r)):
+            return
+        if antes is None:
+            self._nota(OMITIDO, f"{nombre}: la propuesta no escribe", "ninguna tool de lectura sin parámetros")
+        else:
+            self._chk(self._instantanea(tools, token) == antes, f"{nombre}: la propuesta no tiene efectos",
+                      "los datos de lectura cambiaron tras proponer")
+        r = self._proponer(nombre, token, {})
+        self._chk(r.status == 200 and isinstance(r.cuerpo, dict) and r.cuerpo.get("ok") is False
+                  and r.cuerpo.get("error") == "parametros_invalidos",
+                  f"{nombre}: propuesta con parámetros inválidos → parametros_invalidos", self._estado(r))
+        huella = propuesta["huella"]
+
+        self._huella_desconocida()
+        tok, cl = self._token_escritura(nombre, huella, "verificador-1")
+        if not tok:
+            return
+        self._chk(not (e := _errores(_schema("token-claims.schema.json"), cl)),
+                  "el token de escritura cumple el schema (act, ph, cid)", e)
+        self._chk(cl.get("scope") == "asistente:escritura" and cl.get("act") == nombre
+                  and cl.get("ph") == huella and cl.get("cid") == "verificador-1",
+                  "el token de escritura va atado a scope, tool, huella y confirmación",
+                  f"scope={cl.get('scope')} act={cl.get('act')} cid={cl.get('cid')}")
+        vida = cl.get("exp", 0) - cl.get("iat", 0)
+        self._chk(0 < vida <= 60, "vida del token de escritura ≤ 60 s", f"{vida}s")
+        r = self._proponer(nombre, tok, params)
+        self._chk(r.status == 403, "la propuesta con token de escritura → 403", self._estado(r))
+        for lectura in (t for t in tools if t.get("efecto") == "lectura"):
+            r = self._ejecutar(lectura["nombre"], tok, clave="verificador-l")
+            self._chk(r.status == 403, f"lectura {lectura['nombre']} con token de escritura → 403",
+                      self._estado(r))
+            break
+        if otra:
+            r = self._ejecutar(otra["nombre"], tok, self.cfg.acciones.get(otra["nombre"], {}),
+                               clave="verificador-o")
+            self._chk(r.status == 403, f"token de {nombre} usado en {otra['nombre']} → 403", self._estado(r))
+        else:
+            self._nota(OMITIDO, "token de una tool usado en otra", "solo hay una acción con confirmación")
+        if self.cfg.secreto_firma:
+            ahora = int(time.time())
+            viejo = self._forjar(cl, iat=ahora - 400, exp=ahora - 300, jti=uuid.uuid4().hex)
+            r = self._ejecutar(nombre, viejo, params, clave="verificador-vencido")
+            self._chk(r.status == 401, "token de escritura vencido → 401", self._estado(r))
+        else:
+            self._nota(OMITIDO, "token de escritura vencido → 401", "requiere --secreto-firma-env")
+        self._huella_de_otro_usuario(nombre, huella)
+
+        # Desde aquí hay escrituras reales (la del propio token y, solo si el sistema falla, más).
+        cambiados = self._alterar(params)
+        if cambiados is None:
+            self._nota(OMITIDO, f"{nombre}: parámetros distintos a los propuestos → 403",
+                       "la acción no tiene un parámetro de texto que alterar")
+        else:
+            r = self._ejecutar(nombre, tok, cambiados, clave="verificador-ph")
+            self._chk(r.status == 403, f"{nombre}: parámetros distintos a los propuestos → 403",
+                      self._estado(r))
+            tok, cl = self._token_escritura(nombre, huella, "verificador-1")  # el anterior pudo gastarse
+            if not tok:
+                return
+        r1 = self._ejecutar(nombre, tok, params, clave="verificador-1")
+        ok1 = r1.status == 200 and isinstance(r1.cuerpo, dict) and r1.cuerpo.get("ok") is True
+        if not self._chk(ok1 and not (e := _errores(_schema("ejecucion-respuesta.schema.json"), r1.cuerpo)),
+                         f"{nombre}: la ejecución confirmada responde ok y cumple el contrato",
+                         e if ok1 else self._estado(r1)):
+            return
+        mensaje = (r1.cuerpo.get("datos") or {}).get("mensaje")
+        self._chk(isinstance(mensaje, str) and 0 < len(mensaje) <= 300,
+                  f"{nombre}: `datos.mensaje` (≤ 300 caracteres) para la tarjeta")
+        r = self._ejecutar(nombre, tok, params, clave="verificador-2")
+        self._chk(r.status == 403, "el token de escritura sirve una sola vez → 403", self._estado(r))
+        tok2, _ = self._token_escritura(nombre, huella, "verificador-1")
+        if tok2:
+            r = self._ejecutar(nombre, tok2, params, clave="verificador-1")
+            self._chk(r.status == 200 and r.cuerpo == r1.cuerpo,
+                      "Idempotency-Key repetida → mismo resultado, sin reejecutar", self._estado(r))
+        else:
+            self._nota(OMITIDO, "Idempotency-Key repetida", "el sistema no emite un segundo token")
+        self._nota(OMITIDO, "modificación: dato cambiado desde la propuesta → conflicto",
+                   "no se puede forzar desde fuera; cubierta en tests/test_mock_acciones.py")
+
+    def _proponer(self, nombre: str, token: str, params: dict) -> Resp:
+        cab = {"X-Asistente-Contrato": "1", "Content-Type": "application/json",
+               "Authorization": f"Bearer {token}", "X-Asistente-Request-Id": uuid.uuid4().hex}
+        url = self.base + self.cfg.ruta_ejecucion.format(nombre=nombre) + "/propuesta"
+        return self._http("POST", url, headers=cab, content=json.dumps({"parametros": params}))
+
+    def _instantanea(self, tools: list[dict], token: str) -> list | None:
+        """Datos de todas las lecturas sin parámetros obligatorios (None si no hay ninguna)."""
+        datos = []
+        for t in tools:
+            if t.get("efecto") == "lectura" and not t.get("parametros", {}).get("required"):
+                r = self._ejecutar(t["nombre"], token)
+                datos.append((r.cuerpo or {}).get("datos") if isinstance(r.cuerpo, dict) else None)
+        return datos or None
+
+    def _url_confirmacion(self, url: str, cid: str, huella: str) -> str:
+        return str(httpx.URL(url).copy_merge_params({"confirmacion": cid, "huella": huella}))
+
+    def _token_escritura(self, nombre: str, huella: str, cid: str) -> tuple[str, dict]:
+        r, tok = self._pedir_token(self._url_confirmacion(self.cfg.token_url, cid, huella),
+                                   self.cfg.cabecera_token)
+        if not self._chk(r.status == 200 and bool(tok), f"{nombre}: emite token de escritura para su propuesta",
+                         self._estado(r)):
+            return "", {}
+        try:
+            return tok, jwt.decode(tok, options={"verify_signature": False, "verify_aud": False})
+        except jwt.PyJWTError as e:
+            self._chk(False, "el token de escritura es un JWT legible", str(e))
+            return "", {}
+
+    def _huella_desconocida(self) -> None:
+        r, tok = self._pedir_token(self._url_confirmacion(self.cfg.token_url, "verificador-x", "f" * 64),
+                                   self.cfg.cabecera_token)
+        self._chk(not tok and r.status != 200, "no emite token de escritura para una huella desconocida",
+                  self._estado(r))
+
+    def _huella_de_otro_usuario(self, nombre: str, huella: str) -> None:
+        if not self.cfg.token_url_otro:
+            self._nota(OMITIDO, "no emite token de escritura para la huella de otro usuario",
+                       "requiere --token-url-otro")
+            return
+        r, tok = self._pedir_token(self._url_confirmacion(self.cfg.token_url_otro, "verificador-o", huella),
+                                   self.cfg.cabecera_token_otro)
+        self._chk(not tok and r.status != 200, "no emite token de escritura para la huella de otro usuario",
+                  self._estado(r))
+
+    @staticmethod
+    def _alterar(params: dict) -> dict | None:
+        """Mismos parámetros con un texto cambiado (misma longitud), o None si no hay dónde."""
+        for k, v in params.items():
+            if isinstance(v, str) and v and not k.lower().endswith("id"):
+                return {**params, k: v[:-1] + ("x" if v[-1] != "x" else "y")}
+        return None
+
 
 def _desde_entorno(nombre: str | None, parser: argparse.ArgumentParser) -> str | None:
     if not nombre:
@@ -503,6 +668,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--algoritmo-firma", default="HS256")
     p.add_argument("--id-ajeno")
     p.add_argument("--tool-id")
+    p.add_argument("--accion", action="append", default=[], metavar="NOMBRE=JSON",
+                   help="parámetros válidos de una tool con `confirmacion`; ejecuta una escritura real")
     p.add_argument("--max-kb", type=int, default=50)
     p.add_argument("--max-ms", type=int, help="tope de tiempo por ejecución (por defecto, timeout_s de la tool)")
     p.add_argument("--timeout", type=float, default=20)
@@ -511,6 +678,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ruta-salud", default="/asistente/salud")
     a = p.parse_args(argv)
 
+    acciones: dict[str, dict] = {}
+    for item in a.accion:
+        nombre, _, crudo = item.partition("=")
+        try:
+            acciones[nombre] = json.loads(crudo)
+        except ValueError:
+            p.error(f"--accion {nombre or item}: el valor no es JSON")
+        if not isinstance(acciones[nombre], dict):
+            p.error(f"--accion {nombre}: los parámetros deben ser un objeto JSON")
     manifiesto = a.token_manifiesto or _desde_entorno(a.token_manifiesto_env, p)
     if not manifiesto:
         p.error("falta --token-manifiesto-env (o --token-manifiesto)")
@@ -521,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
         token_url_otro=a.token_url_otro,
         cabecera_token_otro=_desde_entorno(a.cabecera_token_otro_env, p),
         secreto_firma=_desde_entorno(a.secreto_firma_env, p), algoritmo_firma=a.algoritmo_firma,
-        id_ajeno=a.id_ajeno, tool_id=a.tool_id, max_kb=a.max_kb,
+        id_ajeno=a.id_ajeno, tool_id=a.tool_id, acciones=acciones, max_kb=a.max_kb,
         max_ms=a.max_ms, timeout=a.timeout,
     )
     destino = httpx.URL(a.base_url)

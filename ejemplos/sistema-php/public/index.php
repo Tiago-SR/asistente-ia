@@ -36,13 +36,18 @@ if ($ruta === '/asistente/salud' && $metodo === 'GET') {
 }
 if ($ruta === '/asistente/token' && $metodo === 'GET') {
     $prueba = isset($_GET['usuario']) && is_string($_GET['usuario']) ? $_GET['usuario'] : null;
-    emitir($ctl->token(usuarioDeSesion(), $prueba));
+    $conf = isset($_GET['confirmacion']) && is_string($_GET['confirmacion']) ? $_GET['confirmacion'] : null;
+    $huella = isset($_GET['huella']) && is_string($_GET['huella']) ? $_GET['huella'] : null;
+    emitir($ctl->token(usuarioDeSesion(), $prueba, $conf, $huella));
 }
 if ($ruta === '/asistente/tools' && $metodo === 'GET') {
     emitir($ctl->manifiesto($auth));
 }
-if ($metodo === 'POST' && preg_match('#^/asistente/tools/([a-z][a-z0-9_]{0,63})$#', $ruta, $m)) {
-    emitir($ctl->ejecutar($m[1], $auth, file_get_contents('php://input') ?: ''));
+if ($metodo === 'POST' && preg_match('#^/asistente/tools/([a-z][a-z0-9_]{0,63})(/propuesta)?$#', $ruta, $m)) {
+    $cuerpo = file_get_contents('php://input') ?: '';
+    emitir(isset($m[2])
+        ? $ctl->propuesta($m[1], $auth, $cuerpo)
+        : $ctl->ejecutar($m[1], $auth, $cuerpo, $_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? null));
 }
 if (str_starts_with($ruta, '/asistente/')) {
     emitir(Respuesta::http(404, 'no encontrado'));

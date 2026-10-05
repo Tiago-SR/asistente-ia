@@ -1,6 +1,6 @@
 # Sistema PHP de referencia
 
-Implementación del [contrato v1](../../contrato/CONTRATO.md) en PHP 8.2+ para que un equipo con CodeIgniter 4 (p. ej. SGAgro) la copie y adapte. Tools de ejemplo: dos de lectura y una de escritura (solo para la prueba de rechazo), datos ficticios en memoria (ana y beto, los mismos del [mock Python](../sistema-mock/app.py)).
+Implementación del [contrato v1](../../contrato/CONTRATO.md) en PHP 8.2+ para que un equipo con CodeIgniter 4 (p. ej. SGAgro) la copie y adapte. Tools de ejemplo: lecturas, **acciones con confirmación** (agregar y modificar una nota, sección 8 del contrato) y una escritura sin confirmación (solo para la prueba de rechazo). Datos ficticios (ana y beto, los mismos del [mock Python](../sistema-mock/app.py)).
 
 ## Por qué un router mínimo y no CI4
 
@@ -13,11 +13,12 @@ Un proyecto CI4 completo añade esqueleto, `writable/`, `spark` y decenas de MB 
 ```
 public/index.php                    router + página de demostración con <asistente-chat>
 src/Config.php                      lee variables de entorno
-src/Controllers/AsistenteController salud, token, manifiesto, ejecutar
+src/Controllers/AsistenteController salud, token (de lectura y de escritura), manifiesto, propuesta, ejecutar
 src/Auth/EmisorToken.php            emite el JWT (HS256 o RS256)
 src/Auth/ValidadorToken.php         firma, alg fijo, iss, aud, exp, claims obligatorios
-src/Tools/*                         tools de ejemplo (guía: ../../contrato/GUIA_TOOLS.md)
+src/Tools/*                         tools de ejemplo (guía: ../../contrato/GUIA_TOOLS.md); `Accion` = con propuesta
 src/Datos/Repositorio.php           datos ficticios (aquí iría tu base de datos)
+src/Datos/Almacen.php               estado de las acciones en SQLite: notas, propuestas, jti gastados, idempotencia
 tests/ContratoTest.php              rechazos de token, aislamiento, scope, escritura, parámetros
 ```
 
@@ -37,8 +38,12 @@ export V_MANIFIESTO=manifiesto-php V_SECRETO=secreto-php-0123456789-0123456789-a
 python herramientas/verificar_sistema.py --base-url http://localhost:8203 \
   --token-url "http://localhost:8203/asistente/token?usuario=ana" \
   --token-url-otro "http://localhost:8203/asistente/token?usuario=beto" \
-  --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+  --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO \
+  --accion agregar_nota='{"establecimiento_id":"1","texto":"nota del verificador"}' \
+  --accion modificar_nota='{"nota_id":"n1","texto":"texto del verificador"}'
 ```
+
+`--accion` activa las comprobaciones de la sección 8 y **ejecuta escrituras reales** (aquí, notas de ana en SQLite); sin ella se omiten.
 
 Para que el asistente lo use, copiá la entrada de [`config/sistemas.example.yaml`](../../config/sistemas.example.yaml) a `config/sistemas.yaml` y poné `PHP_SECRETO` y `PHP_MANIFEST_TOKEN` en el `.env` del asistente (los valores de arriba, solo para desarrollo).
 
@@ -81,6 +86,16 @@ Otras variables: `SISTEMA_ID` (= `iss` = `id` del registro), `SISTEMA_AUDIENCIA`
 5. Reemplazá `Repositorio` por tus modelos y escribí tus tools siguiendo la [guía](../../contrato/GUIA_TOOLS.md). Cada una queda en `src/Tools/` e implementa `Herramienta`; se registra en `Fabrica` (en CI4, `Config\Services`).
 6. Ejecutá el verificador contra el sistema real (con `--cabecera-token-env` para la cookie de sesión) antes de habilitarlo.
 
+## Acciones con confirmación (sección 8)
+
+Opcional: un sistema de solo lectura no necesita nada de esto. Piezas, en el orden en que se usan:
+
+1. `propuesta()` (`POST /asistente/tools/{nombre}/propuesta`, token de lectura): `Accion::preparar` valida y resume **sin escribir**; el controlador calcula la huella (SHA-256 de `{sub, tool, parametros, versión}`) y la recuerda en `Almacen` hasta que vence.
+2. `token()` con `?confirmacion=&huella=`: emite el token de escritura (60 s, `act`, `ph`, `cid`) solo si la huella es de una propuesta vigente **de ese usuario**. Aquí iría también la comprobación de que el usuario puede escribir (si no, `403`).
+3. `ejecutar()` con ese token e `Idempotency-Key`: scope y `act`; clave repetida → resultado anterior; `jti` de un solo uso (inserción atómica); parámetros iguales a los de la propuesta; versión sin cambios (si no, `conflicto`).
+
+Al llevarlo a tu sistema: `Almacen` pasa a tu base de datos (los `INSERT OR IGNORE` de `jti` e idempotencia son atómicos por clave única: conservar eso), y la comprobación de versión debe ser una sola sentencia `UPDATE … WHERE version = ?`. Rutas CI4: añadí `$routes->post('tools/(:segment)/propuesta', 'Asistente::propuesta/$1');` y pasá `$this->request->getHeaderLine('Idempotency-Key')` y los parámetros `confirmacion` y `huella` del query. `SISTEMA_DB` es el archivo SQLite (por defecto, el directorio temporal). Hay que habilitarla además en el asistente con `acciones_habilitadas`.
+
 ## Tools de ejemplo
 
 | Tool | Efecto | Qué muestra |
@@ -88,6 +103,8 @@ Otras variables: `SISTEMA_ID` (= `iss` = `id` del registro), `SISTEMA_AUDIENCIA`
 | `listar_establecimientos` | lectura | listado con filtro `texto` y acciones `ui` |
 | `resumen_establecimiento` | lectura | búsqueda por id: "no existe" y "es de otro" dan el mismo `no_encontrado` |
 | `resumen_por_cultivo` | lectura | agregada del lado del sistema (`superficie_ha` por cultivo + total), sin parámetros ni geometrías |
+| `listar_notas` | lectura | las notas del usuario; el verificador la usa para comprobar que una propuesta no escribe |
+| `agregar_nota`, `modificar_nota` | **escritura con confirmación** | ver «Acciones con confirmación». La modificación muestra antes y después y detecta el `conflicto` por versión |
 | `eliminar_establecimiento` | **escritura** | figura en el manifiesto y el controlador la rechaza con `403` con scope de lectura; aunque se ejecutara no hace nada. Existe para que el verificador compruebe esa capa |
 
 ## Probado de punta a punta

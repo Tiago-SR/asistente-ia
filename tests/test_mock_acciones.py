@@ -1,7 +1,7 @@
 """Contrato de las acciones con confirmación (sección 8) contra el sistema mock, sin el asistente.
 
 Cada regla que el sistema debe cumplir tiene su prueba, y cada defecto deliberado del mock
-(`MOCK_DEFECTO`) la rompe: son las comprobaciones que tendrá el verificador de conformidad.
+(`MOCK_DEFECTO`) la rompe: son las comprobaciones del verificador de conformidad.
 """
 
 import time

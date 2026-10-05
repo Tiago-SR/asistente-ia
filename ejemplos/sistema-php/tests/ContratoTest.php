@@ -103,11 +103,17 @@ final class ContratoTest extends TestCase
         $this->assertSame(200, $r->estado);
         $this->assertSame('1', $r->cuerpo['contrato']);
         $efectos = array_column($r->cuerpo['tools'], 'efecto', 'nombre');
+        $acciones = ['agregar_nota', 'modificar_nota'];
         $this->assertSame('escritura', $efectos['eliminar_establecimiento']);
-        unset($efectos['eliminar_establecimiento']);
-        foreach ($efectos as $efecto) {
+        foreach ($acciones as $a) {
+            $this->assertSame('escritura', $efectos[$a]);
+        }
+        foreach (array_diff_key($efectos, array_flip([...$acciones, 'eliminar_establecimiento'])) as $efecto) {
             $this->assertSame('lectura', $efecto);
         }
+        // solo las acciones con propuesta declaran `confirmacion`; borrar no se ofrece
+        $con = array_column(array_filter($r->cuerpo['tools'], fn($t) => isset($t['confirmacion'])), 'nombre');
+        $this->assertSame($acciones, $con);
     }
 
     // ── Negocio ──
@@ -224,5 +230,169 @@ final class ContratoTest extends TestCase
         // un HS256 firmado con la PÚBLICA como secreto (confusión de algoritmos) se rechaza
         $falso = JWT::encode($this->claims(), $pub, 'HS256');
         $this->assertSame(401, $ctl->ejecutar('listar_establecimientos', "Bearer $falso", '{"parametros":{}}')->estado);
+    }
+
+    // ── Acciones con confirmación (sección 8) ──
+    private const AGREGAR = ['establecimiento_id' => '1', 'texto' => 'Helada'];
+
+    private function proponer(string $tool = 'agregar_nota', array $params = self::AGREGAR, string $sub = 'u-1001'): array
+    {
+        $r = $this->ctl->propuesta($tool, 'Bearer ' . $this->jwt(['sub' => $sub]), json_encode(['parametros' => $params]));
+        $this->assertSame(200, $r->estado);
+        return $r->cuerpo;
+    }
+
+    private function tokenEscritura(string $huella, string $cid = 'c-1', string $login = 'ana'): ?string
+    {
+        return $this->ctl->token(null, $login, $cid, $huella)->cuerpo['token'] ?? null;
+    }
+
+    /** Propone y obtiene el token de escritura, como hace el usuario al confirmar. */
+    private function listo(string $tool = 'agregar_nota', array $params = self::AGREGAR): array
+    {
+        $p = $this->proponer($tool, $params);
+        return [$p, $this->tokenEscritura($p['huella'])];
+    }
+
+    private function escribir(?string $token, string $tool = 'agregar_nota', array $params = self::AGREGAR, ?string $clave = 'k1'): array
+    {
+        $r = $this->ctl->ejecutar($tool, $token === null ? null : "Bearer $token", json_encode(['parametros' => $params]), $clave);
+        return [$r->estado, $r->cuerpo];
+    }
+
+    private function notas(string $sub = 'u-1001'): array
+    {
+        return $this->ejecutar($this->jwt(['sub' => $sub]), 'listar_notas')[1]['datos']['notas'];
+    }
+
+    public function testLaPropuestaNoEscribeYTraeResumenYHuella(): void
+    {
+        $antes = $this->notas();
+        $p = $this->proponer();
+        $this->assertTrue($p['ok']);
+        $this->assertSame(64, strlen($p['huella']));
+        $this->assertSame(Config::TTL_PROPUESTA_S, $p['expira_s']);
+        $this->assertStringContainsString('El Matorral', $p['resumen']);
+        $this->assertSame($antes, $this->notas());
+    }
+
+    public function testModificarMuestraAntesYDespues(): void
+    {
+        $p = $this->proponer('modificar_nota', ['nota_id' => 'n1', 'texto' => 'nuevo']);
+        $this->assertSame(['Antes: Revisar el alambrado del potrero norte', 'Después: nuevo'], $p['detalle']);
+    }
+
+    public function testPropuestaConParametrosInvalidosOAjenos(): void
+    {
+        $t = 'Bearer ' . $this->jwt();
+        foreach ([
+            ['agregar_nota', '{"parametros":{}}', 'parametros_invalidos'],
+            ['agregar_nota', '{"parametros":{"establecimiento_id":"3","texto":"x"}}', 'no_encontrado'], // de beto
+            ['modificar_nota', '{"parametros":{"nota_id":"n999","texto":"x"}}', 'no_encontrado'],
+            ['listar_establecimientos', '{"parametros":{}}', 'no_disponible'], // no es una acción
+        ] as [$tool, $cuerpo, $error]) {
+            $r = $this->ctl->propuesta($tool, $t, $cuerpo);
+            $this->assertSame([200, $error], [$r->estado, $r->cuerpo['error']], $cuerpo);
+        }
+    }
+
+    public function testLaPropuestaPideTokenDeLecturaNoDeEscritura(): void
+    {
+        [, $tok] = $this->listo();
+        $this->assertSame(403, $this->ctl->propuesta('agregar_nota', "Bearer $tok", '{"parametros":{}}')->estado);
+        $this->assertSame(401, $this->ctl->propuesta('agregar_nota', null, '{}')->estado);
+    }
+
+    public function testNoEmiteTokenDeEscrituraParaUnaHuellaAjenaDesconocidaOMalPedida(): void
+    {
+        $p = $this->proponer();
+        $this->assertSame(403, $this->ctl->token(null, 'ana', 'c', str_repeat('f', 64))->estado);
+        $this->assertSame(403, $this->ctl->token(null, 'beto', 'c', $p['huella'])->estado, 'huella de otro usuario');
+        $this->assertSame(400, $this->ctl->token(null, 'ana', null, $p['huella'])->estado);
+        $this->assertSame(400, $this->ctl->token(null, 'ana', 'c', null)->estado);
+        $this->assertSame(400, $this->ctl->token(null, 'ana', 'c con espacios', $p['huella'])->estado);
+    }
+
+    public function testElTokenDeEscrituraEsCortoYEstaAtado(): void
+    {
+        [$p, $tok] = $this->listo();
+        $c = (array) JWT::decode($tok, new \Firebase\JWT\Key(self::SECRETO, 'HS256'));
+        $this->assertSame(['asistente:escritura', 'agregar_nota', $p['huella'], 'c-1'], [$c['scope'], $c['act'], $c['ph'], $c['cid']]);
+        $this->assertLessThanOrEqual(60, $c['exp'] - $c['iat']);
+    }
+
+    public function testEjecucionConformeEIdempotente(): void
+    {
+        [$p, $tok] = $this->listo();
+        [$estado, $r1] = $this->escribir($tok);
+        $this->assertSame([200, true, 'Nota agregada.'], [$estado, $r1['ok'], $r1['datos']['mensaje']]);
+        $this->assertCount(2, $this->notas());
+        // reintento con la misma clave y otro token (p. ej. se perdió el primero): mismo resultado, no reejecuta
+        [$estado, $r2] = $this->escribir($this->tokenEscritura($p['huella']));
+        $this->assertSame([200, $r1], [$estado, $r2]);
+        $this->assertCount(2, $this->notas());
+    }
+
+    public function testElTokenDeEscrituraNoSeReutiliza(): void
+    {
+        [, $tok] = $this->listo();
+        $this->assertSame(200, $this->escribir($tok, clave: 'k1')[0]);
+        $this->assertSame(403, $this->escribir($tok, clave: 'k2')[0]);
+        $this->assertCount(2, $this->notas());
+    }
+
+    public function testElTokenNoSirveParaOtraToolNiOtrosParametros(): void
+    {
+        [, $tok] = $this->listo();
+        $this->assertSame(403, $this->escribir($tok, 'modificar_nota', ['nota_id' => 'n1', 'texto' => 'x'])[0]);
+        [, $tok] = $this->listo();
+        $this->assertSame(403, $this->escribir($tok, params: [...self::AGREGAR, 'texto' => 'OTRO TEXTO'], clave: 'k9')[0]);
+        $this->assertCount(1, $this->notas());
+    }
+
+    public function testLaEscrituraExigeTokenDeEscrituraEIdempotencyKey(): void
+    {
+        [, $tok] = $this->listo();
+        $this->assertSame(400, $this->escribir($tok, clave: null)[0]);
+        $this->assertSame(403, $this->escribir($this->jwt())[0], 'token de lectura');
+        $this->assertSame(401, $this->escribir(null)[0]);
+        [$estado] = $this->ejecutar($tok, 'listar_establecimientos');
+        $this->assertSame(403, $estado, 'lectura con token de escritura');
+        $this->assertCount(1, $this->notas());
+    }
+
+    public function testUnTokenDeEscrituraVencidoOSinSuHuellaSeRechaza(): void
+    {
+        $p = $this->proponer();
+        $ahora = time();
+        $viejo = $this->jwt(['scope' => 'asistente:escritura', 'act' => 'agregar_nota', 'ph' => $p['huella'], 'cid' => 'c',
+            'iat' => $ahora - 200, 'exp' => $ahora - 100, 'jti' => 'viejo']);
+        $this->assertSame(401, $this->escribir($viejo)[0]);
+        $inventado = $this->jwt(['scope' => 'asistente:escritura', 'act' => 'agregar_nota', 'ph' => str_repeat('a', 64), 'cid' => 'c', 'jti' => 'inv']);
+        $this->assertSame(403, $this->escribir($inventado)[0], 'huella que el sistema no emitió');
+        $sinCid = $this->jwt(['scope' => 'asistente:escritura', 'act' => 'agregar_nota', 'ph' => $p['huella'], 'jti' => 'sc']);
+        $this->assertSame(403, $this->escribir($sinCid)[0]);
+        $this->assertCount(1, $this->notas());
+    }
+
+    public function testModificarDetectaQueElDatoCambio(): void
+    {
+        $params = ['nota_id' => 'n1', 'texto' => 'nuevo'];
+        [, $tok] = $this->listo('modificar_nota', $params);
+        // alguien más la modifica entre la propuesta y la confirmación
+        [, $otro] = $this->listo('modificar_nota', ['nota_id' => 'n1', 'texto' => 'de otro']);
+        $this->assertSame(200, $this->escribir($otro, 'modificar_nota', ['nota_id' => 'n1', 'texto' => 'de otro'], 'k2')[0]);
+        [$estado, $r] = $this->escribir($tok, 'modificar_nota', $params);
+        $this->assertSame([200, 'conflicto'], [$estado, $r['error']]);
+        $this->assertSame('de otro', $this->notas()[0]['texto']);
+    }
+
+    public function testLasNotasSonDeCadaUsuario(): void
+    {
+        $this->assertSame([], $this->notas('u-1002'));
+        $p = $this->proponer('modificar_nota', ['nota_id' => 'n1', 'texto' => 'x'], 'u-1001');
+        $this->assertTrue($p['ok']);
+        $r = $this->ctl->propuesta('modificar_nota', 'Bearer ' . $this->jwt(['sub' => 'u-1002']), '{"parametros":{"nota_id":"n1","texto":"x"}}');
+        $this->assertSame('no_encontrado', $r->cuerpo['error']);
     }
 }

@@ -32,6 +32,12 @@ final class Registro
         return $this->tools[$nombre] ?? null;
     }
 
+    /** Escritura con propuesta y confirmación (sección 8); las demás escrituras no se ejecutan nunca. */
+    public function esAccion(Herramienta $t): bool
+    {
+        return $t instanceof Accion;
+    }
+
     public function esLectura(Herramienta $t): bool
     {
         return ($t->definicion()['efecto'] ?? null) === 'lectura';

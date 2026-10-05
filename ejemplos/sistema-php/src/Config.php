@@ -15,10 +15,13 @@ namespace Ejemplo;
  *   SISTEMA_TOKEN_MANIFIESTO  credencial con la que el asistente lee el manifiesto
  *   APP_ENV                   `local` habilita ?usuario=ana en /asistente/token
  *   ASISTENTE_URL             URL pública del asistente (solo para la página de demostración)
+ *   SISTEMA_DB                archivo SQLite del estado de las acciones (notas, propuestas…)
  */
 final class Config
 {
     public const VIDA_TOKEN_S = 600; // contrato: 5–15 min
+    public const VIDA_TOKEN_ESCRITURA_S = 60; // sección 8.3: ≤ 60 s
+    public const TTL_PROPUESTA_S = 120;       // sección 8.1: 10–300
 
     public function __construct(
         public readonly string $id,
@@ -30,6 +33,7 @@ final class Config
         public readonly string $tokenManifiesto,
         public readonly bool $local,
         public readonly string $asistenteUrl,
+        public readonly string $rutaDb = ':memory:',
     ) {
     }
 
@@ -62,6 +66,7 @@ final class Config
             self::requerida('SISTEMA_TOKEN_MANIFIESTO'),
             self::env('APP_ENV', 'production') === 'local',
             self::env('ASISTENTE_URL', 'http://localhost:8100'),
+            self::env('SISTEMA_DB', sys_get_temp_dir() . '/sistema-php.sqlite'),
         );
     }
 

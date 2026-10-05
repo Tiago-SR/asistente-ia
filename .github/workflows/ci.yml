@@ -41,15 +41,16 @@ jobs:
           MOCK_ID=mock-b MOCK_SECRETO=secreto-b-9876543210-9876543210 MOCK_TOKEN_MANIFIESTO=man-b \
             uv run uvicorn app:app --app-dir ejemplos/sistema-mock --port 8202 &
           sleep 5
-          verificar() {  # id, secreto, usuario, otro usuario, puerto
+          verificar() {  # id, secreto, usuario, otro usuario, puerto, establecimiento del usuario
             V_MANIFIESTO=man-$1 V_SECRETO=$2 uv run python herramientas/verificar_sistema.py \
               --base-url http://localhost:$5 \
               --token-url "http://localhost:$5/asistente/token?usuario=$3" \
               --token-url-otro "http://localhost:$5/asistente/token?usuario=$4" \
-              --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+              --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO \
+              --accion agregar_nota='{"establecimiento_id":"'$6'","texto":"nota del verificador"}'
           }
-          verificar a secreto-a-0123456789-0123456789 ana beto 8201
-          verificar b secreto-b-9876543210-9876543210 beto ana 8202
+          verificar a secreto-a-0123456789-0123456789 ana beto 8201 1
+          verificar b secreto-b-9876543210-9876543210 beto ana 8202 3
 
   php:
     runs-on: ubuntu-latest
@@ -74,7 +75,9 @@ jobs:
               --base-url http://localhost:8203 \
               --token-url "http://localhost:8203/asistente/token?usuario=ana" \
               --token-url-otro "http://localhost:8203/asistente/token?usuario=beto" \
-              --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO
+              --token-manifiesto-env V_MANIFIESTO --secreto-firma-env V_SECRETO \
+              --accion agregar_nota='{"establecimiento_id":"1","texto":"nota del verificador"}' \
+              --accion modificar_nota='{"nota_id":"n1","texto":"texto del verificador"}'
       - if: failure()
         run: docker logs sistema-php
 
