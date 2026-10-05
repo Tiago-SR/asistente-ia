@@ -17,3 +17,6 @@ sistemas:
       #   clave_publica_env: PHP_PUBKEY   # PEM de la clave pública; sin `secreto_env`
     conector:
       token_manifiesto_env: PHP_MANIFEST_TOKEN
+    # Fase 5 (opcional): escrituras que el modelo puede PROPONER; el usuario confirma cada una en pantalla.
+    # Vacío (por defecto) = solo lectura. La tool debe declarar `confirmacion` en su manifiesto (contrato, sección 8).
+    # acciones_habilitadas: [agregar_nota, modificar_nota]

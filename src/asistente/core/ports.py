@@ -5,7 +5,10 @@ from typing import Any, Protocol
 
 from asistente.core.llm.base import Capacidades, Mensaje, OnDelta, Respuesta, ToolDef, Uso
 
-__all__ = ["LLM", "STT", "Auditoria", "Capacidades", "Conector", "Contexto", "LimiteExcedido", "Limites"]
+__all__ = [
+    "LLM", "STT", "AccionCreada", "Acciones", "Auditoria", "Capacidades", "Conector", "Contexto",
+    "LimiteExcedido", "Limites", "ResultadoPropuesta",
+]
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,31 @@ class ResultadoTool:
         return {"ok": True, "datos": self.datos, "fuente": self.fuente, "truncado": self.truncado}
 
 
+@dataclass(frozen=True)
+class ResultadoPropuesta:
+    """Respuesta del sistema a la propuesta de una acción (sin efectos). El resumen lo redacta
+    el sistema, no el modelo: es lo que el usuario confirma."""
+
+    ok: bool
+    resumen: str = ""
+    lineas: tuple[str, ...] = ()
+    huella: str = ""
+    expira_s: int = 120
+    error: str | None = None
+    detalle_error: str | None = None
+    status_http: int | None = None
+
+    @property
+    def token_expirado(self) -> bool:
+        return self.error == "token_expirado"
+
+
+@dataclass(frozen=True)
+class AccionCreada:
+    id: str
+    expira: str  # ISO 8601
+
+
 class LLM(Protocol):
     capacidades: Capacidades
 
@@ -83,6 +111,21 @@ class Conector(Protocol):
     async def tools(self) -> list[ToolDef]: ...
 
     async def ejecutar(self, nombre: str, parametros: dict) -> ResultadoTool: ...
+
+    async def proponer(self, nombre: str, parametros: dict) -> ResultadoPropuesta:
+        """Pide al sistema validar y resumir una acción de escritura, sin ejecutarla."""
+        ...
+
+
+class Acciones(Protocol):
+    """Propuestas pendientes de confirmación del usuario."""
+
+    async def crear(
+        self, ctx: Contexto, conversacion_id: Any, tool: str, parametros: dict,
+        propuesta: ResultadoPropuesta,
+    ) -> AccionCreada:
+        """Guarda la propuesta; reemplaza la pendiente anterior de la conversación.
+        Lanza `LimiteExcedido("acciones_hora")` si el usuario propone demasiado."""
 
 
 class Auditoria(Protocol):

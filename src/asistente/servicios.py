@@ -16,6 +16,7 @@ from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.conector_http import ConectorHttp
 from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas, Sistema
+from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.repo import Repo
 
@@ -40,6 +41,7 @@ class Servicios:
     sesiones: async_sessionmaker[AsyncSession] | None = None
     cierre: Callable[[], object] | None = None
     stt: STT | None = None  # None = dictado deshabilitado
+    acciones: AccionesSql | None = None  # None = sin acciones con confirmación
 
 
 def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
@@ -93,4 +95,5 @@ def construir(settings: Settings) -> Servicios:
         sesiones=sesiones,
         cierre=motor.dispose,
         stt=_fabrica_stt(settings),
+        acciones=AccionesSql(sesiones, settings.acciones_max_por_hora),
     )

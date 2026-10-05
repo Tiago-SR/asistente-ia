@@ -77,7 +77,7 @@ def test_el_manifiesto_del_mock_cumple_el_schema_del_contrato(mock_a):
 
     schema = json.loads((RAIZ / "contrato/schemas/manifiesto.schema.json").read_text())
     jsonschema.validate(mock_a.MANIFIESTO, schema)
-    assert len(parsear_manifiesto(mock_a.MANIFIESTO).tools) == 3
+    assert len(parsear_manifiesto(mock_a.MANIFIESTO).tools) == 6
 
 
 # --- cache y descarga contra el mock -------------------------------------------------

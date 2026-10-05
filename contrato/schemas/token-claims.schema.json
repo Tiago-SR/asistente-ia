@@ -3,22 +3,98 @@
   "$id": "https://asistente.local/contrato/v1/token-claims.schema.json",
   "title": "Claims del JWT de usuario",
   "type": "object",
-  "required": ["iss", "aud", "sub", "iat", "exp", "jti", "scope"],
+  "required": [
+    "iss",
+    "aud",
+    "sub",
+    "iat",
+    "exp",
+    "jti",
+    "scope"
+  ],
   "properties": {
-    "iss": { "type": "string", "minLength": 1, "description": "Id del sistema, igual al `id` en el registro del asistente." },
-    "aud": { "type": "string", "minLength": 1, "description": "Audiencia; por defecto `asistente`." },
-    "sub": { "type": "string", "minLength": 1, "description": "Identificador estable y opaco del usuario en el sistema." },
-    "iat": { "type": "integer", "minimum": 0 },
-    "exp": { "type": "integer", "minimum": 0 },
-    "jti": { "type": "string", "minLength": 1 },
-    "scope": { "type": "string", "enum": ["asistente:lectura"] },
-    "nombre": { "type": "string", "maxLength": 200 },
+    "iss": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id del sistema, igual al `id` en el registro del asistente."
+    },
+    "aud": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Audiencia; por defecto `asistente`."
+    },
+    "sub": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identificador estable y opaco del usuario en el sistema."
+    },
+    "iat": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exp": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "jti": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "asistente:lectura",
+        "asistente:escritura"
+      ]
+    },
+    "nombre": {
+      "type": "string",
+      "maxLength": 200
+    },
     "tenants": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Solo para métricas y cuotas. Nunca se usa para autorizar."
     },
-    "locale": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$" }
+    "locale": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
+    },
+    "act": {
+      "type": "string",
+      "description": "Solo escritura: nombre de la única tool para la que sirve el token."
+    },
+    "ph": {
+      "type": "string",
+      "description": "Solo escritura: huella de los parámetros confirmados, emitida por el sistema en la propuesta."
+    },
+    "cid": {
+      "type": "string",
+      "description": "Solo escritura: id de la confirmación (lo fija el asistente)."
+    }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "scope": {
+            "const": "asistente:escritura"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "then": {
+        "required": [
+          "act",
+          "ph",
+          "cid"
+        ]
+      }
+    }
+  ]
 }

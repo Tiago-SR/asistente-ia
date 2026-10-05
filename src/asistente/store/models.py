@@ -15,6 +15,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -104,3 +105,30 @@ class ContadorUso(Base):
     inicio: Mapped[datetime] = mapped_column(_ahora())
     mensajes: Mapped[int] = mapped_column(Integer, default=0)
     tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class Accion(Base):
+    """Propuesta de una escritura y su ciclo de vida (Fase 5). El `id` es aleatorio de 128 bits y
+    no adivinable; la fila es la autoridad del estado: pendiente → confirmada → ejecutada | fallida,
+    o cancelada | expirada | reemplazada. Toda consulta filtra por `(sistema_id, usuario_ref)`."""
+
+    __tablename__ = "acciones"
+    __table_args__ = (Index("ix_accion_sistema_usuario", "sistema_id", "usuario_ref", "creada"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    usuario_ref: Mapped[str] = mapped_column(String(256))
+    conversacion_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    tool: Mapped[str] = mapped_column(String(64))
+    parametros: Mapped[dict] = mapped_column(JSONB)
+    huella: Mapped[str] = mapped_column(String(128))
+    resumen: Mapped[str] = mapped_column(Text)
+    lineas: Mapped[list] = mapped_column(JSONB, default=list)
+    estado: Mapped[str] = mapped_column(String(16), default="pendiente")
+    creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    expira: Mapped[datetime] = mapped_column(_ahora())
+    decidida: Mapped[datetime | None] = mapped_column(_ahora())
+    jti_confirmacion: Mapped[str | None] = mapped_column(String(128))
+    ok: Mapped[bool | None] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(String(500))
+    status_http: Mapped[int | None] = mapped_column(Integer)

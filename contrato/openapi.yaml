@@ -40,6 +40,7 @@ paths:
         - { name: nombre, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" } }
         - { name: X-Asistente-Contrato, in: header, required: true, schema: { type: string, const: "1" } }
         - { name: X-Asistente-Request-Id, in: header, required: false, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string }, description: "Obligatoria en escrituras (sección 8): un reintento con la misma clave devuelve el resultado anterior sin reejecutar." }
       requestBody:
         required: true
         content:
@@ -57,6 +58,29 @@ paths:
           description: Scope insuficiente, o se usó el token de manifiesto
         "5XX":
           description: Error del sistema
+  /asistente/tools/{nombre}/propuesta:
+    post:
+      summary: "Valida y resume una acción de escritura, sin efectos (sección 8)"
+      description: Token de lectura. El sistema recuerda la huella devuelta hasta `expira_s`.
+      security: [{ tokenUsuario: [] }]
+      parameters:
+        - { name: nombre, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" } }
+        - { name: X-Asistente-Contrato, in: header, required: true, schema: { type: string, const: "1" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "schemas/ejecucion-request.schema.json" }
+      responses:
+        "200":
+          description: "Propuesta (`ok: true`) o error de negocio (`ok: false`)"
+          content:
+            application/json:
+              schema: { $ref: "schemas/propuesta-respuesta.schema.json" }
+        "401":
+          description: Token inválido o vencido
+        "403":
+          description: Scope insuficiente
   /asistente/salud:
     get:
       summary: Salud (opcional)

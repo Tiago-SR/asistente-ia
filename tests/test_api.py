@@ -22,6 +22,7 @@ from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.conector_http import ConectorHttp
 from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas
+from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.models import Base
 from asistente.store.models import LlamadaTool as FilaLlamada
@@ -79,11 +80,13 @@ def llm():
 
 @pytest.fixture
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
-    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None):
+    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None,
+                   acciones_habilitadas=(), max_acciones_hora=20):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
-            entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes),
+            entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes,
+                            acciones_habilitadas=list(acciones_habilitadas)),
             entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes),
         ])
         registro = RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
@@ -100,6 +103,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
             prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt,
+            acciones=AccionesSql(sesiones, max_acciones_hora),
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")

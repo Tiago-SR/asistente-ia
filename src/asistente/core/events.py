@@ -6,6 +6,7 @@ from typing import Any
 DELTA = "delta"
 TOOL = "tool"
 UI = "ui"
+CONFIRMACION = "confirmacion"
 DONE = "done"
 ERROR = "error"
 TOKEN_EXPIRADO = "token_expirado"

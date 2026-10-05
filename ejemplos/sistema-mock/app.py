@@ -17,13 +17,16 @@ ese usuario sin pedir contraseña. Un sistema real usa su sesión normal.
 """
 
 import asyncio
+import hashlib
+import itertools
+import json
 import os
 import time
 import uuid
 
 import jsonschema
 import jwt
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 ID = os.getenv("MOCK_ID", "mock-a")
@@ -32,6 +35,9 @@ SECRETO = os.getenv("MOCK_SECRETO", "secreto-mock-a")
 AUDIENCIA = os.getenv("MOCK_AUDIENCIA", "asistente")
 TOKEN_MANIFIESTO = os.getenv("MOCK_TOKEN_MANIFIESTO", "manifiesto-mock-a")
 VIDA_TOKEN_S = 600
+VIDA_TOKEN_ESCRITURA_S = 60
+SCOPE_L = "asistente:lectura"
+SCOPE_E = "asistente:escritura"
 
 # Defectos deliberados (uno por comprobación del verificador). Sin MOCK_DEFECTO el mock es conforme.
 DEFECTOS = {
@@ -48,6 +54,13 @@ DEFECTOS = {
     "respuesta_enorme",         # listar_establecimientos devuelve ~100 KB
     "respuesta_con_geometria",  # incluye geometrías en los datos
     "lento",                    # tarda 0,3 s por ejecución
+    # Fase 5 (acciones con confirmación):
+    "propuesta_con_efectos",    # la propuesta ya escribe (debe ser sin efectos)
+    "ph_ignorado",              # la ejecución no comprueba la huella de los parámetros
+    "replay_aceptado",          # un token de escritura sirve más de una vez
+    "token_otra_tool",          # un token de escritura sirve para otra tool
+    "sin_idempotencia",         # ignora Idempotency-Key: reejecuta
+    "token_escritura_largo",    # el token de escritura dura 1 h
 }
 DEFECTO = os.getenv("MOCK_DEFECTO", "")
 if DEFECTO and DEFECTO not in DEFECTOS:
@@ -63,6 +76,19 @@ DATOS: dict[str, list[dict]] = {
         {"id": "3", "nombre": "Los Ceibos", "superficie_ha": 88.2, "cultivo": "trigo"},
     ],
 }
+
+# Notas por usuario (Fase 5). El estado vive en memoria: se pierde al reiniciar.
+NOTAS: dict[str, list[dict]] = {
+    "ana": [{"id": "n1", "establecimiento_id": "1", "texto": "Revisar el alambrado del potrero norte",
+             "version": 1}],
+    "beto": [],
+}
+_ids_nota = itertools.count(2)
+PROPUESTAS: dict[str, dict] = {}   # huella → propuesta vigente emitida por este sistema
+JTI_USADOS: set[str] = set()       # tokens de escritura ya gastados (un solo uso)
+IDEMPOTENCIA: dict[str, dict] = {} # Idempotency-Key → (sub, respuesta)
+TTL_PROPUESTA_S = 120
+ESCRITURAS = ("agregar_nota", "modificar_nota")
 
 MANIFIESTO = {
     "contrato": "1",
@@ -92,6 +118,60 @@ MANIFIESTO = {
                 "additionalProperties": False,
             },
             "efecto": "lectura",
+            "timeout_s": 15,
+        },
+        {
+            "nombre": "listar_notas",
+            "descripcion": (
+                "Lista las notas del usuario (id, establecimiento y texto). Usar antes de modificar una "
+                "nota para obtener su id."
+            ),
+            "parametros": {
+                "type": "object",
+                "properties": {
+                    "establecimiento_id": {"type": "string", "description": "filtra por establecimiento"},
+                },
+                "additionalProperties": False,
+            },
+            "efecto": "lectura",
+            "timeout_s": 15,
+        },
+        {
+            "nombre": "agregar_nota",
+            "descripcion": (
+                "Agrega una nota de texto a un establecimiento del usuario. El usuario debe confirmarla "
+                "en pantalla antes de que se guarde. Resolver antes el id con listar_establecimientos."
+            ),
+            "parametros": {
+                "type": "object",
+                "properties": {
+                    "establecimiento_id": {"type": "string", "description": "id del establecimiento"},
+                    "texto": {"type": "string", "minLength": 1, "maxLength": 500},
+                },
+                "required": ["establecimiento_id", "texto"],
+                "additionalProperties": False,
+            },
+            "efecto": "escritura",
+            "confirmacion": {"ttl_s": TTL_PROPUESTA_S},
+            "timeout_s": 15,
+        },
+        {
+            "nombre": "modificar_nota",
+            "descripcion": (
+                "Reemplaza el texto de una nota existente del usuario. El usuario debe confirmarlo en "
+                "pantalla. Obtener antes el id con listar_notas."
+            ),
+            "parametros": {
+                "type": "object",
+                "properties": {
+                    "nota_id": {"type": "string", "description": "id de la nota"},
+                    "texto": {"type": "string", "minLength": 1, "maxLength": 500},
+                },
+                "required": ["nota_id", "texto"],
+                "additionalProperties": False,
+            },
+            "efecto": "escritura",
+            "confirmacion": {"ttl_s": TTL_PROPUESTA_S},
             "timeout_s": 15,
         },
         {
@@ -153,7 +233,12 @@ async def salud() -> dict:
 
 
 @app.get("/asistente/token")
-async def emitir_token(usuario: str) -> dict:
+async def emitir_token(
+    usuario: str, confirmacion: str | None = Query(default=None), huella: str | None = Query(default=None),
+) -> dict:
+    """Sin parámetros: token de lectura. Con `confirmacion` y `huella`: token de escritura para
+    esa confirmación (Fase 5). El sistema solo lo emite si la huella es de una propuesta suya,
+    vigente y de este usuario: así el asistente no puede fabricarlo ni usar otra huella."""
     if usuario not in DATOS:
         raise HTTPException(403, "usuario sin acceso al asistente")
     ahora = int(time.time())
@@ -164,10 +249,21 @@ async def emitir_token(usuario: str) -> dict:
         "iat": ahora,
         "exp": ahora + (3600 if DEFECTO == "token_vida_larga" else VIDA_TOKEN_S),
         "jti": uuid.uuid4().hex,
-        "scope": "asistente:lectura",
+        "scope": SCOPE_L,
         "nombre": usuario.capitalize(),
         "locale": "es-UY",
     }
+    if confirmacion is not None or huella is not None:
+        if not confirmacion or not huella:
+            raise HTTPException(400, "confirmacion y huella van juntas")
+        propuesta = PROPUESTAS.get(huella)
+        if propuesta is None or propuesta["sub"] != usuario or propuesta["exp"] < time.time():
+            raise HTTPException(403, "no hay una propuesta vigente con esa huella")
+        claims.update({
+            "scope": SCOPE_E,
+            "exp": ahora + (3600 if DEFECTO == "token_escritura_largo" else VIDA_TOKEN_ESCRITURA_S),
+            "act": propuesta["tool"], "ph": huella, "cid": confirmacion,
+        })
     token = jwt.encode(claims, SECRETO, algorithm="HS256")
     return {
         "token": token,
@@ -182,12 +278,7 @@ async def manifiesto(authorization: str | None = Header(default=None)) -> dict:
     return MANIFIESTO
 
 
-@app.post("/asistente/tools/{nombre}")
-async def ejecutar(
-    nombre: str,
-    request: Request,
-    authorization: str | None = Header(default=None),
-) -> JSONResponse:
+def _claims_de(authorization: str | None) -> dict:
     token = _bearer(authorization)
     if token == TOKEN_MANIFIESTO:
         if DEFECTO != "acepta_token_manifiesto":
@@ -199,30 +290,156 @@ async def ejecutar(
     if DEFECTO == "firma_no_verificada" or (DEFECTO == "acepta_alg_none" and _alg(token) == "none"):
         opciones["verify_signature"] = False
     try:
-        claims = jwt.decode(
+        return jwt.decode(
             token, SECRETO, algorithms=["HS256"], audience=AUDIENCIA, issuer=ID, options=opciones,
         )
     except jwt.PyJWTError as e:
         raise HTTPException(401, f"token inválido: {e}") from e
-    if DEFECTO != "ignora_scope" and claims.get("scope") != "asistente:lectura":
-        raise HTTPException(403, "scope insuficiente")
 
-    herramienta = next((t for t in MANIFIESTO["tools"] if t["nombre"] == nombre), None)
-    if herramienta is None:
-        return JSONResponse(_error("no_disponible", f"tool desconocida: {nombre}"))
-    if herramienta["efecto"] != "lectura" and DEFECTO != "ignora_scope":
-        raise HTTPException(403, "escritura no permitida con scope de lectura")
 
+async def _parametros(request: Request) -> dict | None:
     try:
         parametros = (await request.json())["parametros"]
     except (ValueError, KeyError, TypeError):
-        parametros = None
-    if not isinstance(parametros, dict):
+        return None
+    return parametros if isinstance(parametros, dict) else None
+
+
+# ── Escrituras con confirmación (Fase 5) ──
+
+def _huella(sub: str, tool: str, parametros: dict, version: int | None) -> str:
+    canonico = json.dumps({"sub": sub, "tool": tool, "parametros": parametros, "version": version},
+                          sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonico.encode()).hexdigest()
+
+
+def _preparar_escritura(sub: str, nombre: str, p: dict):
+    """Valida y resume una escritura SIN aplicarla. Devuelve (error, resumen, lineas, version)."""
+    if nombre == "agregar_nota":
+        est = next((e for e in DATOS.get(sub, []) if e["id"] == p["establecimiento_id"]), None)
+        if est is None:
+            return _error("no_encontrado", "No existe o no tenés acceso"), None, None, None
+        return None, f"Agregar una nota al establecimiento «{est['nombre']}»", [f"Texto: {p['texto']}"], None
+    nota = next((n for n in NOTAS.get(sub, []) if n["id"] == p["nota_id"]), None)
+    if nota is None:
+        return _error("no_encontrado", "No existe o no tenés acceso"), None, None, None
+    est = next((e for e in DATOS.get(sub, []) if e["id"] == nota["establecimiento_id"]), None)
+    donde = f" del establecimiento «{est['nombre']}»" if est else ""
+    return (None, f"Modificar la nota {nota['id']}{donde}",
+            [f"Antes: {nota['texto']}", f"Después: {p['texto']}"], nota["version"])
+
+
+def _aplicar(sub: str, nombre: str, p: dict) -> dict:
+    if nombre == "agregar_nota":
+        nota = {"id": f"n{next(_ids_nota)}", "establecimiento_id": p["establecimiento_id"],
+                "texto": p["texto"], "version": 1}
+        NOTAS.setdefault(sub, []).append(nota)
+        return _ok({"mensaje": "Nota agregada.", "nota": nota}, "notas",
+                   [{"tipo": "navegar", "url": f"/establecimientos/{p['establecimiento_id']}",
+                     "etiqueta": "Ver establecimiento"}])
+    nota = next(n for n in NOTAS[sub] if n["id"] == p["nota_id"])
+    nota["texto"], nota["version"] = p["texto"], nota["version"] + 1
+    return _ok({"mensaje": "Nota modificada.", "nota": nota}, "notas")
+
+
+def _validar_params(nombre: str, parametros: dict) -> dict | None:
+    herramienta = next(t for t in MANIFIESTO["tools"] if t["nombre"] == nombre)
+    try:
+        jsonschema.validate(parametros, herramienta["parametros"])
+    except jsonschema.ValidationError as e:
+        return _error("parametros_invalidos", e.message[:200])
+    return None
+
+
+@app.post("/asistente/tools/{nombre}/propuesta")
+async def propuesta(
+    nombre: str, request: Request, authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """Valida y resume la acción, sin efectos. Token de LECTURA. El sistema recuerda la huella."""
+    claims = _claims_de(authorization)
+    if claims.get("scope") != SCOPE_L:
+        raise HTTPException(403, "la propuesta pide un token de lectura")
+    if nombre not in ESCRITURAS:
+        return JSONResponse(_error("no_disponible", f"tool desconocida: {nombre}"))
+    parametros = await _parametros(request)
+    if parametros is None:
+        return JSONResponse(_error("parametros_invalidos", "cuerpo debe ser {parametros: {...}}"))
+    if (invalido := _validar_params(nombre, parametros)) is not None:
+        return JSONResponse(invalido)
+    sub = claims["sub"]
+    error, resumen, lineas, version = _preparar_escritura(sub, nombre, parametros)
+    if error is not None:
+        return JSONResponse(error)
+    if DEFECTO == "propuesta_con_efectos":
+        _aplicar(sub, nombre, parametros)
+    huella = _huella(sub, nombre, parametros, version)
+    PROPUESTAS[huella] = {"sub": sub, "tool": nombre, "parametros": parametros, "version": version,
+                          "exp": time.time() + TTL_PROPUESTA_S}
+    return JSONResponse({"ok": True, "resumen": resumen, "detalle": lineas, "huella": huella,
+                         "expira_s": TTL_PROPUESTA_S})
+
+
+def _ejecutar_escritura(claims: dict, nombre: str, parametros: dict, clave: str | None) -> JSONResponse:
+    sub = claims["sub"]
+    if claims.get("scope") == SCOPE_E:
+        if not clave and DEFECTO != "sin_idempotencia":
+            raise HTTPException(400, "falta Idempotency-Key")
+        previa = IDEMPOTENCIA.get(clave or "")
+        if previa and previa["sub"] == sub and DEFECTO != "sin_idempotencia":
+            return JSONResponse(previa["respuesta"])  # reintento: mismo resultado, sin reejecutar
+        if claims.get("act") != nombre and DEFECTO != "token_otra_tool":
+            raise HTTPException(403, "el token no es para esta tool")
+        if claims["jti"] in JTI_USADOS and DEFECTO != "replay_aceptado":
+            raise HTTPException(403, "token de escritura ya usado")
+        JTI_USADOS.add(claims["jti"])
+    if (invalido := _validar_params(nombre, parametros)) is not None:
+        return JSONResponse(invalido)
+    if DEFECTO not in ("ph_ignorado", "token_otra_tool") and claims.get("scope") == SCOPE_E:
+        p = PROPUESTAS.get(claims.get("ph", ""))
+        if p is None or p["sub"] != sub or p["tool"] != nombre or p["exp"] < time.time():
+            raise HTTPException(403, "no hay una propuesta vigente para este token")
+        if p["parametros"] != parametros:
+            raise HTTPException(403, "los parámetros no coinciden con los confirmados")
+        error, _, _, version = _preparar_escritura(sub, nombre, parametros)
+        if error is not None:
+            return JSONResponse(error)
+        if version != p["version"]:
+            return JSONResponse(_error("conflicto", "La nota cambió desde que se propuso"))
+    else:
+        error, _, _, _ = _preparar_escritura(sub, nombre, parametros)
+        if error is not None:
+            return JSONResponse(error)
+    respuesta = _aplicar(sub, nombre, parametros)
+    if clave:
+        IDEMPOTENCIA[clave] = {"sub": sub, "respuesta": respuesta}
+    return JSONResponse(respuesta)
+
+
+@app.post("/asistente/tools/{nombre}")
+async def ejecutar(
+    nombre: str,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None),
+) -> JSONResponse:
+    claims = _claims_de(authorization)
+    herramienta = next((t for t in MANIFIESTO["tools"] if t["nombre"] == nombre), None)
+    # Lectura con token de lectura; escritura solo con el token de escritura de una confirmación.
+    esperado = SCOPE_E if herramienta and herramienta["efecto"] == "escritura" else SCOPE_L
+    if DEFECTO != "ignora_scope" and claims.get("scope") != esperado:
+        raise HTTPException(403, "scope insuficiente")
+
+    if herramienta is None:
+        return JSONResponse(_error("no_disponible", f"tool desconocida: {nombre}"))
+    parametros = await _parametros(request)
+    if parametros is None:
         return JSONResponse(_error("parametros_invalidos", "cuerpo debe ser {parametros: {...}}"))
 
     if DEFECTO == "lento":
         await asyncio.sleep(0.3)
-    if herramienta["efecto"] != "lectura":  # solo con el defecto ignora_scope: "elimina" sin pudor
+    if nombre in ESCRITURAS:
+        return _ejecutar_escritura(claims, nombre, parametros, idempotency_key)
+    if herramienta["efecto"] != "lectura":  # eliminar_establecimiento, solo con ignora_scope: "elimina" sin pudor
         return JSONResponse(_ok({"eliminado": True}, "establecimientos"))
     if DEFECTO != "params_sin_validar":
         try:
@@ -255,6 +472,11 @@ async def ejecutar(
             # Igual que "no existe": no se revela si pertenece a otro usuario.
             return JSONResponse(_error("no_encontrado", "No existe o no tenés acceso"))
         return JSONResponse(_ok(est, "establecimientos"))
+
+    if nombre == "listar_notas":
+        filtro = parametros.get("establecimiento_id")
+        notas = [n for n in NOTAS.get(claims["sub"], []) if filtro in (None, n["establecimiento_id"])]
+        return JSONResponse(_ok({"notas": notas}, "notas"))
 
     return JSONResponse(_error("no_disponible", "no implementada"))
 

@@ -20,6 +20,8 @@ class ToolDef:
     nombre: str
     descripcion: str
     parametros: dict  # JSON Schema de tipo object
+    # Tool con efectos: el agente no la ejecuta, la propone y el usuario confirma (Fase 5).
+    escritura: bool = False
 
 
 @dataclass(frozen=True)

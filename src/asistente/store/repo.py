@@ -127,6 +127,22 @@ class Repo:
                     prompt_version=prompt_version if m.rol == "assistant" else None,
                 ))
 
+    async def agregar_nota(
+        self, sistema_id: str, usuario_ref: str, conv_id: uuid.UUID, texto: str
+    ) -> bool:
+        """Agrega un mensaje del asistente a una conversación ya guardada (p. ej. el resultado de
+        una acción confirmada). `False` si la conversación no existe o no es del usuario."""
+        async with self._sesiones.begin() as s:
+            conv = (await s.execute(
+                select(Conversacion).where(*self._propia(sistema_id, usuario_ref, conv_id))
+            )).scalar_one_or_none()
+            if conv is None:
+                return False
+            conv.actualizada = func.now()
+            s.add(FilaMensaje(conversacion_id=conv_id, rol="assistant",
+                              contenido=_a_json(Mensaje("assistant", texto))))
+            return True
+
     async def borrar(self, sistema_id: str, usuario_ref: str, conv_id: uuid.UUID) -> bool:
         async with self._sesiones.begin() as s:
             r = await s.execute(

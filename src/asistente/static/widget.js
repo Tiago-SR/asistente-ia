@@ -37,6 +37,13 @@
  *                      Si el anfitrión llama preventDefault(), el widget no muestra su botón.
  *   asistente:estado   {detail: {habilitado}} al decidir si el asistente está disponible
  *                      (si no lo está, el widget muestra un aviso en lugar del chat).
+ *   asistente:confirmacion  {detail: {id, tool, estado}} cuando una acción propuesta por el asistente termina
+ *                      (estado: ejecutada | cancelada | expirada | reemplazada | fallida). El anfitrión puede
+ *                      refrescar su pantalla tras una acción ejecutada.
+ *
+ * Acciones con confirmación: si el sistema habilitó escrituras, el asistente solo las PROPONE; el widget muestra
+ * una tarjeta con el resumen que redactó el sistema y los botones Confirmar / Cancelar. Confirmar pide al
+ * token-url del anfitrión (con su sesión) un token de escritura para esa confirmación. Nunca se confirma por voz.
  */
 (() => {
   "use strict";
@@ -83,6 +90,11 @@
     mhPrivacidad: "Micrófono abierto: el audio se envía al servicio de voz del navegador (Google, en Chrome).",
     mhInactividad: "Manos libres apagado por inactividad.",
     cancelar: "Cancelar",
+    confirmarTitulo: "Confirmá esta acción",
+    confirmar: "Confirmar",
+    vence: "Vence en {t}",
+    ejecutando: "Ejecutando…",
+    mhConfirmarPantalla: "Te pido confirmar en pantalla: {r}",
     pie: "Las respuestas pueden contener errores; verificá los datos importantes.",
   };
   const ERRORES = {
@@ -96,6 +108,28 @@
     origen_no_permitido: "Esta página no está autorizada para usar el asistente.",
     mensaje_invalido: "El mensaje está vacío o es demasiado largo.",
     no_se_pudo_guardar: "No se pudo guardar la conversación.",
+  };
+  // Estado final de una acción propuesta (tarjeta de confirmación).
+  const ESTADOS_ACCION = {
+    ejecutada: "Hecho.",
+    cancelada: "Cancelada.",
+    expirada: "Venció. Pedilo de nuevo si todavía lo querés.",
+    reemplazada: "Reemplazada por una propuesta más reciente.",
+    fallida: "No se pudo realizar.",
+    confirmada: "Ya se está ejecutando.",
+  };
+  const ERRORES_ACCION = {
+    conflicto: "Los datos cambiaron desde la propuesta. Pedilo de nuevo.",
+    sin_acceso: "No tenés permiso para hacer esto.",
+    no_encontrado: "Ya no existe el dato sobre el que se iba a actuar.",
+    parametros_invalidos: "El sistema no aceptó los datos de la acción.",
+    no_disponible: "Esta acción no está disponible.",
+    timeout: "El sistema tardó demasiado: verificá en el sistema si se hizo antes de repetirlo.",
+    error_sistema: "El sistema no pudo realizar la acción.",
+    confirmacion_invalida: "La confirmación no es válida. Pedilo de nuevo.",
+    token_invalido: "Tu sesión venció. Volvé a intentarlo.",
+    token_expirado: "Tu sesión venció. Volvé a intentarlo.",
+    sin_autorizacion: "El sistema no autorizó la acción (puede que haya vencido). Pedilo de nuevo.",
   };
   const ERRORES_VOZ = {
     voz_no_disponible: "El dictado no está disponible por ahora.",
@@ -424,6 +458,21 @@
       border-radius: 999px; text-decoration: none; font-size: 13px; background: var(--f);
     }
     .msg .acciones a:hover { background: var(--c); color: var(--ct); }
+
+    .msg.confirmacion { align-self: stretch; padding: 12px 14px; border: 1px solid var(--c); border-radius: calc(var(--r) * 1.5); background: var(--f); }
+    .msg.confirmacion.cerrada { border-color: var(--b); opacity: .85; }
+    .accion-titulo { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--apagado); margin-bottom: 4px; }
+    .accion-resumen { font-weight: 600; }
+    .msg.confirmacion ul { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
+    .accion-botones { display: flex; gap: 8px; margin-top: 10px; }
+    .accion-botones button { padding: 6px 16px; border-radius: 999px; border: 1px solid var(--c); background: var(--f); color: var(--c); font: inherit; cursor: pointer; }
+    .accion-botones button.primario { background: var(--c); color: var(--ct); }
+    .accion-botones button:disabled { opacity: .45; cursor: default; }
+    .accion-botones[hidden] { display: none; }
+    .accion-estado { margin-top: 8px; font-size: 13px; color: var(--apagado); }
+    .accion-estado.ok { color: #1f6b3a; }
+    .accion-error { margin-top: 6px; font-size: 13px; color: #8a1f1f; }
+    .accion-error:empty { display: none; }
 
     .entrada { padding: 0 16px 8px; }
     .entrada form {
@@ -1252,6 +1301,7 @@
             if (!estado.isConnected) burbuja.append(estado);
             break;
           case "ui": this._acciones(datos.acciones || [], burbuja); break;
+          case "confirmacion": this._confirmacion(datos); break;
           case "done":
             if (datos.conversacion_id) { this._convId = datos.conversacion_id; this._recordar(); } break;
           case "token_expirado": resultado = "token_expirado"; break;
@@ -1266,6 +1316,109 @@
         this._botonEscuchar(burbuja, acumulado);
       }
       return resultado;
+    }
+
+    // — acciones con confirmación (contrato, sección 8) —
+    // El resumen y el detalle los redactó el SISTEMA (no el modelo). Todo el texto va con textContent.
+    _confirmacion(d) {
+      if (!d || typeof d.id !== "string" || typeof d.huella !== "string" || typeof d.resumen !== "string") return;
+      if (this._tarjetaActiva && this._tarjetaActiva.tarjeta.isConnected) this._cerrarTarjeta(this._tarjetaActiva, "reemplazada");
+      const lineas = Array.isArray(d.lineas) ? d.lineas.filter((x) => typeof x === "string") : [];
+      const tarjeta = this._burbuja("confirmacion");
+      tarjeta.setAttribute("role", "group"); tarjeta.setAttribute("aria-label", TEXTOS.confirmarTitulo);
+      const confirmar = el("button", { type: "button", class: "primario", textContent: TEXTOS.confirmar });
+      const cancelar = el("button", { type: "button", textContent: TEXTOS.cancelar });
+      const botones = el("div", { class: "accion-botones" }, confirmar, cancelar);
+      const estado = el("div", { class: "accion-estado", role: "status" });
+      const err = el("div", { class: "accion-error", role: "alert" });
+      tarjeta.append(
+        el("div", { class: "accion-titulo", textContent: TEXTOS.confirmarTitulo }),
+        el("div", { class: "accion-resumen", textContent: d.resumen }),
+        ...(lineas.length ? [el("ul", {}, ...lineas.map((l) => el("li", { textContent: l })))] : []),
+        botones, estado, err,
+      );
+      const t = { d, tarjeta, confirmar, cancelar, botones, estado, err, timer: 0, cerrada: false, ocupada: false };
+      // Solo un clic real del usuario confirma: un script que dispare click() no cuenta.
+      confirmar.addEventListener("click", (ev) => { if (ev.isTrusted) this._confirmarAccion(t); });
+      cancelar.addEventListener("click", (ev) => { if (ev.isTrusted) this._cancelarAccion(t); });
+      const expiraMs = Date.parse(d.expira);
+      const tick = () => {
+        if (t.cerrada || !tarjeta.isConnected) { clearInterval(t.timer); return; }
+        if (t.ocupada) return;
+        const resta = Math.ceil((expiraMs - Date.now()) / 1000);
+        if (resta <= 0) { this._cerrarTarjeta(t, "expirada"); return; }
+        estado.textContent = TEXTOS.vence.replace("{t}", Math.floor(resta / 60) + ":" + String(resta % 60).padStart(2, "0"));
+      };
+      if (!Number.isNaN(expiraMs)) { tick(); t.timer = setInterval(tick, 1000); }
+      this._tarjetaActiva = t;
+      // En manos libres la propuesta se lee en voz alta, pero se confirma siempre con un clic.
+      if (this._mhActivo() && puedeHablar()) this._decir(TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen));
+      this._bajar();
+    }
+
+    _cerrarTarjeta(t, estado, texto) {
+      if (t.cerrada) return;
+      t.cerrada = true; clearInterval(t.timer);
+      t.botones.hidden = true; t.err.textContent = "";
+      t.tarjeta.classList.add("cerrada", estado);
+      t.estado.textContent = texto || ESTADOS_ACCION[estado] || "";
+      t.estado.classList.toggle("ok", estado === "ejecutada");
+      if (this._tarjetaActiva === t) this._tarjetaActiva = null;
+      this.dispatchEvent(new CustomEvent("asistente:confirmacion", {
+        detail: { id: t.d.id, tool: t.d.tool || "", estado }, bubbles: true, composed: true,
+      }));
+      this._bajar();
+    }
+
+    // Error que no cierra la tarjeta (red, sesión): se puede reintentar o cancelar.
+    _errorTarjeta(t, codigo) {
+      t.ocupada = false; t.confirmar.disabled = t.cancelar.disabled = false;
+      t.err.textContent = ERRORES_ACCION[codigo] || ERROR_GENERICO;
+    }
+
+    // Token de escritura: lo emite el SISTEMA anfitrión, con la sesión del usuario, solo para una propuesta suya vigente.
+    async _tokenEscritura(d) {
+      let u; try { u = new URL(this.getAttribute("token-url"), location.href); } catch { return null; }
+      u.searchParams.set("confirmacion", d.id); u.searchParams.set("huella", d.huella);
+      const r = await fetch(u, { credentials: "same-origin", headers: { Accept: "application/json" } });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return typeof j.token === "string" && j.token ? j.token : null;
+    }
+
+    async _confirmarAccion(t) {
+      if (t.cerrada || t.ocupada) return;
+      t.ocupada = true; t.confirmar.disabled = t.cancelar.disabled = true;
+      t.err.textContent = ""; t.estado.textContent = TEXTOS.ejecutando;
+      try {
+        const token = await this._tokenEscritura(t.d);
+        if (!token) { this._errorTarjeta(t, "sin_autorizacion"); return; }
+        const r = await fetch(`${this._servidor}/v1/confirmaciones/${encodeURIComponent(t.d.id)}/confirmar`, {
+          method: "POST", headers: { Authorization: "Bearer " + token },
+        });
+        let c = {}; try { c = await r.json(); } catch { /* sin cuerpo */ }
+        if (r.status === 409) { this._cerrarTarjeta(t, c.estado in ESTADOS_ACCION ? c.estado : "fallida"); return; }
+        if (r.ok && c.ok === true) {
+          this._cerrarTarjeta(t, "ejecutada", typeof c.mensaje === "string" && c.mensaje ? c.mensaje : ESTADOS_ACCION.ejecutada);
+          this._acciones(Array.isArray(c.ui) ? c.ui : [], t.tarjeta);
+          return;
+        }
+        if (r.ok) { this._cerrarTarjeta(t, "fallida", ERRORES_ACCION[c.error] || ESTADOS_ACCION.fallida); return; }
+        if (r.status === 403 || r.status === 404) { this._cerrarTarjeta(t, "fallida", ERRORES_ACCION[c.error] || ESTADOS_ACCION.fallida); return; }
+        this._errorTarjeta(t, c.error);
+      } catch { this._errorTarjeta(t); }
+    }
+
+    async _cancelarAccion(t) {
+      if (t.cerrada || t.ocupada) return;
+      t.ocupada = true; t.confirmar.disabled = t.cancelar.disabled = true; t.err.textContent = "";
+      try {
+        const r = await this._conToken((h) => fetch(`${this._servidor}/v1/confirmaciones/${encodeURIComponent(t.d.id)}/cancelar`, { method: "POST", headers: h }));
+        let c = {}; try { c = await r.json(); } catch { /* sin cuerpo */ }
+        if (r.ok) this._cerrarTarjeta(t, "cancelada");
+        else if (r.status === 409) this._cerrarTarjeta(t, c.estado in ESTADOS_ACCION ? c.estado : "fallida");
+        else this._errorTarjeta(t, c.error);
+      } catch { this._errorTarjeta(t); }
     }
 
     _acciones(lista, burbuja) {

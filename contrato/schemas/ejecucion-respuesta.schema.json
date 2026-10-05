@@ -5,25 +5,52 @@
   "oneOf": [
     {
       "type": "object",
-      "required": ["ok", "datos"],
+      "required": [
+        "ok",
+        "datos"
+      ],
       "properties": {
-        "ok": { "const": true },
+        "ok": {
+          "const": true
+        },
         "datos": {},
-        "fuente": { "type": "string", "maxLength": 200 },
-        "ui": { "type": "array", "items": { "$ref": "#/$defs/ui" } }
+        "fuente": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "ui": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ui"
+          }
+        }
       },
       "additionalProperties": true
     },
     {
       "type": "object",
-      "required": ["ok", "error"],
+      "required": [
+        "ok",
+        "error"
+      ],
       "properties": {
-        "ok": { "const": false },
+        "ok": {
+          "const": false
+        },
         "error": {
           "type": "string",
-          "enum": ["no_encontrado", "sin_acceso", "parametros_invalidos", "no_disponible"]
+          "enum": [
+            "no_encontrado",
+            "sin_acceso",
+            "parametros_invalidos",
+            "no_disponible",
+            "conflicto"
+          ]
         },
-        "detalle": { "type": "string", "maxLength": 1000 }
+        "detalle": {
+          "type": "string",
+          "maxLength": 1000
+        }
       },
       "additionalProperties": true
     }
@@ -31,11 +58,23 @@
   "$defs": {
     "ui": {
       "type": "object",
-      "required": ["tipo"],
+      "required": [
+        "tipo"
+      ],
       "properties": {
-        "tipo": { "type": "string", "enum": ["navegar"] },
-        "url": { "type": "string" },
-        "etiqueta": { "type": "string", "maxLength": 200 }
+        "tipo": {
+          "type": "string",
+          "enum": [
+            "navegar"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "etiqueta": {
+          "type": "string",
+          "maxLength": 200
+        }
       },
       "additionalProperties": true
     }

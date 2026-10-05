@@ -17,6 +17,9 @@ from asistente.sistemas.registro import RegistroSistemas, Sistema
 log = logging.getLogger(__name__)
 
 SCOPE_LECTURA = "asistente:lectura"
+SCOPE_ESCRITURA = "asistente:escritura"
+# Un token de escritura es de un solo uso y de vida muy corta (lo emite el sistema para una confirmación).
+MAX_VIDA_ESCRITURA_S = 120
 CLAIMS_OBLIGATORIOS = ["iss", "aud", "sub", "iat", "exp", "jti", "scope"]
 
 
@@ -29,6 +32,15 @@ class TokenInvalido(Exception):
 
 
 @dataclass(frozen=True)
+class AccionClaims:
+    """Claims propios del token de escritura: solo sirve para esa tool, esos parámetros y esa confirmación."""
+
+    act: str  # nombre de la tool
+    ph: str   # huella de los parámetros, emitida por el sistema
+    cid: str  # id de la confirmación
+
+
+@dataclass(frozen=True)
 class Usuario:
     sistema_id: str
     usuario_ref: str
@@ -37,6 +49,7 @@ class Usuario:
     tenants: tuple[str, ...]
     locale: str | None
     token: str  # credencial para llamar al sistema; nunca se loguea ni se persiste
+    accion: AccionClaims | None = None  # solo con scope de escritura
 
 
 class Autenticador:
@@ -44,7 +57,7 @@ class Autenticador:
         self._registro = registro
         self._jwks: dict[str, PyJWKClient] = {}
 
-    async def validar(self, token: str) -> Usuario:
+    async def validar(self, token: str, scope: str = SCOPE_LECTURA) -> Usuario:
         sistema = self._sistema_del_token(token)
         clave = await self._clave(sistema, token)
         auth = sistema.auth
@@ -63,12 +76,15 @@ class Autenticador:
         except jwt.PyJWTError as e:
             raise TokenInvalido(f"token inválido: {type(e).__name__}") from e
 
-        if claims["scope"] != SCOPE_LECTURA:
+        if claims["scope"] != scope:
             raise TokenInvalido("scope insuficiente")
         sub, jti = claims["sub"], claims["jti"]
         if not isinstance(sub, str) or not sub or not isinstance(jti, str) or not jti:
             raise TokenInvalido("sub/jti inválidos")
 
+        accion = None
+        if scope == SCOPE_ESCRITURA:
+            accion = _claims_accion(claims)
         tenants = claims.get("tenants") or []
         return Usuario(
             sistema_id=sistema.id,
@@ -78,6 +94,7 @@ class Autenticador:
             tenants=tuple(str(t) for t in tenants) if isinstance(tenants, list) else (),
             locale=_str_o_none(claims.get("locale")),
             token=token,
+            accion=accion,
         )
 
     def _sistema_del_token(self, token: str) -> Sistema:
@@ -105,6 +122,15 @@ class Autenticador:
         except jwt.PyJWTError as e:
             log.warning("no se pudo obtener la clave JWKS de %s: %s", sistema.id, e)
             raise TokenInvalido("clave de firma no disponible") from e
+
+
+def _claims_accion(claims: dict) -> AccionClaims:
+    act, ph, cid = claims.get("act"), claims.get("ph"), claims.get("cid")
+    if not all(isinstance(v, str) and v for v in (act, ph, cid)):
+        raise TokenInvalido("token de escritura sin act/ph/cid")
+    if claims["exp"] - claims["iat"] > MAX_VIDA_ESCRITURA_S:
+        raise TokenInvalido("token de escritura con vida demasiado larga")
+    return AccionClaims(act, ph, cid)
 
 
 def _str_o_none(valor: object) -> str | None:

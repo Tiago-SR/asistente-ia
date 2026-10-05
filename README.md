@@ -11,7 +11,7 @@ Principios del MVP:
 - Cifras siempre trazables a una tool (nada inventado).
 - Proveedor de LLM intercambiable (formato neutro + adaptadores).
 
-> Estado: Fases 0, 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools, referencia PHP, kit de despliegue y CI) y la voz del navegador con el modo «manos libres» del widget. Faltan la prueba manual en Chrome real, el despliegue en el VPS (en espera) y los sistemas reales; ver [Estado y pendientes](#estado-y-pendientes).
+> Estado: Fases 0, 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools, referencia PHP, kit de despliegue y CI) y la voz del navegador con el modo «manos libres» del widget. La Fase 5 (acciones con confirmación: agregar y modificar, nunca borrar) está implementada en el servicio, el mock y el widget. Faltan su referencia PHP y verificador, el despliegue en el VPS (en espera) y los sistemas reales; ver [Estado y pendientes](#estado-y-pendientes).
 
 ## Stack
 
@@ -99,7 +99,7 @@ El asistente sirve el Web Component en `GET /widget.js` (sin dependencias ni bui
 <asistente-chat style="display:block;height:100vh" servidor="https://asistente.example.com" token-url="/asistente/token"></asistente-chat>
 ```
 
-Atributos opcionales: `titulo`, `placeholder`, `idioma` (voz, por defecto `es-UY`), `voz` (nombre de una voz del navegador), `voz-motor` (`auto` | `navegador` | `servidor`), `palabra-activacion` (por defecto `asistente`) y `manos-libres-inactividad` (minutos, por defecto 5; 0 = nunca). **Voz:** el widget dicta con el reconocimiento del navegador (en Chrome el audio se procesa en Google; `voz-motor="servidor"` lo evita usando el STT del asistente) y lee las respuestas con las voces del navegador (botón por mensaje e interruptor de lectura automática). **Manos libres:** un botón en la barra deja el micrófono escuchando la palabra de activación; lo dictado queda en el campo y se envía solo tras confirmarlo («enviar» o botón). Aparece solo con reconocimiento del navegador (no con `voz-motor="servidor"`) y con el indicador de micrófono abierto siempre visible. Detalle en la sección 7.4 del contrato. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, `--asistente-ancho-lateral`, `--asistente-ancho-columna`, …) y avisa al anfitrión con los eventos `asistente:accion` (sugerencias `ui`) y `asistente:estado` (si no está disponible para el usuario, muestra un aviso en lugar del chat). El origen de la página debe estar en `origenes_permitidos` del sistema.
+Atributos opcionales: `titulo`, `placeholder`, `idioma` (voz, por defecto `es-UY`), `voz` (nombre de una voz del navegador), `voz-motor` (`auto` | `navegador` | `servidor`), `palabra-activacion` (por defecto `asistente`) y `manos-libres-inactividad` (minutos, por defecto 5; 0 = nunca). **Voz:** el widget dicta con el reconocimiento del navegador (en Chrome el audio se procesa en Google; `voz-motor="servidor"` lo evita usando el STT del asistente) y lee las respuestas con las voces del navegador (botón por mensaje e interruptor de lectura automática). **Manos libres:** un botón en la barra deja el micrófono escuchando la palabra de activación; lo dictado queda en el campo y se envía solo tras confirmarlo («enviar» o botón). Aparece solo con reconocimiento del navegador (no con `voz-motor="servidor"`) y con el indicador de micrófono abierto siempre visible. Detalle en la sección 7.4 del contrato. Se personaliza con variables CSS (`--asistente-color`, `--asistente-fondo`, `--asistente-fuente`, `--asistente-ancho-lateral`, `--asistente-ancho-columna`, …) y avisa al anfitrión con los eventos `asistente:accion` (sugerencias `ui`) `asistente:estado` (si no está disponible para el usuario, muestra un aviso en lugar del chat) y `asistente:confirmacion` (una acción propuesta terminó). **Acciones:** si el sistema las implementa y el operador las habilita (`acciones_habilitadas` en `config/sistemas.yaml`), el asistente solo las propone y el widget muestra una tarjeta Confirmar/Cancelar con el resumen que redactó el sistema; nunca se confirma por voz. Detalle en la sección 8 del contrato. El origen de la página debe estar en `origenes_permitidos` del sistema.
 
 Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL` apunta al asistente, por defecto `http://localhost:8100`). Registrá el mock en `config/sistemas.yaml` con su origen en `origenes_permitidos`, levantalo con `uvicorn app:app --app-dir ejemplos/sistema-mock --port 8201` y abrí <http://localhost:8201/?usuario=ana>.
 
@@ -153,6 +153,8 @@ tests_e2e/               e2e del widget en navegador (Playwright MCP)
 evals/                   preguntas, corredor y línea base por modelo (resultados/)
 herramientas/            verificador de conformidad y banco de pruebas de audio
 PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
+PRUEBA_MANUAL_VOZ.md     checklist de la prueba manual de voz en navegadores reales
+DISENO_FASE5.md          diseño en papel de las acciones con confirmación (Fase 5)
 ```
 
 ## Estado y pendientes
@@ -161,10 +163,10 @@ PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
 
 **Pendiente:**
 
-- **Prueba manual en Chrome real** (la hace el usuario): voces es-UY/es-ES, lectura automática, dictado seguido de lectura, manos libres con auriculares (el eco de los parlantes está aplazado y no se usa detector de energía), móvil, Safari y Edge.
+- **Prueba manual de voz en otros navegadores y dispositivos (aplazada por el usuario; la voz queda como está):** voces es-UY/es-ES, lectura automática, móvil, Safari y Edge. Checklist y formato de reporte en [`PRUEBA_MANUAL_VOZ.md`](PRUEBA_MANUAL_VOZ.md). El eco de los parlantes sigue aplazado (no hay detector de energía).
 - **Respaldo remoto de voz (opcional):** solo si algún cliente no puede enviar audio a Google o se quiere una voz más natural. El STT ya entra por `STT_*`; un TTS requeriría un puerto `TTS` y `POST /v1/voz/sintetizar`. Comparativa de proveedores en [`PROVEEDORES_VOZ.md`](PROVEEDORES_VOZ.md).
 - **Fase 3, primer sistema real (SGAgro; en espera, falta el sistema):** entregar el kit, acompañar el diseño de sus tools y su prompt de dominio, verificador en verde contra su entorno de pruebas, set de evals propio y costo por pregunta y por sistema.
-- **Fase 5, acciones con confirmación:** habilitar tools de escritura por sistema y por tool. El modelo propone, el asistente emite `confirmacion` con un resumen y un id firmado, el usuario confirma en el widget (no por texto) y el asistente ejecuta con ese id; el sistema exige un token con scope de escritura emitido para esa confirmación. Auditadas y, si se puede, reversibles.
+- **Fase 5, acciones con confirmación (implementada en servicio, mock y widget; contrato en la sección 8, diseño y decisiones en [`DISENO_FASE5.md`](DISENO_FASE5.md)):** el modelo solo propone; el sistema valida y resume sin efectos, el usuario confirma con un clic y el sistema emite un token de escritura de un solo uso atado a la tool y a los parámetros. **Falta:** la referencia PHP (`propuesta`, token de escritura, ejecución idempotente), las comprobaciones de la sección 8 en `verificar_sistema.py` (hoy las cubre `tests/test_mock_acciones.py`), preguntas de evals que terminen en propuesta (y probarlas con el modelo real), restaurar la tarjeta pendiente tras recargar la página, y una acción real de SGAgro. Deshacer (`reversible_con`) y borrar quedan fuera.
 - **Fase 6, proactivo (a evaluar):** webhooks del sistema hacia el asistente o consultas programadas; requiere cola o cron en el contenedor.
 - **Despliegue en el VPS (en espera):** kit listo y probado en local. Hito: stack tras el proxy con TLS, `/admin` y `/docs` cerrados, SSE sin buffering y widget probado contra el dominio real. Los backups quedan en el mismo VPS por ahora.
 
@@ -173,7 +175,7 @@ PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
 - **Privacidad por cliente:** quién informa a los clientes de cada sistema de que sus datos van a un LLM externo y cómo se habilita por cliente (`habilitado` por sistema permite excluir a alguno; un modelo local es la salida si alguien exige que los datos no salgan).
 - **Audio a Google:** cómo se informa que, en Chrome, el audio del dictado y de manos libres se procesa en Google (hoy aceptado; `voz-motor="servidor"` lo evita, y manos libres no está disponible con él).
 - **Quién opera el VPS.**
-- Menores: facturación del uso por sistema, manifiesto por rol de usuario (hoy global), `locale` por usuario o por sistema, y qué acciones valen la pena en la Fase 5.
+- Menores: facturación del uso por sistema, manifiesto por rol de usuario (hoy global), `locale` por usuario o por sistema, y qué acciones concretas de SGAgro entran en la Fase 5.
 
 ## Arquitectura y decisiones vigentes
 

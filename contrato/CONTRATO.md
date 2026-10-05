@@ -28,7 +28,7 @@ Si el usuario no tiene permitido el asistente, responde `403` y el widget muestr
 | `sub` | sí | identificador estable del usuario (string opaco) |
 | `iat`, `exp` | sí | vida corta: **5–15 min** |
 | `jti` | sí | id único (auditoría) |
-| `scope` | sí | `"asistente:lectura"` |
+| `scope` | sí | `"asistente:lectura"` (el de escritura, `"asistente:escritura"`, solo existe para confirmar una acción: [sección 8](#8-acciones-con-confirmación-opcional)) |
 | `nombre` | no | nombre a mostrar |
 | `tenants` | no | ids de organización del usuario, solo para métricas y cuotas. **Nunca se usa para autorizar** |
 | `locale` | no | p. ej. `es-UY` |
@@ -63,7 +63,7 @@ Reglas (si no se cumplen, la tool o el manifiesto se rechazan y se loguea):
 
 - `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único.
 - `descripcion`: ≤ 1 000 caracteres. `parametros`: JSON Schema válido, tipo `object`.
-- `efecto` ∈ {`lectura`, `escritura`}. **En el MVP solo se exponen al modelo las de `lectura`.**
+- `efecto` ∈ {`lectura`, `escritura`}. Al modelo solo se exponen las de `lectura`, salvo las escrituras que declaran `confirmacion` y que el operador del asistente habilitó explícitamente ([sección 8](#8-acciones-con-confirmación-opcional)); ni siquiera esas se ejecutan sin la confirmación del usuario.
 - Máximo 40 tools por sistema y 256 KB por manifiesto.
 - Se cachea con TTL configurable y se puede recargar a mano.
 
@@ -102,7 +102,7 @@ Error de negocio (`200` con `ok: false`):
 | Situación | Respuesta del sistema | Qué hace el asistente |
 |---|---|---|
 | OK | `200`, `ok: true` | pasa `datos` (y `fuente`) al modelo; `ui` va al widget, **no** al modelo |
-| Error de negocio | `200`, `ok: false`, `error` ∈ {`no_encontrado`, `sin_acceso`, `parametros_invalidos`, `no_disponible`} | lo pasa al modelo, que no debe rellenar con suposiciones |
+| Error de negocio | `200`, `ok: false`, `error` ∈ {`no_encontrado`, `sin_acceso`, `parametros_invalidos`, `no_disponible`, `conflicto`}; `conflicto` solo en escrituras (sección 8) | lo pasa al modelo, que no debe rellenar con suposiciones |
 | Token inválido/vencido | `401` | corta el turno y emite `token_expirado` al widget, que renueva y reintenta |
 | Scope insuficiente | `403` | `sin_acceso` |
 | Error del sistema | `5xx` / timeout / JSON inválido | `error_sistema` / `timeout` / `respuesta_invalida` al modelo |
@@ -110,7 +110,7 @@ Error de negocio (`200` con `ok: false`):
 Requisitos para el sistema:
 
 - **Validar el token con su propia clave** y rechazar (`403`) el `token_manifiesto` en este endpoint.
-- **Rechazar toda escritura** con scope `asistente:lectura`. Esta es la capa de solo lectura que vale: el asistente no puede verificar qué hace realmente una tool remota.
+- **Rechazar toda escritura** con scope `asistente:lectura`. Esta es la capa de solo lectura que vale: el asistente no puede verificar qué hace realmente una tool remota. Una escritura solo se acepta con el token de escritura de la sección 8.
 - Tratar los ids y parámetros que llegan como **no confiables**: validar y aplicar permisos como con cualquier input.
 
 Recomendaciones:
@@ -127,7 +127,7 @@ Recomendaciones:
 ## 5. Versionado
 
 - El manifiesto declara `contrato`. El asistente acepta las versiones que soporta y rechaza las demás con un error claro en el log.
-- Cambios compatibles (campos opcionales nuevos) no suben versión; los incompatibles sí.
+- Cambios compatibles (campos opcionales nuevos) no suben versión; los incompatibles sí. La sección 8 (acciones con confirmación) es de este tipo: un sistema que solo lee no cambia nada.
 
 ## 6. Credenciales y registro del sistema
 
@@ -273,6 +273,7 @@ El widget emite eventos DOM (`CustomEvent`, que burbujean y atraviesan el Shadow
 |---|---|---|
 | `asistente:accion` | `{ tipo, url, etiqueta }` | Una tool devolvió una sugerencia `ui` (ver sección 3). Si el sistema llama a `preventDefault()`, el widget no muestra su botón y el sistema decide qué hacer (navegar, abrir un mapa, filtrar una tabla). Por defecto, solo se muestra un botón para URLs relativas del mismo origen. |
 | `asistente:estado` | `{ habilitado }` | Al decidir si el asistente está disponible. Si no lo está (`403` del token o sistema deshabilitado), el widget muestra un aviso en lugar del chat. |
+| `asistente:confirmacion` | `{ id, tool, estado }` | Una acción propuesta por el asistente terminó (`ejecutada`, `cancelada`, `expirada`, `reemplazada` o `fallida`; [sección 8](#8-acciones-con-confirmación-opcional)). El sistema puede refrescar su pantalla tras una `ejecutada`. |
 
 ### 7.4 Voz (opcional)
 
@@ -311,3 +312,76 @@ Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), 
 
 - El contenido del modelo (Markdown) se construye con nodos DOM, nunca con `innerHTML`; los enlaces del modelo solo admiten `http`, `https` y `mailto`.
 - El navegador solo ve el JWT de vida corta, nunca la clave de firma ni el token de manifiesto.
+
+## 8. Acciones con confirmación (opcional)
+
+Un sistema puede dejar que el asistente **proponga** escrituras acotadas (agregar o modificar un dato). Nunca se ejecutan sin que el usuario las confirme con un clic en el widget. Es opcional y está apagado por defecto: un sistema que no lo implemente sigue siendo de solo lectura. El borrado no se admite en esta versión (una tool marcada `destructiva: true` no se ofrece nunca).
+
+**Quién manda.** La autoridad es el sistema: ejecuta una escritura solo con un token de escritura que él mismo emitió para esa acción. Un asistente comprometido no puede fabricarlo. El resumen que el usuario confirma lo redacta el sistema, no el modelo.
+
+### 8.1 Declararla en el manifiesto
+
+```json
+{ "nombre": "agregar_nota",
+  "descripcion": "Agrega una nota a un establecimiento. El usuario debe confirmarla en pantalla.",
+  "parametros": { "type": "object", "properties": { "establecimiento_id": {"type": "string"}, "texto": {"type": "string", "maxLength": 500} },
+                  "required": ["establecimiento_id", "texto"], "additionalProperties": false },
+  "efecto": "escritura",
+  "confirmacion": { "ttl_s": 120 } }
+```
+
+`confirmacion.ttl_s` (10–300, por defecto 120) es lo que dura una propuesta. Sin `confirmacion`, la tool de escritura no se ofrece al modelo. Además, el operador del asistente debe listarla en `acciones_habilitadas` del sistema en `config/sistemas.yaml` (vacío por defecto): la escritura se habilita por sistema y por tool, aparte de la lectura.
+
+### 8.2 Propuesta (sin efectos)
+
+`POST {base_url}/asistente/tools/{nombre}/propuesta`: mismo cuerpo que la ejecución y **token de lectura**. El sistema valida los parámetros y los permisos **sin escribir nada** y responde:
+
+```json
+{ "ok": true,
+  "resumen": "Modificar la nota n1 del establecimiento «El Matorral»",
+  "detalle": ["Antes: Revisar el alambrado", "Después: Revisar el alambrado y la tranquera"],
+  "huella": "9f2c…(SHA-256, 64 hex)",
+  "expira_s": 120 }
+```
+
+- `resumen` (≤ 300 caracteres) y `detalle` (≤ 10 líneas de ≤ 200) son lo que el usuario ve. Una modificación debe mostrar el valor anterior y el nuevo.
+- `huella`: SHA-256 de la forma canónica de `{sub, tool, parametros, versión del registro que se modifica}`. **El sistema la recuerda hasta `expira_s`** y solo emite tokens de escritura para huellas que él produjo, para ese usuario y vigentes.
+- Errores de negocio como en la sección 3 (`ok: false`).
+
+### 8.3 Token de escritura
+
+Cuando el usuario pulsa **Confirmar**, el widget pide al `token-url` del sistema (con la sesión del usuario) un token para esa confirmación: la misma ruta con `?confirmacion=<id>&huella=<huella>` añadidos a la query. El sistema comprueba que la huella es de una propuesta suya, vigente y de ese usuario, y emite un JWT con los claims habituales más:
+
+| Claim | Valor |
+|---|---|
+| `scope` | `asistente:escritura` |
+| `exp` | **≤ 60 s** después de `iat` (el asistente rechaza más de 120 s) |
+| `jti` | único; **un solo uso** |
+| `act` | nombre de la única tool para la que sirve |
+| `ph` | la huella confirmada |
+| `cid` | el id de la confirmación (`confirmacion` de la query) |
+
+Un usuario sin permiso de escritura recibe `403` y la tarjeta lo informa.
+
+### 8.4 Ejecución
+
+El asistente llama al endpoint de ejecución de siempre (sección 3) con ese token y la cabecera **`Idempotency-Key`** (el id de la confirmación). El sistema debe:
+
+1. Validar firma y vigencia, y exigir `scope: asistente:escritura`, `act` = la tool pedida y `cid` presente.
+2. Aceptar cada `jti` **una sola vez**.
+3. Comprobar que los parámetros recibidos son los de la propuesta cuya huella es `ph` (si cambiaron, `403`).
+4. Para una modificación, comprobar que el dato **no cambió** desde la propuesta; si cambió, `{"ok": false, "error": "conflicto"}`.
+5. Tratar la `Idempotency-Key` repetida devolviendo el resultado anterior sin reejecutar.
+6. Responder `{"ok": true, "datos": {"mensaje": "Nota agregada."}, "fuente": …, "ui": […]}`; `datos.mensaje` (≤ 300 caracteres) es lo que muestra la tarjeta.
+
+Rechazar con `403` una escritura con token de lectura, una de lectura con token de escritura y un token de escritura para otra tool. El asistente nunca reintenta una ejecución.
+
+### 8.5 En el asistente y el widget
+
+- El modelo propone con la tool de escritura; el asistente pide la propuesta, la guarda como **pendiente** (`/v1/confirmaciones/{id}`), avisa al widget con el evento SSE `confirmacion` (`{ id, tool, resumen, lineas, huella, expira }`) y el modelo recibe «pendiente: no se ejecutó». Una propuesta por turno, una pendiente por conversación (la nueva reemplaza a la anterior) y un tope de propuestas por usuario y hora (`ASISTENTE_ACCIONES_MAX_POR_HORA`, 20).
+- **El widget muestra una tarjeta** con el resumen del sistema, los botones Confirmar y Cancelar y la cuenta regresiva hasta el vencimiento. Solo un clic real confirma; el texto va como texto, nunca como HTML.
+- `POST /v1/confirmaciones/{id}/confirmar` (token de escritura) y `POST /v1/confirmaciones/{id}/cancelar` (token de lectura). Cada transición es atómica: dos clics o dos pestañas no ejecutan dos veces (`409 accion_no_pendiente` con el `estado` actual). Una acción ajena o inexistente da `404`.
+- **Nunca se confirma por voz**, tampoco en manos libres: allí el asistente lee la propuesta en voz alta («Te pido confirmar en pantalla: …») y espera el clic.
+- Auditoría: la propuesta (`{tool}#propuesta`) y la ejecución quedan en `llamadas_tool`, y el ciclo de vida completo en la tabla `acciones`, con la misma retención que las conversaciones (30 días por defecto). El resultado se agrega al historial de la conversación. La acción queda a nombre del usuario que confirma (`sub`), con el asistente como origen.
+
+La referencia de esta sección es el sistema mock (`ejemplos/sistema-mock`, tools `agregar_nota` y `modificar_nota`) y `tests/test_mock_acciones.py`; cada regla de 8.2–8.4 tiene su prueba y su defecto deliberado (`propuesta_con_efectos`, `ph_ignorado`, `replay_aceptado`, `token_otra_tool`, `sin_idempotencia`, `token_escritura_largo`).

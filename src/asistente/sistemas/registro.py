@@ -50,6 +50,7 @@ class ConectorConfig(_Modelo):
     tipo: Literal["http"] = "http"
     ruta_manifiesto: str = "/asistente/tools"
     ruta_ejecucion: str = "/asistente/tools/{nombre}"
+    ruta_propuesta: str = "/asistente/tools/{nombre}/propuesta"
     token_manifiesto_env: str
     timeout_s: float = Field(default=20, gt=0, le=120)
     manifiesto_ttl_s: int = Field(default=3600, ge=0)
@@ -61,6 +62,8 @@ class ConectorConfig(_Modelo):
             raise ValueError("ruta_manifiesto debe empezar con /")
         if not self.ruta_ejecucion.startswith("/") or "{nombre}" not in self.ruta_ejecucion:
             raise ValueError("ruta_ejecucion debe empezar con / y contener {nombre}")
+        if not self.ruta_propuesta.startswith("/") or "{nombre}" not in self.ruta_propuesta:
+            raise ValueError("ruta_propuesta debe empezar con / y contener {nombre}")
         return self
 
 
@@ -89,6 +92,8 @@ class Sistema(_Modelo):
     llm: LLMConfig | None = None
     limites: LimitesConfig = LimitesConfig()
     retencion_dias: int = Field(default=30, gt=0)
+    # Fase 5: escrituras que el modelo puede proponer (con confirmación del usuario). Vacío = solo lectura.
+    acciones_habilitadas: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _base_url(self) -> Self:

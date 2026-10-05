@@ -6,7 +6,7 @@ from fastapi import Request
 
 from asistente.api.errores import ErrorApi
 from asistente.servicios import Servicios
-from asistente.sistemas.auth import TokenInvalido, Usuario
+from asistente.sistemas.auth import SCOPE_ESCRITURA, SCOPE_LECTURA, TokenInvalido, Usuario
 from asistente.sistemas.registro import Sistema
 
 
@@ -24,14 +24,23 @@ def servicios(request: Request) -> Servicios:
 
 
 async def sesion_actual(request: Request) -> Sesion:
-    """El sistema sale del token (`iss`), nunca del request."""
+    """El sistema sale del token (`iss`), nunca del request. Solo acepta tokens de lectura."""
+    return await _sesion(request, SCOPE_LECTURA)
+
+
+async def sesion_escritura(request: Request) -> Sesion:
+    """Igual, pero exige el token de escritura que el sistema emite para una confirmación."""
+    return await _sesion(request, SCOPE_ESCRITURA)
+
+
+async def _sesion(request: Request, scope: str) -> Sesion:
     svc = servicios(request)
     cabecera = request.headers.get("authorization", "")
     esquema, _, token = cabecera.partition(" ")
     if esquema.lower() != "bearer" or not token.strip():
         raise ErrorApi(401, "token_invalido", {"WWW-Authenticate": "Bearer"})
     try:
-        usuario = await svc.autenticador.validar(token.strip())
+        usuario = await svc.autenticador.validar(token.strip(), scope)
     except TokenInvalido as e:
         codigo = "token_expirado" if e.expirado else "token_invalido"
         raise ErrorApi(401, codigo, {"WWW-Authenticate": "Bearer"}) from e

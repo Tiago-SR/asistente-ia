@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asistente.local/contrato/v1/propuesta-respuesta.schema.json",
+  "title": "Respuesta (HTTP 200) de la propuesta de una acción de escritura",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "ok",
+        "resumen",
+        "huella"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "resumen": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Lo redacta el sistema; es lo que el usuario confirma."
+        },
+        "detalle": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": "Líneas de detalle (por ejemplo «Antes: …», «Después: …»)."
+        },
+        "huella": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "description": "SHA-256 de la forma canónica de {sub, tool, parametros, versión del registro}. El sistema la recuerda hasta `expira_s`."
+        },
+        "expira_s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": [
+        "ok",
+        "error"
+      ],
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "type": "string",
+          "enum": [
+            "no_encontrado",
+            "sin_acceso",
+            "parametros_invalidos",
+            "no_disponible",
+            "conflicto"
+          ]
+        },
+        "detalle": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
+}

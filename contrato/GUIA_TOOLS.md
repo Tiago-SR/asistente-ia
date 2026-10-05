@@ -10,7 +10,7 @@ Los ejemplos salen del [sistema mock](../ejemplos/sistema-mock/app.py) y de las 
 - **Una tool = una intención.** Si la descripción necesita un "o" para explicar qué hace, son dos tools.
 - **Que resuelva la pregunta completa.** Si responder "¿cuántas hectáreas tiene la empresa X?" requiere sumar cien filas, la tool debe devolver el total (ver [sección 4](#4-qué-devolver)), no las cien filas.
 - **Una de listado por entidad principal**, con filtro `texto` (ver [sección 5](#5-listados-con-filtro-texto-para-resolver-nombres)).
-- **Solo lectura.** Las `escritura` no llegan al modelo en el MVP, y el sistema debe rechazarlas igual con el scope de lectura.
+- **Solo lectura por defecto.** Las `escritura` no llegan al modelo salvo que declaren `confirmacion` y el operador las habilite (agregar o modificar; nunca borrar), y aun así el usuario confirma cada una en pantalla ([sección 8 del contrato](CONTRATO.md#8-acciones-con-confirmación-opcional)). El sistema debe rechazar siempre una escritura con el scope de lectura.
 - **Empezar por las preguntas.** Escribir 10 preguntas reales de usuarios y comprobar que cada una se contesta con 1 a 3 llamadas. Esas preguntas son además la base del set de evaluación (`evals/`).
 
 | Mal | Bien |

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Purga de retención: cada cuántos segundos (0 = desactivada).
     purga_intervalo_s: float = _env("ASISTENTE_PURGA_INTERVALO_S", 86400.0)
 
+    # Acciones con confirmación (Fase 5): propuestas por usuario y hora.
+    acciones_max_por_hora: int = _env("ASISTENTE_ACCIONES_MAX_POR_HORA", 20)
+
     # Voz (Fase 4). Sin STT_PROVEEDOR el dictado queda deshabilitado.
     stt_proveedor: str | None = _env("STT_PROVEEDOR", None)
     stt_base_url: str | None = _env("STT_BASE_URL", None)

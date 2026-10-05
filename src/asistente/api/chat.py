@@ -93,7 +93,7 @@ async def chat(
                     await emit(evento, datos)
 
             res = await run_turn(ctx, llm, conector, svc.auditoria, svc.limites, historial,
-                                 texto, filtrado, conv_id, config)
+                                 texto, filtrado, conv_id, config, acciones=svc.acciones)
             if res.completo:
                 try:
                     await asyncio.shield(svc.repo.guardar_turno(
