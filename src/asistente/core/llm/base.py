@@ -45,9 +45,14 @@ class Mensaje:
 class Uso:
     tokens_in: int = 0
     tokens_out: int = 0
+    tokens_in_cache: int = 0  # parte de `tokens_in` servida desde la caché del proveedor (si la informa)
 
     def __add__(self, otro: "Uso") -> "Uso":
-        return Uso(self.tokens_in + otro.tokens_in, self.tokens_out + otro.tokens_out)
+        return Uso(
+            self.tokens_in + otro.tokens_in,
+            self.tokens_out + otro.tokens_out,
+            self.tokens_in_cache + otro.tokens_in_cache,
+        )
 
     @property
     def total(self) -> int:

@@ -84,7 +84,7 @@ class OpenAICompat:
                 async for evento in _eventos(r):
                     if evento.get("usage"):
                         u = evento["usage"]
-                        uso = Uso(u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0)
+                        uso = Uso(u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, _cache(u))
                     for ch in evento.get("choices") or []:
                         delta = ch.get("delta") or {}
                         if frag := delta.get("content"):
@@ -113,6 +113,14 @@ async def _eventos(r: httpx.Response) -> AsyncIterator[dict]:
             yield json.loads(dato)
         except ValueError as e:
             raise LLMError("el proveedor envió un evento SSE que no es JSON") from e
+
+
+def _cache(usage: dict) -> int:
+    """Tokens de entrada servidos desde caché: `prompt_cache_hit_tokens` (DeepSeek) o
+    `prompt_tokens_details.cached_tokens` (OpenAI y compatibles)."""
+    if (n := usage.get("prompt_cache_hit_tokens")) is not None:
+        return n or 0
+    return (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
 
 
 def _acumular(parciales: dict[int, dict], tc: dict) -> None:

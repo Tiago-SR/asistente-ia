@@ -1,0 +1,98 @@
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+
+from asistente.core.llm.base import Uso
+from asistente.core.llm.openai_compat import _cache
+
+EVALS = Path(__file__).resolve().parent.parent / "evals"
+sys.path.insert(0, str(EVALS))
+import correr
+import puntuar as p
+
+BASE = [540.5, 210, 120, 88.2, 870.5, 660.5]
+
+
+def pregunta(**criterios) -> dict:
+    return {"turnos": ["¿algo?"], **criterios}
+
+
+@pytest.mark.parametrize("texto,esperado", [
+    ("Tiene 540,5 ha", [540.5]),
+    ("Tiene 540.5 hectáreas", [540.5]),
+    ("Son 1.234,5 ha", [1234.5]),
+    ("Son 1,234.5 ha", [1234.5]),
+    ("Son 1.234 ha", [1234.0]),
+    ("El 75,9% de 870,5.", [75.9, 870.5]),
+])
+def test_numeros_en_acepta_formato_es_y_en(texto, esperado):
+    assert p.numeros_en(texto) == esperado
+
+
+def test_la_cifra_esperada_debe_aparecer_con_tolerancia():
+    q = pregunta(numeros=[[75.9, 75.87]])
+    assert p.puntuar(q, "Es el 75,9 %", [], BASE, None)["ok"]
+    assert p.puntuar(q, "Es el 75,87 %", [], BASE, None)["ok"]
+    r = p.puntuar(q, "Es el 76 %", [], BASE, None)
+    assert not r["ok"] and any("falta la cifra" in f for f in r["fallos"])
+
+
+def test_una_cifra_de_otro_usuario_es_fallo():
+    r = p.puntuar(pregunta(sin_numeros=[88.2]), "Los Ceibos tiene 88,2 ha", [], BASE, None)
+    assert any("prohibida" in f for f in r["fallos"])
+
+
+def test_cifra_inventada_se_detecta_pero_enteros_chicos_y_anios_no():
+    r = p.puntuar(pregunta(), "Tiene 3 lotes, 999,9 ha, en 2026", [], BASE, None)
+    assert r["fallos"] == ["cifra no respaldada: 999.9"]
+
+
+def test_cifras_derivadas_declaradas_no_cuentan_como_inventadas():
+    q = pregunta(permitidos=[420.5])
+    assert p.puntuar(q, "Hay 420,5 ha de diferencia", [], BASE, None)["ok"]
+    assert not p.puntuar(pregunta(), "Hay 420,5 ha de diferencia", [], BASE, None)["ok"]
+
+
+def test_las_cifras_de_la_pregunta_estan_permitidas():
+    q = {"turnos": ["Crea un campo de 100 hectáreas"], "contiene": [["no puedo"]]}
+    assert p.puntuar(q, "No puedo crear los 100 ha", [], BASE, None)["ok"]
+
+
+def test_contiene_ignora_tildes_y_mayusculas_y_pide_un_grupo_completo():
+    q = pregunta(contiene=[["maíz"], ["soja"]])
+    assert p.puntuar(q, "MAIZ y Soja", [], BASE, None)["ok"]
+    assert not p.puntuar(q, "solo soja", [], BASE, None)["ok"]
+
+
+def test_tools_y_errores_del_servicio():
+    q = pregunta(tools_requeridas=["a"], tools_prohibidas=["b"])
+    assert p.puntuar(q, "ok", ["a"], BASE, None)["ok"]
+    assert len(p.puntuar(q, "ok", ["b"], BASE, None)["fallos"]) == 2
+    assert not p.puntuar(pregunta(), "", [], BASE, "llm_no_disponible")["ok"]
+
+
+def test_cache_de_distintos_proveedores():
+    assert _cache({"prompt_cache_hit_tokens": 120, "prompt_tokens_details": {"cached_tokens": 5}}) == 120
+    assert _cache({"prompt_tokens_details": {"cached_tokens": 64}}) == 64
+    assert _cache({"prompt_tokens": 10}) == 0
+    assert (Uso(10, 2, 8) + Uso(5, 1, 0)) == Uso(15, 3, 8)
+
+
+def test_costo_separa_cache_hit_y_miss():
+    tarifa = {"entrada_cache_hit": {"valle": 1.0}, "entrada_cache_miss": {"valle": 10.0}, "salida": {"valle": 100.0}}
+    uso = {"tokens_in": 1_000_000, "tokens_in_cache": 400_000, "tokens_out": 10_000}
+    assert correr.costo(uso, tarifa, "valle") == pytest.approx(0.4 + 6.0 + 1.0)
+    assert correr.costo(uso, None, "valle") is None
+
+
+def test_el_set_de_preguntas_es_valido():
+    conjunto = yaml.safe_load((EVALS / "preguntas.yaml").read_text(encoding="utf-8"))
+    ids = [q["id"] for q in conjunto["preguntas"]]
+    assert len(ids) == len(set(ids)) >= 30
+    permitidos = {"turnos", "id", "categoria", "usuario", "tools_requeridas", "tools_prohibidas", "numeros",
+                  "sin_numeros", "contiene", "no_contiene", "permitidos"}
+    for q in conjunto["preguntas"]:
+        assert set(q) <= permitidos, q["id"]
+        assert q["turnos"] and q["usuario"] in ("ana", "beto"), q["id"]

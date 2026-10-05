@@ -22,6 +22,7 @@ services:
       - ./contrato:/app/contrato:ro
       - ./prompts:/app/prompts:ro
       - ./herramientas:/app/herramientas:ro
+      - ./evals:/app/evals
       - ./config:/config:ro
     ports:
       - "8100:8000"

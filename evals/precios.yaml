@@ -1,0 +1,9 @@
+# USD por millón de tokens, por modelo (clave = valor de ASISTENTE_MODELO_DEFAULT).
+# `valle`/`pico`: la tarifa depende del horario del proveedor; el informe muestra las dos.
+# Un modelo local o sin tarifa conocida: omitirlo (el informe da solo tokens y latencia).
+# Verificar contra la lista de precios vigente del proveedor antes de usar las cifras para facturar.
+deepseek-flash:
+  entrada_cache_hit: {valle: 0.003, pico: 0.006}
+  entrada_cache_miss: {valle: 0.15, pico: 0.3}
+  salida: {valle: 0.6, pico: 1.2}
+  nota: "Admite modo thinking (activo por defecto) y no-thinking. Línea base con el modo por defecto."

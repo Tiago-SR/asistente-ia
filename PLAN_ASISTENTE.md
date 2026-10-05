@@ -695,7 +695,7 @@ Como no se conoce nada de los sistemas consumidores, el éxito depende de que in
 - [x] `sistemas/manifiesto.py` + `conector_http.py`
 - [x] `core/` (ports incl. `LLM`, agent, tools, events, prompts) y test de arquitectura (`tests/test_arquitectura.py`: `core/` no importa `api/`, `sistemas/` ni `store/`)
 - [x] `core/llm/` formato neutro + adaptador `openai_compat` + tests de contrato de adaptador
-- [ ] Evals corridos contra el modelo elegido como línea base (no existe `evals/` todavía)
+- [x] Evals (`evals/`: 32 preguntas sobre `sistema-php`, `correr.py`, `puntuar.py`, `precios.yaml`) y línea base con `deepseek-flash` (2026-10-05, thinking por defecto): 32/32, 0 cifras no respaldadas, mediana 2,9 s (p95 6 s), ~2,2 llamadas al LLM por pregunta, ~2 240 tokens de entrada (83 % de caché) y ~215 de salida, **≈ 0,0002 USD por pregunta en valle y 0,0004 en pico**. Resultados en `evals/resultados/`. Es un set pequeño y los criterios se afinaron tras las dos primeras corridas (falsos fallos por cifras derivadas): sirve para detectar regresiones y comparar modelos, no como medida absoluta
 - [x] `store/` modelos + migraciones; purga de retención: `retencion.py` recorre los sistemas del registro con su `retencion_dias` al arrancar y cada `ASISTENTE_PURGA_INTERVALO_S` (86400; 0 = desactivada), desde el `lifespan`. Solo cubre sistemas habilitados y válidos
 - [x] `limits.py` (rate limit + cuotas)
 - [x] API `/v1/chat` (SSE), conversaciones, estado, `/salud`, `/admin/*`

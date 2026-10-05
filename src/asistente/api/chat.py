@@ -103,7 +103,11 @@ async def chat(
                     log.exception("[%s] no se pudo guardar el turno", request_id)
                     await emit(events.ERROR, "no_se_pudo_guardar")
                 else:
-                    await emit(events.DONE, {"conversacion_id": str(conv_id)})
+                    await emit(events.DONE, {
+                        "conversacion_id": str(conv_id),
+                        "uso": {"tokens_in": res.uso.tokens_in, "tokens_out": res.uso.tokens_out,
+                                "tokens_in_cache": res.uso.tokens_in_cache},
+                    })
         except Exception:
             log.exception("[%s] error inesperado en el turno", request_id)
             await emit(events.ERROR, "error_interno")
