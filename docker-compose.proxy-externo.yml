@@ -1,0 +1,9 @@
+# Override para una VPS que ya tiene un proxy (Caddy en otro stack) en la red externa `web`.
+#   docker compose -f docker-compose.yml -f docker-compose.proxy-externo.yml up -d --build
+services:
+  asistente:
+    networks: [interna, publica, web]
+
+networks:
+  web:
+    external: true

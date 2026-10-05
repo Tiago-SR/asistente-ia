@@ -1,7 +1,8 @@
-# PRODUCCIÓN. Uso:
+# BASE de producción (genérica). Uso:
 #   docker compose up -d --build        (lee ./.env; Dockge hace lo mismo)
 # Desarrollo: docker compose -f docker-compose.dev.yml up --build
-# Requiere un proxy inverso con TLS delante (nginx/Caddy/Traefik) que haga proxy a asistente:8000
+# Requiere un proxy inverso con TLS delante: docker-compose.prod.yml (VPS genérica, puerto en loopback) o docker-compose.proxy-externo.yml (proxy en red `web`).
+# Debe hacer proxy a asistente:8000
 # con buffering desactivado para SSE. Postgres no se publica fuera de la red interna.
 services:
   asistente:

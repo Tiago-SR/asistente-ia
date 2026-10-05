@@ -1,0 +1,9 @@
+# PRODUCCIÓN en una VPS cualquiera, sin proxy incluido. Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Publica el puerto SOLO en loopback: el proxy del host (nginx, Caddy, Traefik, túnel...)
+# hace TLS y proxy a 127.0.0.1:${ASISTENTE_PUERTO:-8000}, con buffering desactivado para SSE.
+# Ejemplo de nginx en deploy/nginx.conf.example.
+services:
+  asistente:
+    ports:
+      - "127.0.0.1:${ASISTENTE_PUERTO:-8000}:8000"
