@@ -306,3 +306,48 @@ async def test_un_origen_no_permitido_no_confirma(acc, llm, ana, cliente_mocks):
         f"/v1/confirmaciones/{conf['id']}/confirmar",
         headers={"Authorization": f"Bearer {token}", "Origin": "https://malo.example"})
     assert r.status_code == 403
+
+
+# --- restaurar la tarjeta al recargar -------------------------------------------------------------------
+
+async def _pendiente_de(acc, usuario, conv):
+    r = await acc.get(f"/v1/conversaciones/{conv}", headers=auth(usuario=usuario))
+    assert r.status_code == 200
+    return r.json()["pendiente"]
+
+
+async def test_la_conversacion_devuelve_la_propuesta_pendiente_para_restaurar_la_tarjeta(acc, llm, ana):
+    conf, ev = await proponer(acc, llm, ana, agregar())
+    conv = ev[-1][1]["conversacion_id"]
+    p = await _pendiente_de(acc, ana, conv)
+    assert p["id"] == conf["id"] and p["huella"] == conf["huella"] and p["estado"] == "pendiente"
+    assert p["resumen"] == conf["resumen"] and p["lineas"] == conf["lineas"] and p["expira"] == conf["expira"]
+
+
+async def test_sin_propuesta_vigente_no_hay_pendiente(acc, llm, ana, cliente_mocks, sesiones):
+    # cancelada, confirmada, vencida y reemplazada: ninguna se restaura
+    c1, ev = await proponer(acc, llm, ana, agregar("uno"))
+    conv = ev[-1][1]["conversacion_id"]
+    await acc.post(f"/v1/confirmaciones/{c1['id']}/cancelar", headers=auth(usuario=ana))
+    assert await _pendiente_de(acc, ana, conv) is None
+
+    c2, _ = await proponer(acc, llm, ana, agregar("dos"), conv=conv)
+    await confirmar(acc, c2, await token_escritura(cliente_mocks, ana, c2))
+    assert await _pendiente_de(acc, ana, conv) is None
+
+    c3, _ = await proponer(acc, llm, ana, agregar("tres"), conv=conv)
+    async with sesiones.begin() as s:
+        await s.execute(update(Accion).where(Accion.id == uuid.UUID(c3["id"]))
+                        .values(expira=datetime.now(UTC) - timedelta(seconds=1)))
+    assert await _pendiente_de(acc, ana, conv) is None
+
+    await proponer(acc, llm, ana, agregar("cuatro"), conv=conv)
+    c5, _ = await proponer(acc, llm, ana, agregar("cinco"), conv=conv)
+    assert (await _pendiente_de(acc, ana, conv))["id"] == c5["id"]
+
+
+async def test_sin_acciones_habilitadas_la_conversacion_no_trae_pendiente(api, llm, ana):
+    llm.usar(texto("hola"))
+    ev = sse(await chatear(api, "hola", usuario=ana))
+    conv = ev[-1][1]["conversacion_id"]
+    assert await _pendiente_de(api, ana, conv) is None

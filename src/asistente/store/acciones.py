@@ -80,6 +80,20 @@ class AccionesSql:
                 select(Accion).where(*self._propia(sistema_id, usuario_ref, accion_id))
             )).scalar_one_or_none()
 
+    async def pendiente_de(
+        self, sistema_id: str, usuario_ref: str, conversacion_id: uuid.UUID
+    ) -> Accion | None:
+        """La acción pendiente y vigente de la conversación (para restaurar la tarjeta al recargar)."""
+        ahora = self._reloj()
+        async with self._sesiones.begin() as s:
+            return (await s.execute(
+                select(Accion)
+                .where(Accion.sistema_id == sistema_id, Accion.usuario_ref == usuario_ref,
+                       Accion.conversacion_id == conversacion_id, Accion.estado == "pendiente",
+                       Accion.expira > ahora)
+                .order_by(Accion.creada.desc()).limit(1)
+            )).scalar_one_or_none()
+
     async def reclamar(
         self, sistema_id: str, usuario_ref: str, accion_id: uuid.UUID, jti: str
     ) -> Accion | None:

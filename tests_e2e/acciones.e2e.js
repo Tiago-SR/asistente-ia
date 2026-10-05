@@ -201,6 +201,70 @@ async (page) => {
     await p.close();
   }
 
+  // — Recargar la página: la tarjeta pendiente vuelve (la fuente es GET /v1/conversaciones/{id}) —
+  {
+    let pendiente = null;
+    const CONV = "00000000-0000-0000-0000-000000000000";
+    const { p, visto, enviar, tarjeta } = await nueva({
+      prop, confirmar: () => ({ status: 200, json: { estado: "ejecutada", ok: true, mensaje: "Nota agregada tras recargar." } }),
+    });
+    await p.route(`**/v1/conversaciones/${CONV}`, (route) => {
+      if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
+      return route.fulfill({
+        status: 200, headers: { "content-type": "application/json", ...CORS },
+        body: JSON.stringify({ id: CONV, pendiente, mensajes: [
+          { rol: "user", texto: "anotá algo", creado: "2026-10-05T10:00:00Z" },
+          { rol: "assistant", texto: "Te pedí confirmar la acción.", creado: "2026-10-05T10:00:01Z" },
+        ] }),
+      });
+    });
+    const recargar = async () => {
+      await p.reload();
+      await p.locator("asistente-chat textarea").waitFor();
+      await p.evaluate(() => { window.__eventos = []; document.addEventListener("asistente:confirmacion", (e) => window.__eventos.push(e.detail)); });
+      await p.locator("asistente-chat .msg.assistant").first().waitFor();
+    };
+    await enviar();
+
+    pendiente = null;
+    await recargar();
+    await caso("recargar sin propuesta pendiente no dibuja ninguna tarjeta", async () => {
+      afirma(await p.locator("asistente-chat .msg.confirmacion").count() === 0, "apareció una tarjeta");
+    });
+
+    pendiente = { ...prop(7), estado: "pendiente", resumen: "Modificar la nota n1 <b>x</b>", lineas: ["Antes: viejo", "Después: nuevo"] };
+    await recargar();
+    await caso("recargar con una propuesta vigente restaura la tarjeta tras el historial, con detalle y cuenta regresiva", async () => {
+      const t = tarjeta();
+      await t.waitFor();
+      afirma(await p.locator("asistente-chat .msg.confirmacion").count() === 1, "más de una tarjeta");
+      afirma((await t.locator(".accion-resumen").textContent()).includes("<b>x</b>"), "el resumen no es texto literal");
+      afirma(await t.locator("li").count() === 2, "líneas de detalle");
+      afirma(/Vence en 1:5|Vence en 2:0/.test(await t.locator(".accion-estado").textContent()), "sin cuenta regresiva");
+      const orden = await p.locator("asistente-chat").evaluate((e) => {
+        const m = [...e.shadowRoot.querySelectorAll(".msg")];
+        return m.map((x) => x.classList.contains("confirmacion") ? "tarjeta" : x.classList.contains("assistant") ? "asistente" : x.classList.contains("user") ? "usuario" : "otro").filter((x) => x !== "otro");
+      });
+      afirma(orden.at(-1) === "tarjeta" && orden.includes("asistente"), "la tarjeta no va al final: " + orden);
+    });
+    await caso("la tarjeta restaurada se confirma como una normal (token de escritura de ESA propuesta)", async () => {
+      await tarjeta().locator("button.primario").click();
+      await tarjeta().locator(".accion-estado", { hasText: "Nota agregada tras recargar." }).waitFor();
+      const u = new URL(visto.token.at(-1).url);
+      afirma(u.searchParams.get("confirmacion") === "acc-7" && u.searchParams.get("huella") === "h".repeat(64), "URL del token: " + u);
+      afirma(visto.confirmar.at(-1).url.endsWith("/v1/confirmaciones/acc-7/confirmar"), "ruta");
+      afirma((await p.evaluate(() => window.__eventos)).at(-1).estado === "ejecutada", "evento");
+    });
+
+    pendiente = { id: 9, resumen: null };
+    await recargar();
+    await caso("una pendiente mal formada se ignora sin romper el historial", async () => {
+      afirma(await p.locator("asistente-chat .msg.confirmacion").count() === 0, "dibujó una tarjeta inválida");
+      afirma(await p.locator("asistente-chat .msg.assistant").count() >= 1, "no mostró el historial");
+    });
+    await p.close();
+  }
+
   const ok = resultados.filter((r) => r.ok).length;
   return { resultados, resumen: `${ok}/${resultados.length} ok` };
 }

@@ -816,6 +816,8 @@
           const b = this._burbuja(m.rol);
           if (m.rol === "assistant") { markdown(m.texto, b); this._botonEscuchar(b, m.texto); } else b.textContent = m.texto;
         }
+        // Una propuesta que sigue vigente vuelve a mostrarse con su cuenta regresiva (el servidor es la fuente).
+        if (d.pendiente) this._confirmacion(d.pendiente);
         this._recordar(); this._pintarHistorial(); this._menu(false); this._bajar();
       } catch {
         if (silencioso) { this._convId = null; this._recordar(); } else this._error();

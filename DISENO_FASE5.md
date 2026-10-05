@@ -1,6 +1,6 @@
 # Fase 5: acciones con confirmación (diseño, sin implementar)
 
-Estado: **implementado en servicio, mock y widget (2026-10-05)**; el contrato quedó en la sección 8 de `contrato/CONTRATO.md`. Este documento conserva el razonamiento y las decisiones. Desviaciones respecto al borrador: el id de confirmación no se firma (fila en BD + id aleatorio); el widget no restaura la tarjeta pendiente tras recargar; faltan la referencia PHP, el verificador y los evals de acciones (§9, pasos 2, 1 y 6). Parte de lo que ya fija el README («Estado y pendientes», Fase 5) y los principios de seguridad vigentes; propone cómo cumplirlo y deja marcadas las decisiones que corresponden al dueño del producto.
+Estado: **implementado en servicio, mock y widget (2026-10-05)**; el contrato quedó en la sección 8 de `contrato/CONTRATO.md`. Este documento conserva el razonamiento y las decisiones. Desviaciones respecto al borrador: el id de confirmación no se firma (fila en BD + id aleatorio); la tarjeta pendiente se restaura al recargar vía `pendiente` en `GET /v1/conversaciones/{id}`; faltan la referencia PHP, el verificador y los evals de acciones (§9, pasos 2, 1 y 6). Parte de lo que ya fija el README («Estado y pendientes», Fase 5) y los principios de seguridad vigentes; propone cómo cumplirlo y deja marcadas las decisiones que corresponden al dueño del producto.
 
 ## 1. Qué se quiere y qué no
 

@@ -31,7 +31,7 @@ def _acciones(svc: Servicios):
     return svc.acciones
 
 
-def _vista(a: Accion) -> dict:
+def vista_accion(a: Accion) -> dict:
     return {"id": str(a.id), "tool": a.tool, "estado": a.estado, "resumen": a.resumen,
             "lineas": list(a.lineas or []), "huella": a.huella, "expira": a.expira.isoformat()}
 
@@ -69,7 +69,7 @@ async def _anotar(svc: Servicios, sesion: Sesion, a: Accion, texto: str) -> None
 async def ver(
     accion_id: uuid.UUID, sesion: Sesion = Depends(sesion_actual), svc: Servicios = Depends(servicios)
 ):
-    return _vista(await _propia(svc, sesion, accion_id))
+    return vista_accion(await _propia(svc, sesion, accion_id))
 
 
 @router.post("/v1/confirmaciones/{accion_id}/cancelar")
