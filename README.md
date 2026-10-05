@@ -176,7 +176,7 @@ DISENO_FASE5.md          diseño en papel de las acciones con confirmación (Fas
 - **Privacidad por cliente:** quién informa a los clientes de cada sistema de que sus datos van a un LLM externo y cómo se habilita por cliente (`habilitado` por sistema permite excluir a alguno; un modelo local es la salida si alguien exige que los datos no salgan).
 - **Audio a Google:** cómo se informa que, en Chrome, el audio del dictado y de manos libres se procesa en Google (hoy aceptado; `voz-motor="servidor"` lo evita, y manos libres no está disponible con él).
 - **Quién opera el VPS.**
-- Menores: facturación del uso por sistema, manifiesto por rol de usuario (hoy global), `locale` por usuario o por sistema, y qué acciones concretas de SGAgro entran en la Fase 5.
+- Menores: manifiesto por rol de usuario (hoy global; el sistema ya rechaza lo que el usuario no puede hacer, lo que se pierde es que el modelo ofrece tools que fallarán), y qué acciones concretas de SGAgro entran en la Fase 5.
 
 ## Arquitectura y decisiones vigentes
 
@@ -201,4 +201,5 @@ Lo que define el contrato HTTP está en [`contrato/CONTRATO.md`](contrato/CONTRA
   10. Auditoría de sistema, usuario, `jti`, tool, parámetros, estado, duración y tokens, sin guardar resultados completos más allá de la retención (30 días por defecto).
   11. Secretos solo por variables de entorno; nunca se loguean cabeceras `Authorization` ni tokens. Si la infraestructura lo permite, restringir el egress a la API del LLM y a las `base_url` registradas.
 - **Decisiones menores:** manifiesto global por sistema, `HS256` solo para sistemas legados (lo demás, firma asimétrica), widget como vista de chat a pantalla completa y solo con la conversación actual (historial oculto tras `MOSTRAR_HISTORIAL`).
+- **Costo por sistema:** cada llamada al LLM suma a `uso_modelo` (sistema, mes y modelo; entrada, caché de entrada y salida por separado; no se purga). `GET /admin/uso?mes=YYYY-MM` lo traduce a USD con `config/precios.yaml`, con una cota `valle` y otra `pico` porque el servicio no sabe en qué horario del proveedor cayó cada llamada. Un modelo sin tarifa figura en `sin_tarifa` y no entra en el total.
 - **Voz:** Web Speech del navegador como camino principal. Whisper `small` y Kokoro locales se descartaron por calidad en pruebas manuales (resultados en `PROVEEDORES_VOZ.md`); el servicio Whisper sigue en el compose como opcional (perfil `voz`) y como STT del servidor (`voz-motor="servidor"`).

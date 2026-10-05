@@ -24,6 +24,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 from puntuar import puntuar
 
+from asistente.precios import cargar as cargar_precios
+from asistente.precios import costo as costo_tokens
+
 AQUI = Path(__file__).parent
 
 
@@ -88,14 +91,8 @@ class Cliente:
 
 
 def costo(uso: dict, tarifa: dict | None, horario: str) -> float | None:
-    if not tarifa:
-        return None
-    entrada, hit, salida = uso.get("tokens_in", 0), uso.get("tokens_in_cache", 0), uso.get("tokens_out", 0)
-    return (
-        (entrada - hit) * tarifa["entrada_cache_miss"][horario]
-        + hit * tarifa["entrada_cache_hit"][horario]
-        + salida * tarifa["salida"][horario]
-    ) / 1e6
+    return costo_tokens(uso.get("tokens_in", 0), uso.get("tokens_in_cache", 0), uso.get("tokens_out", 0),
+                        tarifa, horario)
 
 
 def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | None) -> dict:
@@ -185,6 +182,8 @@ def main() -> int:
                     help="Origin que se envía; debe estar en origenes_permitidos del sistema (por defecto, el del archivo)")
     ap.add_argument("--modelo", default=os.environ.get("ASISTENTE_MODELO_DEFAULT"),
                     help="nombre del modelo del asistente (solo etiqueta y tarifa; por defecto ASISTENTE_MODELO_DEFAULT)")
+    ap.add_argument("--precios", default=os.environ.get("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml"),
+                    help="tarifas por modelo (por defecto, config/precios.yaml montado en /config)")
     ap.add_argument("--solo", help="ids separados por coma (p. ej. q02,q09)")
     ap.add_argument("--nota", help="texto libre para el informe (p. ej. 'thinking desactivado')")
     ap.add_argument("--salida", default=str(AQUI / "resultados"))
@@ -201,7 +200,7 @@ def main() -> int:
     if args.solo:
         ids = set(args.solo.split(","))
         preguntas = [p for p in preguntas if p["id"] in ids]
-    tarifa = (yaml.safe_load((AQUI / "precios.yaml").read_text(encoding="utf-8")) or {}).get(args.modelo)
+    tarifa = cargar_precios(args.precios).get(args.modelo)
 
     cli = Cliente(args.asistente, token_url, origen, args.timeout)
     resultados = []

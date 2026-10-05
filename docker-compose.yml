@@ -26,6 +26,7 @@ services:
       ASISTENTE_LOG_LEVEL: INFO
     volumes:
       - ./config/sistemas.yaml:/config/sistemas.yaml:ro
+      - ./config/precios.yaml:/config/precios.yaml:ro
     read_only: true
     tmpfs:
       - /tmp

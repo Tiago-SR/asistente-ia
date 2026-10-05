@@ -4,11 +4,11 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from asistente.config import Settings
@@ -24,7 +24,7 @@ from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
-from asistente.store.models import Base
+from asistente.store.models import Base, UsoModelo
 from asistente.store.models import LlamadaTool as FilaLlamada
 from asistente.store.repo import Repo, recortar
 from conftest import entorno, entrada_sistema, escribir_registro, firmar
@@ -81,7 +81,7 @@ def llm():
 @pytest.fixture
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None,
-                   acciones_habilitadas=(), max_acciones_hora=20):
+                   acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml"):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
@@ -98,7 +98,8 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             return (llm_obj or llm), "modelo-test"
 
         svc = Servicios(
-            settings=Settings(database_url=URL, heartbeat_s=heartbeat_s, admin_token=admin_token),
+            settings=Settings(database_url=URL, heartbeat_s=heartbeat_s, admin_token=admin_token,
+                              precios_path=precios_path),
             registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
@@ -329,6 +330,41 @@ async def test_admin_exige_token_y_reporta_sistemas(construir_app):
         r = (await c.get("/admin/sistemas", headers=h)).json()
         assert {s["id"]: s["manifiesto_ok"] for s in r["sistemas"]} == {"mock-a": True, "mock-b": True}
         assert (await c.post("/admin/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
+
+
+async def test_admin_uso_calcula_el_costo_por_sistema_y_modelo(construir_app, sesiones, tmp_path):
+    precios = tmp_path / "precios.yaml"
+    precios.write_text("""
+m-caro:
+  entrada_cache_hit: {valle: 1, pico: 2}
+  entrada_cache_miss: {valle: 10, pico: 20}
+  salida: {valle: 100, pico: 200}
+""", encoding="utf-8")
+    mes = datetime(2019, 3, 1, tzinfo=UTC)  # la BD de desarrollo se comparte: un mes que nadie usa
+    async with sesiones.begin() as s:
+        await s.execute(delete(UsoModelo).where(UsoModelo.mes == mes))
+        s.add_all([
+            UsoModelo(sistema_id="mock-a", mes=mes, modelo="m-caro", llamadas=3, tokens_in=1_000_000,
+                      tokens_in_cache=400_000, tokens_out=10_000),
+            UsoModelo(sistema_id="mock-a", mes=mes, modelo="m-local", llamadas=1, tokens_in=5, tokens_out=5,
+                      tokens_in_cache=0),
+        ])
+    async with construir_app(admin_token="adm1n", precios_path=str(precios)) as c:
+        h = {"Authorization": "Bearer adm1n"}
+        assert (await c.get("/admin/uso")).status_code == 401
+        assert (await c.get("/admin/uso?mes=2026-13", headers=h)).status_code == 422
+        r = (await c.get("/admin/uso?mes=2019-03", headers=h)).json()
+        assert r["mes"] == "2019-03"
+        a = next(s for s in r["sistemas"] if s["id"] == "mock-a")
+        assert a["nombre"] == "MOCK-A"
+        caro = next(m for m in a["modelos"] if m["modelo"] == "m-caro")
+        # 600 000 sin caché x 10 + 400 000 con caché x 1 + 10 000 de salida x 100 = 7,4 USD (valle)
+        assert caro["costo_usd"]["valle"] == pytest.approx(7.4)
+        assert caro["costo_usd"]["pico"] == pytest.approx(14.8)
+        assert next(m for m in a["modelos"] if m["modelo"] == "m-local")["costo_usd"] is None
+        assert a["sin_tarifa"] == ["m-local"] and a["costo_usd"]["valle"] == pytest.approx(7.4)
+        assert (await c.get("/admin/uso?mes=2019-04", headers=h)).json()["sistemas"] == []
+        assert (await c.get("/admin/uso", headers=h)).status_code == 200  # mes en curso
 
 
 async def test_salud_verifica_la_bd(api):

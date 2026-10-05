@@ -2,7 +2,8 @@
 
 Contadores atómicos con `INSERT .. ON CONFLICT DO UPDATE .. RETURNING`: sin carreras
 entre réplicas. Los de usuario cuentan por `(sistema_id, usuario_ref)`; el total de
-tokens del mes es por sistema (`usuario_ref = ''`).
+tokens del mes es por sistema (`usuario_ref = ''`). El consumo por modelo, para el costo,
+va aparte (`uso_modelo`).
 """
 
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.llm.base import Uso
 from asistente.core.ports import Contexto, LimiteExcedido
-from asistente.store.models import ContadorUso
+from asistente.store.models import ContadorUso, UsoModelo
 
 
 def _ventanas(ahora: datetime) -> dict[str, datetime]:
@@ -42,6 +43,22 @@ async def _sumar(
         .returning(ContadorUso)
     )
     return (await s.execute(stmt)).scalar_one()
+
+
+async def _sumar_uso_modelo(s: AsyncSession, ctx: Contexto, mes: datetime, uso: Uso) -> None:
+    stmt = insert(UsoModelo).values(
+        sistema_id=ctx.sistema_id, mes=mes, modelo=ctx.modelo, llamadas=1,
+        tokens_in=uso.tokens_in, tokens_in_cache=uso.tokens_in_cache, tokens_out=uso.tokens_out,
+    )
+    await s.execute(stmt.on_conflict_do_update(
+        index_elements=["sistema_id", "mes", "modelo"],
+        set_={
+            "llamadas": UsoModelo.llamadas + 1,
+            "tokens_in": UsoModelo.tokens_in + uso.tokens_in,
+            "tokens_in_cache": UsoModelo.tokens_in_cache + uso.tokens_in_cache,
+            "tokens_out": UsoModelo.tokens_out + uso.tokens_out,
+        },
+    ))
 
 
 class LimitesPostgres:
@@ -84,6 +101,7 @@ class LimitesPostgres:
         async with self._sesiones.begin() as s:
             await _sumar(s, ctx.sistema_id, "", "mes", v["mes"], 0, uso.total)
             await _sumar(s, ctx.sistema_id, ctx.usuario_ref, "dia", v["dia"], 0, uso.total)
+            await _sumar_uso_modelo(s, ctx, v["mes"], uso)
 
     async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int) -> None:
         # Contador propio (`voz:<ref>`): dictar no consume la cuota de mensajes.

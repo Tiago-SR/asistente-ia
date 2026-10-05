@@ -4,7 +4,8 @@ import json
 import pytest
 
 from asistente.sistemas.auth import Autenticador, TokenInvalido
-from conftest import firmar
+from asistente.sistemas.registro import RegistroSistemas
+from conftest import entorno, entrada_sistema, escribir_registro, firmar
 
 
 @pytest.fixture
@@ -17,6 +18,15 @@ async def test_token_valido(auth):
     assert (u.sistema_id, u.usuario_ref, u.nombre, u.tenants, u.locale) == (
         "mock-a", "ana", "Ana", ("t1",), "es-UY",
     )
+
+
+async def test_locale_del_token_o_el_defecto_del_sistema(tmp_path):
+    ruta = escribir_registro(tmp_path / "s.yaml", [
+        entrada_sistema("mock-a", locale_defecto="es-AR"), entrada_sistema("mock-b")])
+    a = Autenticador(RegistroSistemas(ruta, env=entorno("mock-a", "mock-b")))
+    assert (await a.validar(firmar("mock-a"))).locale == "es-AR"                    # el token no lo trae
+    assert (await a.validar(firmar("mock-a", locale="pt-BR"))).locale == "pt-BR"    # el token manda
+    assert (await a.validar(firmar("mock-b"))).locale is None                       # sin defecto
 
 
 async def test_token_de_a_no_sirve_firmado_con_clave_de_b(auth):

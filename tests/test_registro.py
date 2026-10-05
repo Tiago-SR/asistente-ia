@@ -10,6 +10,14 @@ def test_carga_sistema_valido(tmp_path):
     assert r.errores == {}
 
 
+def test_locale_defecto_valido_o_el_sistema_se_descarta(tmp_path):
+    r = RegistroSistemas(escribir_registro(tmp_path / "s.yaml", [
+        entrada_sistema("a", locale_defecto="es-UY"), entrada_sistema("b", locale_defecto="español"),
+        entrada_sistema("c")]), env=entorno("a", "b", "c"))
+    assert r.obtener("a").locale_defecto == "es-UY" and r.obtener("c").locale_defecto is None
+    assert r.obtener("b") is None and "b" in r.errores
+
+
 def test_sistema_invalido_no_afecta_a_los_demas(tmp_path):
     malo = entrada_sistema("malo", auth={"algoritmo": "none", "secreto_env": "X"})
     r = RegistroSistemas(

@@ -107,6 +107,26 @@ class ContadorUso(Base):
     tokens: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
+class UsoModelo(Base):
+    """Consumo por sistema, mes y modelo, con la caché de entrada aparte (cuesta distinto).
+
+    Es la base del informe de costo (`GET /admin/uso`). No se purga con la retención de las
+    conversaciones: son pocas filas y sirven para facturar meses atrás.
+    """
+
+    __tablename__ = "uso_modelo"
+    __table_args__ = (UniqueConstraint("sistema_id", "mes", "modelo"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    mes: Mapped[datetime] = mapped_column(_ahora())  # primer instante del mes (UTC)
+    modelo: Mapped[str] = mapped_column(String(200))
+    llamadas: Mapped[int] = mapped_column(Integer, default=0)  # llamadas al LLM, no mensajes
+    tokens_in: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens_in_cache: Mapped[int] = mapped_column(BigInteger, default=0)  # parte de tokens_in
+    tokens_out: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
 class Accion(Base):
     """Propuesta de una escritura y su ciclo de vida (Fase 5). El `id` es aleatorio de 128 bits y
     no adivinable; la fila es la autoridad del estado: pendiente → confirmada → ejecutada | fallida,

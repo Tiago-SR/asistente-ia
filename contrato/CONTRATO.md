@@ -31,7 +31,7 @@ Si el usuario no tiene permitido el asistente, responde `403` y el widget muestr
 | `scope` | sí | `"asistente:lectura"` (el de escritura, `"asistente:escritura"`, solo existe para confirmar una acción: [sección 8](#8-acciones-con-confirmación-opcional)) |
 | `nombre` | no | nombre a mostrar |
 | `tenants` | no | ids de organización del usuario, solo para métricas y cuotas. **Nunca se usa para autorizar** |
-| `locale` | no | p. ej. `es-UY` |
+| `locale` | no | p. ej. `es-UY` (si falta, el `locale_defecto` del registro, ver 6.3) |
 
 Firma recomendada: `RS256` o `EdDSA` (el sistema guarda la privada, el asistente solo la pública). Aceptado para sistemas legados y pruebas locales: `HS256` con secreto compartido. `alg: none` se rechaza siempre. Cómo se generan y dónde se guardan las claves: ver [sección 6](#6-credenciales-y-registro-del-sistema).
 
@@ -190,6 +190,7 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **`id` = `iss`:** el `id` del YAML debe ser idéntico al claim `iss` de los tokens, y `audiencia` al claim `aud`. Si no coinciden, el asistente responde `token_invalido`. El `id` es solo un identificador que se elige (`^[a-z0-9][a-z0-9_-]{0,63}$`) y no tiene que existir en otro lugar.
 - **`base_url`:** el **backend** que sirve `/asistente/*`; el asistente lo llama de servidor a servidor. Si el asistente corre en Docker y el sistema en el host, usar `host.docker.internal:<puerto>` y que el sistema escuche en `0.0.0.0` (no solo `127.0.0.1`).
 - **`origenes_permitidos`:** orígenes exactos (esquema + host + puerto) de las **páginas** donde se inserta el widget. Se usan para CORS y se verifican contra el `Origin` de cada request. `http://localhost:8002` y `http://127.0.0.1:8002` son orígenes distintos.
+- **`locale_defecto` (opcional):** idioma (`es-UY`) de los usuarios cuyo token no trae el claim `locale`; si el token lo trae, manda el del token. Lo usan el prompt («idioma preferido del usuario») y el dictado del servidor.
 - **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
 - **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 

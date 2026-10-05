@@ -1,6 +1,7 @@
-# USD por millón de tokens, por modelo (clave = valor de ASISTENTE_MODELO_DEFAULT).
-# `valle`/`pico`: la tarifa depende del horario del proveedor; el informe muestra las dos.
-# Un modelo local o sin tarifa conocida: omitirlo (el informe da solo tokens y latencia).
+# USD por millón de tokens, por modelo (clave = modelo con el que responde el asistente).
+# La usan `GET /admin/uso` (costo por sistema y mes) y los evals.
+# `valle`/`pico`: la tarifa depende del horario del proveedor; los informes muestran las dos.
+# Un modelo local o sin tarifa conocida: omitirlo (el informe da solo tokens).
 # Verificar contra la lista de precios vigente del proveedor antes de usar las cifras para facturar.
 deepseek-flash:
   entrada_cache_hit: {valle: 0.003, pico: 0.006}

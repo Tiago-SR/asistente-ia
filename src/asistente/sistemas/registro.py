@@ -92,6 +92,8 @@ class Sistema(_Modelo):
     llm: LLMConfig | None = None
     limites: LimitesConfig = LimitesConfig()
     retencion_dias: int = Field(default=30, gt=0)
+    # Idioma de los usuarios cuyo token no trae el claim `locale` (p. ej. `es-UY`).
+    locale_defecto: str | None = Field(default=None, pattern=r"^[a-z]{2}(-[A-Z]{2})?$")
     # Fase 5: escrituras que el modelo puede proponer (con confirmación del usuario). Vacío = solo lectura.
     acciones_habilitadas: tuple[str, ...] = ()
 

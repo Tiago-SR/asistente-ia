@@ -11,6 +11,7 @@ from asistente.core.ports import Contexto, LimiteExcedido, LimitesUso, Resultado
 from asistente.limits import LimitesPostgres
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.models import Base, LlamadaTool
+from asistente.store.uso import consumo_del_mes
 
 URL = os.environ.get("ASISTENTE_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="sin ASISTENTE_DATABASE_URL")
@@ -69,6 +70,25 @@ async def test_cuota_mensual_de_tokens_es_por_sistema(sesiones):
     assert e.value.cual == "tokens_mes"
     # otro sistema no comparte cuota
     await lim.reservar_mensaje(ctx())
+
+
+async def test_el_consumo_se_acumula_por_sistema_mes_y_modelo_con_la_cache_aparte(sesiones):
+    t = [datetime(2026, 1, 31, 23, 0, tzinfo=UTC)]
+    lim = LimitesPostgres(sesiones, reloj=lambda: t[0])
+    c = ctx()
+    await lim.registrar_uso(c, Uso(100, 20, 80))
+    await lim.registrar_uso(c, Uso(50, 10, 0))
+    await lim.registrar_uso(ctx("beto", sistema=c.sistema_id), Uso(10, 1, 5))  # mismo sistema y modelo
+    t[0] = datetime(2026, 2, 1, 0, 5, tzinfo=UTC)  # mes nuevo
+    await lim.registrar_uso(c, Uso(7, 3, 2))
+    enero = await consumo_del_mes(sesiones, datetime(2026, 1, 1, tzinfo=UTC))
+    fila = next(f for f in enero if f.sistema_id == c.sistema_id)
+    assert (fila.modelo, fila.llamadas, fila.tokens_in, fila.tokens_in_cache, fila.tokens_out) == (
+        c.modelo, 3, 160, 85, 31)
+    febrero = await consumo_del_mes(sesiones, datetime(2026, 2, 1, tzinfo=UTC))
+    assert [(f.llamadas, f.tokens_in) for f in febrero if f.sistema_id == c.sistema_id] == [(1, 7)]
+    await lim.registrar_uso(c, Uso(0, 0))  # sin consumo no deja fila
+    assert len(await consumo_del_mes(sesiones, datetime(2026, 2, 1, tzinfo=UTC))) == len(febrero)
 
 
 async def test_auditoria_guarda_metadatos_sin_resultado(sesiones):

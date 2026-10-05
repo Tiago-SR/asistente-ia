@@ -92,7 +92,7 @@ class Autenticador:
             jti=jti,
             nombre=_str_o_none(claims.get("nombre")),
             tenants=tuple(str(t) for t in tenants) if isinstance(tenants, list) else (),
-            locale=_str_o_none(claims.get("locale")),
+            locale=_str_o_none(claims.get("locale")) or sistema.locale_defecto,
             token=token,
             accion=accion,
         )

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     sistemas_path: str = _env("ASISTENTE_SISTEMAS_PATH", "/config/sistemas.yaml")
     prompts_dir: str = _env("ASISTENTE_PROMPTS_DIR", "prompts")
     admin_token: str | None = _env("ASISTENTE_ADMIN_TOKEN", None)
+    precios_path: str = _env("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml")
     log_level: str = _env("ASISTENTE_LOG_LEVEL", "INFO")
 
     llm_proveedor: str = _env("LLM_PROVEEDOR", "openai_compat")
