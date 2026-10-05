@@ -1,4 +1,4 @@
-"""Formato neutro del core para hablar con un LLM (sección 3.8 del plan).
+"""Formato neutro del core para hablar con un LLM.
 
 Nada de vocabulario de proveedor aquí: cada adaptador traduce de y hacia su API.
 """

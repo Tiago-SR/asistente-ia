@@ -1,4 +1,4 @@
-"""Eventos que el core emite hacia la capa API (que los serializa como SSE, sección 7.5)."""
+"""Eventos que el core emite hacia la capa API (que los serializa como SSE)."""
 
 from collections.abc import Awaitable, Callable
 from typing import Any

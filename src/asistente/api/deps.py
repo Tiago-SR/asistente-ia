@@ -1,4 +1,4 @@
-"""Dependencias de la API: servicios, usuario autenticado y verificación de Origin (sección 6)."""
+"""Dependencias de la API: servicios, usuario autenticado y verificación de Origin."""
 
 from dataclasses import dataclass
 

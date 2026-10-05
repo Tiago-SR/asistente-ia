@@ -1,4 +1,4 @@
-"""Loop del agente (sección 7.4 del plan).
+"""Loop del agente.
 
 `run_turn` no persiste: devuelve los mensajes nuevos y el llamador (API) los guarda
 solo si el turno terminó bien. Así un turno cortado no deja historial a medias.
@@ -33,7 +33,7 @@ _LEGIBLE = "Consultando {nombre}"
 class ConfigTurno:
     max_iter: int = 8
     max_output_tokens: int = 1500
-    # Debe ser menor que la vida del token del usuario (sección 7.4).
+    # Debe ser menor que la vida del token del usuario.
     timeout_turno_s: float = 120.0
     timeout_tool_s: float = 30.0
     max_tools_concurrentes: int = 4

@@ -1,4 +1,4 @@
-"""Composición del prompt de sistema en tres capas (sección 8 del plan).
+"""Composición del prompt de sistema en tres capas: base, dominio del sistema y contexto de sesión.
 
 Devuelve también una versión (`hash base + hash dominio`) que se guarda en cada mensaje.
 """

@@ -1,4 +1,4 @@
-"""Validación de JWT de usuario por sistema (secciones 3.4, 4.1 y 6 del plan).
+"""Validación de JWT de usuario por sistema (secciones 1 y 6 del contrato).
 
 El sistema se deduce del claim `iss` del propio token: `iss` → registro → clave y
 algoritmo de ese sistema. Nunca se acepta un algoritmo que no sea el configurado

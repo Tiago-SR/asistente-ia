@@ -14,7 +14,7 @@ def test_widget_se_sirve_publico_con_etag():
 
 
 def test_widget_no_usa_innerhtml_ni_storage():
-    """El contenido del modelo solo entra al DOM como nodos de texto (sección 9)."""
+    """El contenido del modelo solo entra al DOM como nodos de texto."""
     from pathlib import Path
 
     js = (Path(__file__).resolve().parent.parent / "src/asistente/static/widget.js").read_text()
@@ -54,7 +54,7 @@ def test_widget_sintaxis_valida():
 
 
 def test_widget_solo_recuerda_el_id_de_conversacion():
-    """sessionStorage solo guarda el id de la conversación; el token vive en memoria (sección 9)."""
+    """sessionStorage solo guarda el id de la conversación; el token vive en memoria."""
     import re
 
     js = _js()
@@ -65,7 +65,7 @@ def test_widget_solo_recuerda_el_id_de_conversacion():
 
 
 def test_widget_dictado_solo_con_capacidad_y_sin_envio_automatico():
-    """El micrófono nace oculto, se muestra con voz.dictado y solo rellena el campo (sección 7.7)."""
+    """El micrófono nace oculto, se muestra con voz.dictado y solo rellena el campo (contrato, sección 7.4)."""
     js = _js()
     assert 'class: "mic", hidden: true' in js
     assert "voz.dictado === true" in js
@@ -168,3 +168,118 @@ def test_widget_historial_oculto_no_toca_la_lista():
     js = _js()
     assert "MOSTRAR_HISTORIAL = false" in js
     assert "_pintarHistorial() {\n      if (!MOSTRAR_HISTORIAL) return;" in js
+
+
+# ───────────────────────── modo «manos libres» ─────────────────────────
+
+
+def test_buscar_activacion_solo_al_comienzo_de_la_frase():
+    r = _utiles_voz(
+        """
+        const b = (t, p = "asistente") => U.buscarActivacion(t, p);
+        return {
+          sola: b("asistente"),
+          con_pregunta: b("Asistente, ¿cuántas hectáreas de soja tengo?"),
+          sin_acento_y_mayusculas: b("ASISTENTE cuántas hectáreas"),
+          con_muletilla: b("oye asistente dame el resumen"),
+          muy_adentro: b("dime lo que pasa con el asistente de ayer"),
+          ausente: b("buenos días a todos"),
+          vacia: b(""),
+          compuesta: U.buscarActivacion("hola jarvis, abrí el mapa", "hola jarvis"),
+          sin_palabra: U.buscarActivacion("asistente hola", ""),
+        };
+        """
+    )
+    assert r == {
+        "sola": "",
+        "con_pregunta": "cuántas hectáreas de soja tengo?",
+        "sin_acento_y_mayusculas": "cuántas hectáreas",
+        "con_muletilla": "dame el resumen",
+        "muy_adentro": None,
+        "ausente": None,
+        "vacia": None,
+        "compuesta": "abrí el mapa",
+        "sin_palabra": None,
+    }
+
+
+def test_comandos_solo_valen_como_frase_entera():
+    r = _utiles_voz(
+        """
+        const c = (t) => U.comandoDe(t);
+        return {
+          enviar: c("Enviar"), enviar_punto: c("enviar."), enviar_voseo: c("¡Enviá!"), por_favor: c("enviar por favor"),
+          cancelar: c("cancelar"), descartar: c("descartá"),
+          apagar: c("Apagar manos libres"),
+          dentro_de_frase: c("quiero enviar un informe"), cancelar_cuota: c("cancelar la cuota de ayer"), nada: c(""),
+        };
+        """
+    )
+    assert r == {
+        "enviar": "enviar", "enviar_punto": "enviar", "enviar_voseo": "enviar", "por_favor": "enviar",
+        "cancelar": "cancelar", "descartar": "cancelar", "apagar": "apagar",
+        "dentro_de_frase": None, "cancelar_cuota": None, "nada": None,
+    }
+
+
+def test_interpretar_segun_el_estado():
+    r = _utiles_voz(
+        """
+        const i = (e, t, final = true) => U.interpretar(e, t, "asistente", final);
+        return {
+          armado_ruido: i("armado", "qué lindo día hace hoy"),
+          armado_enviar: i("armado", "enviar"),
+          armado_activa: i("armado", "asistente cuántas hectáreas"),
+          armado_activa_parcial: i("armado", "asistente", false),
+          respondiendo_activa: i("respondiendo", "oye asistente"),
+          capturando_texto: i("capturando", "de soja tengo"),
+          capturando_enviar: i("capturando", "enviar"),
+          capturando_enviar_parcial: i("capturando", "enviar", false),
+          confirmando_cancelar: i("confirmando", "cancelar"),
+          confirmando_texto: i("confirmando", "y de maíz"),
+          apagar_armado: i("armado", "apagar manos libres"),
+          apagar_capturando: i("capturando", "apagar manos libres"),
+          apagado: i("apagado", "asistente hola"),
+          vacio: i("capturando", "  "),
+        };
+        """
+    )
+    assert r["armado_ruido"] == {"accion": "ignorar"}
+    assert r["armado_enviar"] == {"accion": "ignorar"}  # sin activación no hay comandos: nada se envía solo
+    assert r["armado_activa"] == {"accion": "activar", "resto": "cuántas hectáreas"}
+    assert r["armado_activa_parcial"] == {"accion": "activar", "resto": ""}  # la activación reacciona ya con el parcial
+    assert r["respondiendo_activa"] == {"accion": "activar", "resto": ""}      # interrumpe la lectura
+    assert r["capturando_texto"] == {"accion": "texto", "texto": "de soja tengo"}
+    assert r["capturando_enviar"] == {"accion": "enviar"}
+    assert r["capturando_enviar_parcial"] == {"accion": "texto", "texto": "enviar"}  # un comando parcial no dispara
+    assert r["confirmando_cancelar"] == {"accion": "cancelar"}
+    assert r["confirmando_texto"] == {"accion": "texto", "texto": "y de maíz"}
+    assert r["apagar_armado"] == {"accion": "apagar"} and r["apagar_capturando"] == {"accion": "apagar"}
+    assert r["apagado"] == {"accion": "ignorar"} and r["vacio"] == {"accion": "ignorar"}
+
+
+def test_reinicio_del_reconocedor_crece_y_tiene_tope():
+    r = _utiles_voz("return [0, 1, 2, 3, 4, 5, 10].map((n) => U.retrasoReinicio(n));")
+    assert r == [250, 500, 1000, 2000, 4000, 5000, 5000]
+
+
+def test_widget_manos_libres_pide_confirmacion_y_es_opcional():
+    """Nada se envía solo salvo que se cambie la constante; el modo no existe sin Web Speech ni en voz-motor=servidor."""
+    js = _js()
+    assert "const MANOS_LIBRES_CONFIRMAR = true;" in js
+    # un único camino de envío: el cierre de frase solo envía si la constante lo pide
+    cierre = js.split("_mhCerrarFrase() {", 1)[1].split("// Envía lo que hay", 1)[0]
+    assert "if (!MANOS_LIBRES_CONFIRMAR) this._mhEnviarTexto();" in cierre
+    # los comandos de voz solo se interpretan con frases finales
+    assert 'const cmd = final ? comandoDe(texto) : null;' in js
+    # oculto por defecto; se muestra solo con el reconocimiento del navegador, síntesis y contexto seguro
+    assert 'class: "manos", type: "button", hidden: true' in js
+    assert '_motorDictado() === "navegador" && puedeHablar() && window.isSecureContext !== false' in js
+    # el indicador de micrófono abierto y la forma de apagar existen
+    assert "mh-apagar" in js and 'e.key === "Escape"' in js and "mhPrivacidad" in js
+    # atributos documentados
+    assert 'getAttribute("palabra-activacion")' in js and "manos-libres-inactividad" in js
+    # sigue sin llamar a ningún otro host
+    import re
+
+    assert not re.search(r"fetch\(\s*[\"'`]https?://", js)

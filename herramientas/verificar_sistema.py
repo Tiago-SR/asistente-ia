@@ -1,4 +1,4 @@
-"""Verificador de conformidad con el contrato v1 (sección 10.5 del plan).
+"""Verificador de conformidad con el contrato v1 (sección 6.5 del contrato).
 
 Uso mínimo:
   python herramientas/verificar_sistema.py --base-url http://localhost:8201 \

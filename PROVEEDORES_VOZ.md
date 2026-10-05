@@ -1,7 +1,7 @@
 # Proveedores de voz a comparar (STT y TTS)
 
 > Fecha de los datos: **2026-10-04**. Los precios cambian seguido y varios son promociones: confirmar en la página oficial antes de decidir.
-> **Estado (2026-10-05):** este documento nació para elegir un STT y un TTS remotos, pero la prueba manual cambió el plan: el camino principal es **la voz del navegador** (Web Speech), ya implementada en el widget (ver la Fase 4 de [`PLAN_ASISTENTE.md`](PLAN_ASISTENTE.md)). Lo de abajo queda como referencia para un **respaldo remoto opcional** (clientes que no puedan enviar audio a Google, o una voz más natural). Nada de esto bloquea el trabajo actual.
+> **Estado (2026-10-05):** este documento nació para elegir un STT y un TTS remotos, pero la prueba manual cambió el plan: el camino principal es **la voz del navegador** (Web Speech), ya implementada en el widget (ver [Estado y pendientes](README.md#estado-y-pendientes) y el [contrato, sección 7.4](contrato/CONTRATO.md#74-voz-opcional)). Lo de abajo queda como referencia para un **respaldo remoto opcional** (clientes que no puedan enviar audio a Google, o una voz más natural). Nada de esto bloquea el trabajo actual.
 > Contexto: el STT local de antes (Whisper `small` en un contenedor speaches) no daba la calidad necesaria.
 > Idioma objetivo: español rioplatense (`es-UY`). La calidad en ese acento es lo primero que hay que medir; lo que sigue sobre calidad es orientativo y **no está probado por nosotros**.
 
@@ -21,7 +21,7 @@ Pendiente de medir: ElevenLabs, OpenAI, Deepgram y demás de las tablas de abajo
 
 | Motor | Precio | Encaje | Ventajas | Desventajas |
 |---|---|---|---|---|
-| **`SpeechRecognition`** (Web Speech API; en Chrome usa el servicio de voz de Google) | $0 | Del lado del cliente: el widget lo usa directamente, sin pasar por el servidor del asistente | Gratis, sin clave ni infraestructura, buena calidad probada en español, resultados parciales mientras se habla | El audio va a Google (privacidad: pendiente pregunta 2 del plan). Solo Chrome/Edge/Safari, no hay control del modelo ni de la versión, sin garantía de servicio, y puede cambiar o dejar de funcionar. No hay forma de usarlo desde el servidor |
+| **`SpeechRecognition`** (Web Speech API; en Chrome usa el servicio de voz de Google) | $0 | Del lado del cliente: el widget lo usa directamente, sin pasar por el servidor del asistente | Gratis, sin clave ni infraestructura, buena calidad probada en español, resultados parciales mientras se habla | El audio va a Google (privacidad: pregunta abierta en [Estado y pendientes](README.md#estado-y-pendientes)). Solo Chrome/Edge/Safari, no hay control del modelo ni de la versión, sin garantía de servicio, y puede cambiar o dejar de funcionar. No hay forma de usarlo desde el servidor |
 | **`speechSynthesis`** (voces del sistema o de Chrome) | $0 | Del lado del cliente | Gratis, sin latencia de red (las voces locales) y mejor que Kokoro en nuestra prueba | Las voces dependen del sistema operativo y del navegador: cada usuario oirá algo distinto, y en Linux a veces no hay ninguna en español. Mejor probada con es-ES que con es-UY. Calidad por debajo de los servicios comerciales neuronales |
 
 ## Cómo se lee la columna "Encaje"
@@ -88,7 +88,7 @@ El STT cuesta casi nada en cualquier opción: **la decisión de STT es de calida
 1. Grabar 20–30 frases en español rioplatense: cifras, hectáreas, nombres de cultivos y de establecimientos, y alguna con ruido de fondo.
 2. Pasarlas por 3–4 candidatos de STT y medir el porcentaje de error de palabras (WER), el error en cifras y la latencia.
 3. Para TTS, generar 5–6 respuestas típicas del asistente con 3–4 voces y juzgar a ciegas: naturalidad, acento, pronunciación de cifras y unidades, y latencia hasta el primer audio.
-4. Anotar privacidad: a dónde viaja el audio, si el proveedor lo retiene o entrena con él, y si ofrece acuerdo de no retención (pregunta abierta 2 del plan).
+4. Anotar privacidad: a dónde viaja el audio, si el proveedor lo retiene o entrena con él, y si ofrece acuerdo de no retención (pregunta abierta de privacidad, ver el README).
 
 ## Fuentes
 

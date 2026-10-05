@@ -1,4 +1,4 @@
-"""Modelos de persistencia (sección 7.3 del plan).
+"""Modelos de persistencia.
 
 Todo cuelga de `(sistema_id, usuario_ref)`; `usuario_ref` es el `sub` opaco del sistema.
 Las consultas del repositorio deben filtrar siempre por ambos.

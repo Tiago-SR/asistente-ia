@@ -1,4 +1,4 @@
-"""Configuración del servicio por variables de entorno (sección 7.6 del plan)."""
+"""Configuración del servicio por variables de entorno."""
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict

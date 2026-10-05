@@ -1,4 +1,4 @@
-"""core/ solo depende de interfaces: no importa api/, sistemas/ ni store/ (plan 3.6 y 12.1)."""
+"""core/ solo depende de interfaces: no importa api/, sistemas/ ni store/."""
 
 import ast
 from pathlib import Path

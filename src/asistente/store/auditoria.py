@@ -1,4 +1,4 @@
-"""Auditoría de tools en `llamadas_tool`: metadatos, nunca el resultado (sección 7.3)."""
+"""Auditoría de tools en `llamadas_tool`: metadatos, nunca el resultado."""
 
 from typing import Any
 

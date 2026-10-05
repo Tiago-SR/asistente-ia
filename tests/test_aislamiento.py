@@ -1,4 +1,4 @@
-"""Aislamiento entre sistemas y entre usuarios (hito de la Fase 1, sección 6 del plan).
+"""Aislamiento entre sistemas y entre usuarios (hito de la Fase 1).
 
 Dos sistemas mock registrados con claves distintas; cada usuario consulta sus datos y ninguna
 prueba logra cruzar sistemas ni usuarios. Reutiliza las fixtures de `test_api.py`.

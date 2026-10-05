@@ -1,4 +1,4 @@
-"""POST /v1/voz/transcribir: dictado (sección 7.7). Cuerpo = audio crudo; devuelve el texto
+"""POST /v1/voz/transcribir: dictado (sección 7.4 del contrato). Cuerpo = audio crudo; devuelve el texto
 para que el widget lo ponga en el campo (sin envío automático). El audio no se guarda."""
 
 import logging

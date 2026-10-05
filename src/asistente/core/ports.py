@@ -1,4 +1,4 @@
-"""Puertos del core. Sin dependencias de api/, sistemas/ ni store/ (sección 7.1)."""
+"""Puertos del core. Sin dependencias de api/, sistemas/ ni store/."""
 
 from dataclasses import dataclass, field
 from typing import Any, Protocol

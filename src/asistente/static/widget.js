@@ -1,5 +1,5 @@
 /*
- * <asistente-chat> — widget de chat del Asistente (sección 9 del plan).
+ * <asistente-chat> — widget de chat del Asistente.
  *
  * Web Component sin dependencias ni build. Shadow DOM, sin innerHTML: todo el contenido
  * (incluido el Markdown del modelo) se construye con nodos DOM, así que no hay inyección.
@@ -22,6 +22,10 @@
  *               navegador (Web Speech; en Chrome el audio lo procesa el servicio de Google) y, si no existe,
  *               el STT del asistente (POST /v1/voz/transcribir). "servidor" evita enviar el audio a Google.
  *               La respuesta hablada usa siempre las voces del navegador (speechSynthesis).
+ *   palabra-activacion        palabra que despierta el modo «manos libres» (por defecto "asistente").
+ *   manos-libres-inactividad  minutos sin interacción tras los que el modo manos libres se apaga solo
+ *               (por defecto 5; 0 = no se apaga). El botón «Manos libres» solo aparece si el navegador tiene
+ *               reconocimiento y síntesis de voz, la página es un contexto seguro y voz-motor no es "servidor".
  *
  * Personalización por variables CSS (se heredan a través del Shadow DOM):
  *   --asistente-color, --asistente-color-texto, --asistente-fondo, --asistente-texto,
@@ -69,6 +73,16 @@
     callar: "Dejar de escuchar",
     leerAuto: "Leer las respuestas en voz alta",
     noLeerAuto: "Dejar de leer en voz alta",
+    manosLibres: "Manos libres",
+    apagarManosLibres: "Apagar manos libres",
+    mhArmado: "Manos libres activo. Decí «{p}» para hablar.",
+    mhCapturando: "Te escucho…",
+    mhConfirmando: "¿Lo envío? Decí «enviar» o «cancelar».",
+    mhRespondiendo: "Respondiendo… Decí «{p}» para interrumpir.",
+    mhEsperar: "Esperá a que termine la respuesta para enviar.",
+    mhPrivacidad: "Micrófono abierto: el audio se envía al servicio de voz del navegador (Google, en Chrome).",
+    mhInactividad: "Manos libres apagado por inactividad.",
+    cancelar: "Cancelar",
     pie: "Las respuestas pueden contener errores; verificá los datos importantes.",
   };
   const ERRORES = {
@@ -110,6 +124,66 @@
     return "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance === "function";
   }
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
+
+  // ── Modo «manos libres» (ver contrato 7.4) ──
+  // Decisión de producto: nada se envía solo al terminar de hablar; el usuario confirma («enviar» o botón).
+  // Ponerlo en false hace que se envíe al cerrar la frase (mismo camino, sin código aparte).
+  const MANOS_LIBRES_CONFIRMAR = true;
+  const PALABRA_ACTIVACION = "asistente";   // por defecto; atributo palabra-activacion
+  const MH_INACTIVIDAD_MIN = 5;             // se apaga solo tras tantos minutos sin interacción; atributo manos-libres-inactividad (0 = nunca)
+  const MH_CIERRE_MS = 1800;                // silencio tras el que una frase dictada pasa a confirmación
+  const MH_ESPERA_MS = 8000;                // tras la palabra de activación, tiempo para empezar a hablar
+  const MH_MAX_FALLOS = 5;                  // reinicios seguidos del reconocedor con error antes de apagar
+
+  const COMANDOS = {
+    enviar: ["enviar", "envia", "enviar mensaje", "enviar pregunta"],
+    cancelar: ["cancelar", "cancela", "descartar", "descarta"],
+    apagar: ["apagar manos libres", "apaga manos libres", "desactivar manos libres"],
+  };
+
+  // minúsculas, sin acentos ni puntuación, espacios simples: para comparar lo que reconoce el navegador.
+  function normalizarFrase(t) {
+    return String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  // Texto que sigue a la palabra de activación si esta aparece al comienzo de la frase (con hasta `maxAntes`
+  // palabras antes, p. ej. «oye asistente»); null si no aparece.
+  function buscarActivacion(texto, palabra, maxAntes = 2) {
+    const buscadas = normalizarFrase(palabra).split(" ").filter(Boolean);
+    if (!buscadas.length) return null;
+    const toks = String(texto).trim().split(/\s+/);
+    const norm = toks.map(normalizarFrase);
+    for (let i = 0; i <= Math.min(maxAntes, toks.length - buscadas.length); i++) {
+      if (buscadas.every((b, k) => norm[i + k] === b)) {
+        return toks.slice(i + buscadas.length).join(" ").replace(/^[\s,.:;¡!¿?]+/, "");
+      }
+    }
+    return null;
+  }
+  // "enviar" | "cancelar" | "apagar" si la frase ENTERA es un comando (opcional «por favor»); si no, null.
+  function comandoDe(texto) {
+    const n = normalizarFrase(texto).replace(/ por favor$/, "");
+    for (const [cmd, frases] of Object.entries(COMANDOS)) if (frases.includes(n)) return cmd;
+    return null;
+  }
+  // Qué hacer con una frase reconocida según el estado. Los comandos solo valen en frases finales: un
+  // «enviar» parcial podría ser el comienzo de «enviar un informe».
+  function interpretar(estado, texto, palabra, final) {
+    if (!String(texto).trim()) return { accion: "ignorar" };
+    const cmd = final ? comandoDe(texto) : null;
+    if (cmd === "apagar" && estado !== "apagado") return { accion: "apagar" };
+    if (estado === "capturando" || estado === "confirmando") {
+      if (cmd === "enviar" || cmd === "cancelar") return { accion: cmd };
+      return { accion: "texto", texto };
+    }
+    if (estado === "armado" || estado === "respondiendo") {
+      const resto = buscarActivacion(texto, palabra);
+      return resto === null ? { accion: "ignorar" } : { accion: "activar", resto };
+    }
+    return { accion: "ignorar" };
+  }
+  // Espera antes de reiniciar el reconocedor: breve si terminó por silencio, creciente si falló.
+  function retrasoReinicio(fallos) { return Math.min(5000, 250 * 2 ** fallos); }
 
   // Markdown -> texto para leer en voz alta (sin símbolos, enlaces, código ni separadores de tabla).
   function textoParaVoz(md) {
@@ -296,6 +370,23 @@
     .barra svg { width: 20px; height: 20px; }
     .barra .altavoz.activa { color: var(--c); }
     .barra .altavoz[hidden] { display: none; }
+    .barra .manos { display: flex; align-items: center; gap: 6px; background: none; border: 1px solid var(--b); border-radius: 999px; padding: 4px 12px 4px 8px; font: inherit; font-size: 13px; color: inherit; cursor: pointer; }
+    .barra .manos:hover { background: var(--suave); }
+    .barra .manos[aria-pressed="true"] { background: var(--c); border-color: var(--c); color: var(--ct); }
+    .barra .manos[hidden] { display: none; }
+    .barra .manos svg { width: 16px; height: 16px; }
+    .mh { max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto 8px; padding: 8px 12px; border: 1px solid var(--c); border-radius: var(--r); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+    .mh[hidden] { display: none; }
+    .mh-punto { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #c0392b; }
+    .mh-estado { font-weight: 600; }
+    .mh-parcial { flex: 1 1 120px; min-width: 0; color: var(--apagado); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mh button { border: 1px solid var(--b); background: var(--f); color: inherit; border-radius: 999px; padding: 3px 12px; font: inherit; cursor: pointer; }
+    .mh button:hover { border-color: var(--c); color: var(--c); }
+    .mh .mh-enviar { background: var(--c); border-color: var(--c); color: var(--ct); }
+    .mh .mh-enviar:hover { color: var(--ct); opacity: .9; }
+    .mh button[hidden] { display: none; }
+    .mh-priv { flex-basis: 100%; font-size: 11px; color: var(--apagado); }
+    @media (prefers-reduced-motion: no-preference) { .mh.escuchando .mh-punto { animation: pulso 1.2s infinite; } }
     .voz-acciones { margin-top: 6px; }
     .escuchar { width: 28px; height: 28px; border: 1px solid var(--b); border-radius: 50%; background: transparent; color: var(--apagado); cursor: pointer; display: inline-grid; place-items: center; padding: 0; }
     .escuchar:hover, .escuchar.hablando { color: var(--c); border-color: var(--c); }
@@ -379,6 +470,7 @@
     enviar: "M12 19V5M5 12l7-7 7 7",
     mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
     parar: "M7 7h10v10H7z",
+    manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
     altavoz: "M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
   };
   function icono(nombre) {
@@ -405,7 +497,7 @@
 
   class AsistenteChat extends HTMLElement {
     static get observedAttributes() { return ["token-url", "servidor"]; }
-    static get _utiles() { return { textoParaVoz, ultimoCorte, elegirVoz }; }  // para los tests
+    static get _utiles() { return { textoParaVoz, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, retrasoReinicio }; }  // para los tests
 
     constructor() {
       super();
@@ -419,6 +511,11 @@
       this._reco = null;
       this._leerAuto = false;
       this._leidoHasta = 0;
+      this._pendientesVoz = 0;   // frases encoladas en speechSynthesis que aún no terminaron
+      this._genVoz = 0;          // cambia al cortar la voz: ignora los eventos de lo cancelado
+      this._leerCortado = false; // el usuario interrumpió la lectura de este turno (manos libres)
+      // modo manos libres: estado y recursos (ver _mh* más abajo)
+      this._mh = { estado: "apagado", reco: null, fallos: 0, ultimoError: "", siguiente: 0, idxActivacion: -1, tCierre: null, tInact: null, tReinicio: null };
       this.attachShadow({ mode: "open" });
     }
 
@@ -435,6 +532,7 @@
       if (this._abort) this._abort.abort();
       this._detenerGrabacion(true);
       this._detenerReco(true);
+      this._mhApagar("", true);
       this._pararVoz();
     }
 
@@ -471,7 +569,10 @@
       this._altavoz.addEventListener("click", () => this._conmutarLeerAuto());
       try { this._leerAuto = sessionStorage.getItem(CLAVE_LEER) === "1"; } catch { /* sin storage */ }
       this._pintarAltavoz();
-      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._altavoz, otra]));
+      // manos libres: oculto hasta saber que el navegador puede (ver _actualizarVoz)
+      this._manos = el("button", { class: "manos", type: "button", hidden: true, "aria-pressed": "false" }, icono("manos"), el("span", { textContent: TEXTOS.manosLibres }));
+      this._manos.addEventListener("click", () => this._conmutarManosLibres());
+      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._altavoz, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
       this._scroll = el("div", { class: "scroll" }, this._mensajes);
@@ -494,8 +595,21 @@
       this._avisoVoz = el("div", { class: "aviso-voz", role: "status" });
       const form = el("form", {}, this._entrada, this._mic, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
+      // indicador de manos libres: visible siempre que el micrófono esté abierto, con el botón de apagar
+      this._mhPunto = el("span", { class: "mh-punto", "aria-hidden": "true" });
+      this._mhEtiqueta = el("span", { class: "mh-estado", role: "status", "aria-live": "polite" });
+      this._mhParcial = el("span", { class: "mh-parcial" });
+      this._mhEnviar = el("button", { type: "button", class: "mh-enviar", textContent: TEXTOS.enviar });
+      this._mhCancelar = el("button", { type: "button", class: "mh-cancelar", textContent: TEXTOS.cancelar });
+      this._mhApagarBtn = el("button", { type: "button", class: "mh-apagar", textContent: TEXTOS.apagarManosLibres });
+      this._mhEnviar.addEventListener("click", () => this._mhEnviarTexto());
+      this._mhCancelar.addEventListener("click", () => this._mhDescartar());
+      this._mhApagarBtn.addEventListener("click", () => this._mhApagar(""));
+      this._mhCaja = el("div", { class: "mh", hidden: true }, this._mhPunto, this._mhEtiqueta, this._mhParcial,
+        this._mhEnviar, this._mhCancelar, this._mhApagarBtn, el("div", { class: "mh-priv", textContent: TEXTOS.mhPrivacidad }));
+      this.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._mhActivo()) this._mhApagar(""); });
       const principal = el("main", { class: "principal" }, barra, this._scroll,
-        el("div", { class: "entrada" }, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie })));
+        el("div", { class: "entrada" }, this._mhCaja, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie })));
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
       r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
@@ -679,6 +793,9 @@
     _actualizarVoz() {
       this._mic.hidden = !this._motorDictado();
       this._altavoz.hidden = !puedeHablar();
+      // manos libres: solo con el reconocimiento del navegador (la palabra de activación no existe en el STT del servidor)
+      this._manos.hidden = !(this._motorDictado() === "navegador" && puedeHablar() && window.isSecureContext !== false);
+      if (this._manos.hidden) this._mhApagar("", true);
     }
 
     _marcarMic(grabando) {
@@ -740,6 +857,194 @@
       try { cancelar ? r.abort() : r.stop(); } catch { /* ya terminó */ }
     }
 
+    // — modo «manos libres» —
+    // Un solo SpeechRecognition continuo atiende todos los estados (así no compite por el micrófono):
+    //   apagado → armado (solo espera la palabra de activación) → capturando (dicta al campo) →
+    //   confirmando («enviar» / «cancelar» o botones) → respondiendo → armado.
+    _mhActivo() { return this._mh.estado !== "apagado"; }
+    _palabra() { return (this.getAttribute("palabra-activacion") || PALABRA_ACTIVACION).trim() || PALABRA_ACTIVACION; }
+
+    _conmutarManosLibres() {
+      if (this._mhActivo()) { this._mhApagar(""); return; }
+      if (!reconocimiento() || this._ocupado) return;
+      this._detenerReco(true); this._detenerGrabacion(true);   // un solo micrófono a la vez
+      this._pararVoz();
+      this._avisarVoz("");
+      this._mh.fallos = 0; this._mh.ultimoError = "";
+      this._mhEstado("armado");
+      this._mhIniciarReco();                                   // dentro del gesto del usuario (el navegador lo exige)
+    }
+
+    // `motivo`: "" (lo pidió el usuario), "voz", "inactividad" o un código de ERRORES_VOZ.
+    _mhApagar(motivo, silencioso = false) {
+      const mh = this._mh;
+      if (!this._mhActivo()) return;
+      clearTimeout(mh.tReinicio); mh.tReinicio = null;
+      const r = mh.reco; mh.reco = null;
+      if (r) { try { r.abort(); } catch { /* ya terminó */ } }
+      this._leerCortado = true; this._pararVoz();
+      this._mhEstado("apagado");
+      if (silencioso) return;
+      if (motivo === "inactividad") this._avisarVoz(TEXTOS.mhInactividad);
+      else if (ERRORES_VOZ[motivo]) this._avisarVoz(ERRORES_VOZ[motivo], true);
+      else this._avisarVoz("");
+    }
+
+    _mhEstado(nuevo) {
+      const mh = this._mh;
+      mh.estado = nuevo;
+      if (nuevo !== "capturando") { clearTimeout(mh.tCierre); mh.tCierre = null; }
+      this._mic.disabled = nuevo !== "apagado";
+      this._mhPintar();
+      this._mhActividad();
+    }
+
+    // Reinicia el temporizador de inactividad (se llama en cada cambio de estado o gesto del usuario).
+    _mhActividad() {
+      const mh = this._mh;
+      clearTimeout(mh.tInact); mh.tInact = null;
+      if (!this._mhActivo()) return;
+      const min = Number(this.getAttribute("manos-libres-inactividad") ?? MH_INACTIVIDAD_MIN);
+      if (!(min > 0)) return;
+      mh.tInact = setTimeout(() => this._mhApagar("inactividad"), min * 60_000);
+    }
+
+    _mhPintar() {
+      const mh = this._mh, e = mh.estado, activo = e !== "apagado";
+      const p = this._palabra();
+      this._mhCaja.hidden = !activo;
+      this._mhCaja.classList.toggle("escuchando", activo);
+      this._mhEtiqueta.textContent = ({
+        armado: TEXTOS.mhArmado, capturando: TEXTOS.mhCapturando, confirmando: TEXTOS.mhConfirmando, respondiendo: TEXTOS.mhRespondiendo,
+      }[e] || "").replace("{p}", p);
+      this._mhParcial.textContent = "";
+      this._mhEnviar.hidden = this._mhCancelar.hidden = !(e === "capturando" || e === "confirmando");
+      this._manos.setAttribute("aria-pressed", String(activo));
+      const t = activo ? TEXTOS.apagarManosLibres : TEXTOS.manosLibres;
+      this._manos.title = t; this._manos.setAttribute("aria-label", t);
+    }
+
+    _mhIniciarReco() {
+      const SR = reconocimiento(), mh = this._mh;
+      if (!SR || !this._mhActivo() || mh.reco) return;
+      const r = new SR();
+      r.lang = this.getAttribute("idioma") || "es-UY";
+      r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+      mh.siguiente = 0; mh.idxActivacion = -1;                 // los índices de resultados empiezan de cero en cada sesión
+      r.onresult = (e) => { mh.fallos = 0; this._mhResultados(e); };
+      r.onerror = (e) => {
+        // «no-speech» y «aborted» son el ciclo normal (silencio, o lo cortamos nosotros): onend reinicia.
+        if (e.error === "no-speech" || e.error === "aborted") return;
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") { this._mhApagar("mic_denegado"); return; }
+        if (e.error === "audio-capture") { this._mhApagar("mic_no_disponible"); return; }
+        mh.fallos++; mh.ultimoError = e.error === "network" ? "reco_red" : "reco_error";
+      };
+      // Chrome corta el reconocimiento continuo tras un rato de silencio o ~60 s: se reinicia mientras siga activo.
+      r.onend = () => {
+        if (mh.reco !== r) return;                             // lo reemplazamos o lo apagamos nosotros
+        mh.reco = null;
+        this._mhReprogramar();
+      };
+      mh.reco = r;
+      try { r.start(); }
+      catch { r.onend = null; mh.reco = null; mh.fallos++; mh.ultimoError = "reco_error"; this._mhReprogramar(); }
+    }
+
+    // Reinicia el reconocedor tras una pausa; si falló demasiadas veces seguidas, apaga el modo con el aviso del último error.
+    _mhReprogramar() {
+      const mh = this._mh;
+      if (!this._mhActivo()) return;
+      if (mh.fallos >= MH_MAX_FALLOS) { this._mhApagar(mh.ultimoError || "reco_error"); return; }
+      clearTimeout(mh.tReinicio);
+      mh.tReinicio = setTimeout(() => { mh.tReinicio = null; this._mhIniciarReco(); }, retrasoReinicio(mh.fallos));
+    }
+
+    _mhResultados(e) {
+      const mh = this._mh;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i], texto = String(res[0].transcript || "").trim();
+        if (!texto) continue;
+        if (res.isFinal) {
+          if (i < mh.siguiente) continue;                      // ya procesado
+          mh.siguiente = i + 1;
+        }
+        this._mhFrase(texto, res.isFinal, i);
+      }
+    }
+
+    _mhFrase(texto, final, i) {
+      const mh = this._mh;
+      if (!this._mhActivo()) return;
+      if ((mh.estado === "capturando" || mh.estado === "confirmando") && i < mh.idxActivacion) return;   // eco de lo anterior a la activación
+      const a = interpretar(mh.estado, texto, this._palabra(), final);
+      switch (a.accion) {
+        case "apagar": this._mhApagar("voz"); break;
+        case "activar": {
+          this._leerCortado = true; this._pararVoz();          // hablarle al asistente corta su lectura
+          this._avisarVoz("");
+          mh.idxActivacion = i;
+          this._mhEstado("capturando");
+          this._mhTexto(a.resto, final);
+          break;
+        }
+        case "enviar": this._mhEnviarTexto(); break;
+        case "cancelar": this._mhDescartar(); break;
+        case "texto": {
+          if (mh.estado === "confirmando") this._mhEstado("capturando");   // sigue dictando: vuelve a capturar
+          const resto = i === mh.idxActivacion ? buscarActivacion(texto, this._palabra()) : null;
+          this._mhTexto(resto === null ? texto : resto, final);
+          break;
+        }
+        default: break;
+      }
+    }
+
+    // Parcial → indicador; final → campo de texto (sin enviar). Siempre rearma el cierre de la frase.
+    _mhTexto(texto, final) {
+      if (final && texto) { this._mhParcial.textContent = ""; this._anadirAlCampo(texto); }
+      else this._mhParcial.textContent = texto ? "… " + texto : "";
+      this._mhArmarCierre();
+    }
+
+    // Tras un silencio, lo dictado pasa a confirmación; si no se dijo nada, se vuelve a armado.
+    _mhArmarCierre() {
+      const mh = this._mh;
+      clearTimeout(mh.tCierre);
+      if (mh.estado !== "capturando") return;
+      const vacio = !this._entrada.value.trim();
+      mh.tCierre = setTimeout(() => {
+        mh.tCierre = null;
+        if (mh.estado !== "capturando") return;
+        if (this._entrada.value.trim()) this._mhCerrarFrase();
+        else { this._mhEstado("armado"); this._avisarVoz(ERRORES_VOZ.sin_texto, true); }
+      }, vacio ? MH_ESPERA_MS : MH_CIERRE_MS);
+    }
+
+    _mhCerrarFrase() {
+      this._mhEstado("confirmando");
+      if (!MANOS_LIBRES_CONFIRMAR) this._mhEnviarTexto();
+    }
+
+    // Envía lo que hay en el campo (la confirmación: «enviar», el botón o, si se desactiva MANOS_LIBRES_CONFIRMAR, el cierre de la frase).
+    _mhEnviarTexto() {
+      if (!this._mhActivo() || !this._entrada.value.trim()) return;
+      if (this._ocupado) { this._avisarVoz(TEXTOS.mhEsperar); return; }
+      this._avisarVoz("");
+      this._enviarForm();                                      // _enviarMensaje pasa el estado a «respondiendo»
+    }
+
+    _mhDescartar() {
+      if (!this._mhActivo()) return;
+      this._entrada.value = ""; this._entrada.dispatchEvent(new Event("input"));
+      this._avisarVoz("");
+      this._mhEstado("armado");
+    }
+
+    // Vuelve a armado cuando la respuesta terminó de llegar y de leerse.
+    _mhRevisarFin() {
+      if (this._mh.estado === "respondiendo" && !this._ocupado && this._pendientesVoz === 0) this._mhEstado("armado");
+    }
+
     // — respuesta hablada (speechSynthesis) —
     _conmutarLeerAuto() {
       this._leerAuto = !this._leerAuto;
@@ -762,11 +1067,19 @@
       const idioma = this.getAttribute("idioma") || "es-UY";
       const v = elegirVoz(window.speechSynthesis.getVoices(), idioma, this.getAttribute("voz"));
       if (v) { u.voice = v; u.lang = v.lang; } else u.lang = idioma;
-      if (alTerminar) { u.onend = alTerminar; u.onerror = alTerminar; }
+      const gen = this._genVoz;
+      this._pendientesVoz++;
+      const fin = () => {
+        if (gen === this._genVoz) this._pendientesVoz = Math.max(0, this._pendientesVoz - 1);
+        if (alTerminar) alTerminar();
+        this._mhRevisarFin();
+      };
+      u.onend = fin; u.onerror = fin;
       window.speechSynthesis.speak(u);
     }
 
     _pararVoz() {
+      this._genVoz++; this._pendientesVoz = 0;
       if (puedeHablar()) window.speechSynthesis.cancel();
       if (this._raiz) for (const b of this._raiz.querySelectorAll(".escuchar.hablando")) b.classList.remove("hablando");
     }
@@ -878,10 +1191,12 @@
     _bloquear(si) {
       this._ocupado = si; this._enviar.disabled = si;
       this._raiz.setAttribute("aria-busy", String(si));
+      if (!si) this._mhRevisarFin();
     }
 
     async _enviarMensaje(texto) {
       this._pararVoz();
+      if (this._mhActivo()) this._mhEstado("respondiendo");   // también si se envió con Enter o el botón
       this._bloquear(true);
       this._burbuja("user").textContent = texto;
       const burbuja = this._burbuja("assistant");
@@ -918,8 +1233,8 @@
         burbuja.remove(); this._error(codigo); return "error";
       }
       let acumulado = "", resultado = "ok";
-      this._leidoHasta = 0;
-      const leer = this._leerAuto && puedeHablar();
+      this._leidoHasta = 0; this._leerCortado = false;
+      const leer = (this._leerAuto || this._mhActivo()) && puedeHablar();   // en manos libres siempre se lee
       const pintar = () => {
         const acciones = burbuja.querySelector(".acciones");
         burbuja.replaceChildren(); markdown(acumulado, burbuja);
@@ -930,7 +1245,7 @@
         switch (evento) {
           case "delta":
             acumulado += datos.texto || ""; pintar();
-            if (leer) this._leerIncremental(acumulado, false);
+            if (leer && !this._leerCortado) this._leerIncremental(acumulado, false);
             break;
           case "tool":
             estado.textContent = TEXTOS.consultando + "… " + (datos.herramientas || []).join(", ");
@@ -947,7 +1262,7 @@
       });
       estado.remove();
       if (resultado === "ok" && acumulado.trim()) {
-        if (leer) this._leerIncremental(acumulado, true);
+        if (leer && !this._leerCortado) this._leerIncremental(acumulado, true);
         this._botonEscuchar(burbuja, acumulado);
       }
       return resultado;

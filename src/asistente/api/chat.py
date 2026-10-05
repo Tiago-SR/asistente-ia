@@ -1,4 +1,4 @@
-"""POST /v1/chat: respuesta SSE (sección 7.5). El turno corre en una tarea aparte y se
+"""POST /v1/chat: respuesta SSE. El turno corre en una tarea aparte y se
 cancela si el cliente corta."""
 
 import asyncio

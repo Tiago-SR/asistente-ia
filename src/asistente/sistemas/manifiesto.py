@@ -1,4 +1,4 @@
-"""Descarga, validación y cache del manifiesto de tools (sección 4.2 del plan)."""
+"""Descarga, validación y cache del manifiesto de tools (sección 2 del contrato)."""
 
 import logging
 import re

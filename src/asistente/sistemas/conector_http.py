@@ -1,4 +1,4 @@
-"""Conector HTTP: ejecuta una tool en el sistema con el token del usuario (sección 4.3)."""
+"""Conector HTTP: ejecuta una tool en el sistema con el token del usuario (sección 3 del contrato)."""
 
 import json
 import logging

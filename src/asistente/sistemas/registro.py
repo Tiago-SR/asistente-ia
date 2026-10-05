@@ -1,4 +1,4 @@
-"""Registro de sistemas: carga y valida `config/sistemas.yaml` (sección 5 del plan).
+"""Registro de sistemas: carga y valida `config/sistemas.yaml` (sección 6 del contrato).
 
 Un sistema inválido queda deshabilitado (con el error registrado en `errores`) y el
 resto sigue funcionando. Los secretos nunca están en el archivo: se referencian por

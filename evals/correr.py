@@ -1,4 +1,4 @@
-"""Corre el set de preguntas contra un asistente en marcha y guarda resultados por modelo (plan 12.2).
+"""Corre el set de preguntas contra un asistente en marcha y guarda resultados por modelo.
 
 Mide por pregunta: aciertos, tools llamadas, iteraciones (llamadas al LLM), latencia, tokens y costo.
 Usa el asistente real por HTTP, así que prueba todo el camino (token, tools, prompt, modelo).

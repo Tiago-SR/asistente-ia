@@ -1,4 +1,4 @@
-"""Rate limit y cuotas sobre Postgres (sección 7.1/6 del plan).
+"""Rate limit y cuotas sobre Postgres.
 
 Contadores atómicos con `INSERT .. ON CONFLICT DO UPDATE .. RETURNING`: sin carreras
 entre réplicas. Los de usuario cuentan por `(sistema_id, usuario_ref)`; el total de

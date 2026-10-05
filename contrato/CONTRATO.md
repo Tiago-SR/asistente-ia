@@ -262,6 +262,8 @@ El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessi
 | `idioma` | Idioma de la voz (BCP 47). Por defecto `es-UY`; si el sistema no tiene voces de ese idioma, el widget usa `es-ES` o la primera en español disponible. |
 | `voz` | Nombre exacto de una voz del navegador, para forzarla. |
 | `voz-motor` | `auto` (por defecto), `navegador` o `servidor`: qué usa el dictado (ver [7.4](#74-voz-opcional)). |
+| `palabra-activacion` | Palabra que despierta el modo manos libres (por defecto `asistente`). |
+| `manos-libres-inactividad` | Minutos sin interacción tras los que el modo manos libres se apaga solo (por defecto 5; `0` = no se apaga). |
 
 Colores, tipografía y anchos se personalizan con variables CSS definidas en el elemento o en un ancestro: `--asistente-color`, `--asistente-color-texto`, `--asistente-fondo`, `--asistente-texto`, `--asistente-borde`, `--asistente-fuente`, `--asistente-radio`, `--asistente-ancho-lateral` (reservada para cuando se active el historial) y `--asistente-ancho-columna`.
 
@@ -282,6 +284,18 @@ El widget usa la **Web Speech API** del navegador, sin configurar nada en el ser
 - **Respuesta hablada:** `speechSynthesis`, con las voces instaladas en el dispositivo del usuario (cada usuario oye lo que su sistema tenga). Cada respuesta del asistente trae un botón para escucharla, y la barra superior tiene un interruptor para leerlas automáticamente (se recuerda en la pestaña). La lectura empieza por oraciones completas, antes de que termine la respuesta; se quitan el Markdown, los enlaces y el código. Dictar, enviar un mensaje o apagar el interruptor la detienen.
 - **Voz elegida:** la de `voz` si existe; si no, la del `idioma` pedido; si no, `es-ES`; si no, cualquiera en español. Sin ninguna voz en español, el navegador usa la suya por defecto.
 - **Sin garantías de servicio:** son APIs del navegador; su calidad, disponibilidad y versión no las controla el asistente.
+
+#### Modo «manos libres»
+
+Un segundo modo del widget, además del chat de siempre (que no cambia). Un botón **Manos libres** en la barra superior lo enciende; la primera vez lo inicia el usuario con ese clic (el navegador exige un gesto del usuario para abrir el micrófono) y después el widget queda escuchando solo la **palabra de activación**.
+
+- **Disponibilidad:** el botón aparece solo si el navegador tiene reconocimiento y síntesis de voz, la página es un contexto seguro (HTTPS o `localhost`) y `voz-motor` no es `servidor`. Con `voz-motor="servidor"` no hay manos libres: la palabra de activación necesita el reconocimiento continuo del navegador, que es justo lo que ese valor evita.
+- **Estados:** apagado → **armado** (solo escucha la palabra de activación) → **capturando** (lo que se dice va al campo de texto) → **confirmando** (el texto queda en el campo; se envía con el botón o diciendo «enviar», se descarta con el botón o diciendo «cancelar») → **respondiendo** (el asistente responde y la respuesta se lee en voz alta, aunque el interruptor de lectura automática esté apagado) → armado de nuevo.
+- **Nada se envía solo al terminar de hablar.** Tras un silencio de unos 2 s, lo dictado pasa a confirmación; si se sigue hablando, se añade al texto. «Enviar», «cancelar» y «apagar manos libres» solo valen como frase completa y tras una pausa (no dentro de una frase como «quiero enviar un informe»). La exigencia de confirmación es la constante `MANOS_LIBRES_CONFIRMAR` del widget: en `false`, el mismo cierre de frase envía directamente.
+- **Palabra de activación:** `asistente` por defecto (atributo `palabra-activacion`; puede ser de varias palabras). Debe estar al comienzo de la frase (admite hasta dos palabras antes, como «oye asistente»); se ignoran mayúsculas, acentos y puntuación. Lo que se dice a continuación en la misma frase ya cuenta como dictado.
+- **Interrumpir la lectura:** la lectura se corta al tocar el botón de escuchar del mensaje o al decir la palabra de activación mientras el asistente habla. No hay detector de energía ni cancelación de eco: **por ahora hay que usar auriculares**, porque con parlantes el micrófono oiría al asistente.
+- **Privacidad:** mientras está encendido, el micrófono está abierto y, en Chrome, **todo el audio se envía de forma continua al servicio de voz del navegador (Google)**, no solo lo que sigue a la palabra de activación. Por eso el widget muestra un indicador siempre visible (punto rojo, estado, aviso de privacidad) con el botón **Apagar manos libres**, y se apaga también con la tecla Esc, diciendo «apagar manos libres» o solos tras `manos-libres-inactividad` minutos sin interacción (se avisa en pantalla). Un sistema cuyos usuarios no deban enviar audio a un tercero fija `voz-motor="servidor"` y el modo no aparece.
+- **Continuidad:** Chrome corta el reconocimiento continuo tras un rato de silencio o unos 60 s; el widget lo reinicia solo mientras el modo siga encendido, con espera creciente si hay errores y se apaga con un aviso tras cinco fallos seguidos o si se deniega el micrófono. Mientras está encendido, el botón de dictado manual queda deshabilitado (dos reconocedores a la vez competirían por el micrófono).
 
 #### STT del servidor (alternativa)
 
