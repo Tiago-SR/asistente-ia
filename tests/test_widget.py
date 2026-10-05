@@ -75,3 +75,10 @@ def test_widget_dictado_solo_con_capacidad_y_sin_envio_automatico():
     cuerpo = js.split("async _transcribir(", 1)[1].split("// — chat —", 1)[0]
     assert "_entrada.value" in cuerpo
     assert "_enviarForm" not in cuerpo and "_enviarMensaje" not in cuerpo
+
+
+def test_widget_historial_oculto_no_toca_la_lista():
+    """Con MOSTRAR_HISTORIAL=false _pintarHistorial no hace nada: si lanzara, _abrir lo capturaría y olvidaría el id."""
+    js = _js()
+    assert "MOSTRAR_HISTORIAL = false" in js
+    assert "_pintarHistorial() {\n      if (!MOSTRAR_HISTORIAL) return;" in js

@@ -55,7 +55,7 @@ if ($cfg->local && isset($_GET['usuario'])) {
 }
 if ($ruta === '/') {
     $titulo = $cfg->nombre;
-    $cuerpo = "Sesión simulada como «$usuario».";
+    $cuerpo = "Sesión simulada como «{$usuario}».";
 } elseif (preg_match('#^/establecimientos/([0-9]+)$#', $ruta, $m)) {
     $repo = new Repositorio();
     $u = $repo->usuarioPorLogin($usuario);

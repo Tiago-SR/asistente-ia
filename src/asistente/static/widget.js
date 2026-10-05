@@ -204,7 +204,7 @@
     }
     [hidden] { display: none !important; }
     button { font: inherit; color: inherit; }
-    textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--c); outline-offset: 1px; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--c); outline-offset: 1px; }
 
     .lateral {
       width: var(--asistente-ancho-lateral, 260px); flex: none; display: flex; flex-direction: column;
@@ -546,6 +546,7 @@
     }
 
     _pintarHistorial() {
+      if (!MOSTRAR_HISTORIAL) return;
       const aviso = (texto) => el("li", {}, el("span", { class: "vacio-hist", textContent: texto }));
       if (this._convs === null) return this._lista.replaceChildren(aviso(ERROR_GENERICO));
       if (!this._convs.length) return this._lista.replaceChildren(aviso(TEXTOS.sinHistorial));
