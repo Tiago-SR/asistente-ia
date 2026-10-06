@@ -21,6 +21,9 @@ class Prompts:
     def __init__(self, directorio: str | Path) -> None:
         self._dir = Path(directorio).resolve()
         self._base = (self._dir / "base.md").read_text(encoding="utf-8").strip()
+        # Capa del canal de voz (opcional): cómo pedir el resumen hablado. Ver core/voz_resumen.py.
+        archivo_voz = self._dir / "voz.md"
+        self._voz = archivo_voz.read_text(encoding="utf-8").strip() if archivo_voz.is_file() else ""
 
     def _dominio(self, ruta: str | None) -> str:
         if not ruta:
@@ -47,6 +50,7 @@ class Prompts:
         usuario_nombre: str | None,
         locale: str | None,
         hoy: date,
+        canal: str = "texto",
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -57,5 +61,9 @@ class Prompts:
         partes = [self._base]
         if dominio:
             partes.append("## Dominio del sistema\n" + dominio)
+        version = f"{_hash(self._base)}+{_hash(dominio)}"
+        if canal == "voz" and self._voz:
+            partes.append("## Canal de voz\n" + self._voz)
+            version += f"+v{_hash(self._voz)}"
         partes.append("## Contexto de la sesión\n" + "\n".join(sesion))
-        return "\n\n".join(partes), f"{_hash(self._base)}+{_hash(dominio)}"
+        return "\n\n".join(partes), version

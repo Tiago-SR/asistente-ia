@@ -79,11 +79,48 @@ def _puntuar_propuestas(pregunta: dict, propuestas: list[dict], texto: str) -> l
     return fallos
 
 
+MARCAS_MARKDOWN = ("*", "|", "#", "`", "[", "]", "<", ">", "http")
+
+
+def _puntuar_voz(pregunta: dict, voz: str | None, respuesta: str, permitidos: list[float]) -> list[str]:
+    """Resumen hablado (canal de voz): debe existir, ser breve, hablado, sin cifras inventadas y no leer la respuesta entera.
+
+    Criterios opcionales en `voz:` de la pregunta: max_palabras (45), max_cifras (3), contiene (grupos), no_contiene."""
+    crit = pregunta.get("voz") or {}
+    if voz is None or not voz.strip():
+        return ["no mandó el resumen hablado (<voz>)"]
+    fallos: list[str] = []
+    palabras = voz.split()
+    if len(palabras) > crit.get("max_palabras", 45):
+        fallos.append(f"el resumen hablado es largo: {len(palabras)} palabras")
+    if len(palabras) >= len(respuesta.split()) and len(respuesta.split()) > 12:
+        fallos.append("el resumen hablado no es más corto que la respuesta (la lee entera)")
+    if any(m in voz.lower() for m in MARCAS_MARKDOWN):
+        fallos.append("el resumen hablado tiene Markdown, enlaces o símbolos que no se pueden leer")
+    cifras = [n for n in numeros_en(voz) if not _es_ruido(n)]
+    if len(cifras) > crit.get("max_cifras", 3):
+        fallos.append(f"el resumen hablado lee demasiadas cifras: {cifras}")
+    for n in cifras:
+        # al hablar se redondea («unas 870» por 870,5): se acepta hasta una unidad de diferencia, no más
+        if not any(_cerca(n, p) or abs(n - p) <= 1 for p in permitidos):
+            fallos.append(f"cifra no respaldada en el resumen hablado: {n:g}")
+    visible = normalizar(voz)
+    for grupo in crit.get("contiene", []):
+        if not any(normalizar(g) in visible for g in grupo):
+            fallos.append(f"el resumen hablado no menciona ninguno de {grupo}")
+    for prohibido in crit.get("no_contiene", []):
+        if normalizar(prohibido) in visible:
+            fallos.append(f"el resumen hablado contiene «{prohibido}»")
+    return fallos
+
+
 def puntuar(pregunta: dict, respuesta: str, herramientas: list[str], base: list[float], hubo_error: str | None,
-            propuestas: list[dict] | None = None) -> dict:
+            propuestas: list[dict] | None = None, voz: str | None = None, canal: str = "texto") -> dict:
     """Devuelve {ok, fallos: [str]}. Todos los criterios son opcionales en la pregunta.
 
-    `propuestas`: eventos `confirmacion` del turno (tool, resumen, lineas); una propuesta nunca se ejecuta."""
+    `propuestas`: eventos `confirmacion` del turno (tool, resumen, lineas); una propuesta nunca se ejecuta.
+    `voz`/`canal`: en el canal de voz se exige y puntúa el resumen hablado (evento `voz`); la respuesta completa
+    se puntúa igual que siempre."""
     fallos: list[str] = []
     if hubo_error:
         fallos.append(f"error del servicio: {hubo_error}")
@@ -120,4 +157,6 @@ def puntuar(pregunta: dict, respuesta: str, herramientas: list[str], base: list[
     for n in encontrados:
         if not _es_ruido(n) and not any(_cerca(n, p) for p in permitidos):
             fallos.append(f"cifra no respaldada: {n:g}")
+    if canal == "voz" and not hubo_error and not propuestas:   # con una propuesta, lo que se dice es la frase del sistema
+        fallos += _puntuar_voz(pregunta, voz, respuesta, permitidos)
     return {"ok": not fallos, "fallos": fallos}

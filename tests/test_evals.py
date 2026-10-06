@@ -140,3 +140,57 @@ def test_el_set_de_acciones_es_valido():
         assert not (q.get("propone") and q.get("sin_propuesta")), q["id"]
         categorias.add(q["categoria"])
     assert {"propuesta", "ambigua", "inyeccion", "fuera_de_alcance"} <= categorias
+
+
+# ───────────────────────── canal de voz ─────────────────────────
+
+
+def test_voz_sin_resumen_es_un_fallo_solo_en_el_canal_de_voz():
+    q = pregunta(numeros=[870.5])
+    assert p.puntuar(q, "Son 870,5 ha.", [], BASE, None)["ok"]  # canal de texto: no se exige
+    r = p.puntuar(q, "Son 870,5 ha.", [], BASE, None, None, None, "voz")
+    assert not r["ok"] and any("resumen hablado" in f for f in r["fallos"])
+
+
+def test_voz_resumen_breve_hablado_y_respaldado_pasa():
+    larga = "Tenés 870,5 hectáreas en total. " + "Detalle por cultivo y por establecimiento. " * 6
+    r = p.puntuar(pregunta(numeros=[870.5]), larga, [], BASE, None, None,
+                  "Tenés unas 870 hectáreas en total; el desglose está en pantalla.", "voz")
+    assert r["ok"], r["fallos"]
+
+
+@pytest.mark.parametrize("voz,esperado", [
+    ("palabra " * 60, "es largo"),
+    ("Mirá **870,5** hectáreas", "Markdown"),
+    ("Entrá a https://x.test para verlo", "Markdown"),
+    ("Tenés 540,5 de soja, 210 de maíz y 120 de otro, y 870,5 en total", "demasiadas cifras"),
+    ("Tenés 999 hectáreas", "no respaldada"),
+    ("Tenés 872 hectáreas", "no respaldada"),
+])
+def test_voz_fallos_de_forma_y_de_cifras(voz, esperado):
+    larga = "Respuesta completa. " * 30
+    r = p.puntuar(pregunta(), larga, [], BASE, None, None, voz, "voz")
+    assert not r["ok"] and any(esperado in f for f in r["fallos"]), r["fallos"]
+
+
+def test_voz_que_lee_la_respuesta_entera_falla_y_la_frase_del_sistema_en_propuestas_no_se_exige():
+    corta = "Tenés tres establecimientos: El Matorral, La Esperanza y San Pedro, con soja y maíz como cultivos."
+    r = p.puntuar(pregunta(), corta, [], BASE, None, None, corta, "voz")
+    assert not r["ok"] and any("más corto" in f for f in r["fallos"])
+    prop = [{"tool": "agregar_nota", "resumen": "Agregar una nota", "lineas": []}]
+    assert p.puntuar(pregunta(), "Pedí confirmar.", [], BASE, None, prop, None, "voz")["ok"]
+
+
+def test_voz_criterios_propios_de_la_pregunta():
+    q = pregunta(voz={"max_cifras": 1, "contiene": [["pantalla"]], "no_contiene": ["trigo"]})
+    larga = "Respuesta completa. " * 30
+    assert p.puntuar(q, larga, [], BASE, None, None, "Son 870 hectáreas; mirá la pantalla.", "voz")["ok"]
+    r = p.puntuar(q, larga, [], BASE, None, None, "Son 540,5 y 210 de trigo.", "voz")
+    assert not r["ok"] and len(r["fallos"]) >= 3
+
+
+def test_el_set_de_evals_de_voz_es_valido_y_fija_el_canal():
+    conjunto = yaml.safe_load((EVALS / "preguntas_voz.yaml").read_text(encoding="utf-8"))
+    assert conjunto["canal"] == "voz" and len(conjunto["preguntas"]) >= 10
+    ids = [q["id"] for q in conjunto["preguntas"]]
+    assert len(ids) == len(set(ids)) and all({"id", "categoria", "usuario", "turnos"} <= q.keys() for q in conjunto["preguntas"])

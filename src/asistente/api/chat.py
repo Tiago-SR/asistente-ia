@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -25,6 +26,8 @@ router = APIRouter()
 class ChatIn(BaseModel):
     conversacion_id: uuid.UUID | None = None
     mensaje: str
+    # «voz»: el modelo agrega un resumen hablado (evento `voz`); la respuesta completa no cambia.
+    canal: Literal["texto", "voz"] = "texto"
 
 
 def _frame(evento: str, datos) -> bytes:
@@ -32,6 +35,7 @@ def _frame(evento: str, datos) -> bytes:
         events.DELTA: lambda d: {"texto": d},
         events.TOOL: lambda d: {"herramientas": d},
         events.UI: lambda d: {"acciones": d},
+        events.VOZ: lambda d: {"texto": d},
         events.ERROR: lambda d: {"codigo": d},
     }.get(evento, lambda d: d or {})(datos)
     return f"event: {evento}\ndata: {json.dumps(cuerpo, ensure_ascii=False)}\n\n".encode()
@@ -66,7 +70,7 @@ async def chat(
     request_id = uuid.uuid4().hex
     prompt, version = svc.prompts.componer(
         sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
-        usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(UTC).date(),
+        usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(UTC).date(), canal=body.canal,
     )
     lim = sistema.limites
     ctx = Contexto(
@@ -78,7 +82,7 @@ async def chat(
         u.sistema_id, u.usuario_ref, conv_id, cfg.max_turnos_historial
     )
     config = ConfigTurno(max_iter=cfg.max_iter, max_output_tokens=cfg.max_output_tokens,
-                         timeout_turno_s=cfg.timeout_turno_s)
+                         timeout_turno_s=cfg.timeout_turno_s, resumen_voz=body.canal == "voz")
     conector = svc.conector.para(u, request_id)
 
     cola: asyncio.Queue = asyncio.Queue()
@@ -103,8 +107,11 @@ async def chat(
                     log.exception("[%s] no se pudo guardar el turno", request_id)
                     await emit(events.ERROR, "no_se_pudo_guardar")
                 else:
+                    tiempos = {k: v for k, v in res.tiempos.items() if not k.startswith("_")}
+                    log.info("[%s] turno canal=%s tiempos_ms=%s", request_id, body.canal, tiempos)
                     await emit(events.DONE, {
                         "conversacion_id": str(conv_id),
+                        "tiempos_ms": tiempos,
                         "uso": {"tokens_in": res.uso.tokens_in, "tokens_out": res.uso.tokens_out,
                                 "tokens_in_cache": res.uso.tokens_in_cache},
                     })

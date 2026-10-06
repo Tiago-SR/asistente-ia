@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 DELTA = "delta"
+VOZ = "voz"  # resumen hablado (solo canal de voz)
 TOOL = "tool"
 UI = "ui"
 CONFIRMACION = "confirmacion"

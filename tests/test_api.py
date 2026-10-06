@@ -83,6 +83,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml"):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
+        (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
             entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes,
@@ -534,3 +535,40 @@ async def test_dictado_rate_limit_por_usuario_y_aparte_del_chat(construir_app, l
         assert (await dictar(c, usuario=u2)).status_code == 200  # otro usuario, otro contador
         # dictar no consume la cuota de mensajes del chat
         assert sse(await chatear(c, usuario=u1))[-1][0] == "done"
+
+
+# --- canal de voz (resumen hablado; ver tests/test_voz.py) -------------------------------------
+
+
+async def test_api_canal_voz_manda_evento_voz_guarda_solo_el_texto_completo_y_pide_el_resumen(api, llm):
+    guion = llm.usar(pide(LISTAR), texto("<voz>Tenés un establecimiento.</voz>\n\nTenés El Matorral"))
+    r = await api.post("/v1/chat", json={"mensaje": "¿qué campos tengo?", "canal": "voz"}, headers=auth())
+    assert r.status_code == 200
+    ev = sse(r)
+    assert ("voz", {"texto": "Tenés un establecimiento."}) in ev
+    assert "<voz>" not in "".join(d["texto"] for e, d in ev if e == "delta")
+    assert "## Canal de voz" in guion.llamadas[0].system
+    conv = ev[-1][1]["conversacion_id"]
+    visibles = (await api.get(f"/v1/conversaciones/{conv}", headers=auth())).json()["mensajes"]
+    assert visibles[-1]["texto"].strip() == "Tenés El Matorral"
+
+
+async def test_api_canal_texto_por_defecto_sin_capa_de_voz(api, llm):
+    guion = llm.usar(texto("Hola"))
+    ev = sse(await api.post("/v1/chat", json={"mensaje": "hola"}, headers=auth()))
+    assert not [e for e, _ in ev if e == "voz"]
+    assert "Canal de voz" not in guion.llamadas[0].system
+
+
+@pytest.mark.parametrize("canal", ["radio", 3, None])
+async def test_api_canal_desconocido_422(api, canal):
+    r = await api.post("/v1/chat", json={"mensaje": "hola", "canal": canal}, headers=auth())
+    assert r.status_code == 422
+
+
+async def test_done_informa_tiempos_en_ms_sin_exponer_datos_internos(api, llm):
+    llm.usar(texto("<voz>Hola.</voz>\n\nHola Ana"))
+    ev = sse(await api.post("/v1/chat", json={"mensaje": "hola", "canal": "voz"}, headers=auth()))
+    tiempos = ev[-1][1]["tiempos_ms"]
+    assert {"voz", "primer_delta", "total"} <= tiempos.keys() and all(isinstance(v, int) and v >= 0 for v in tiempos.values())
+    assert not [k for k in tiempos if k.startswith("_")]

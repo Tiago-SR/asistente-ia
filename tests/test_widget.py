@@ -283,3 +283,274 @@ def test_widget_manos_libres_pide_confirmacion_y_es_opcional():
     import re
 
     assert not re.search(r"fetch\(\s*[\"'`]https?://", js)
+
+
+# ───────────────────────── tema claro / oscuro ─────────────────────────
+
+
+def _paleta(js: str, selector: str) -> dict[str, str]:
+    import re
+
+    bloque = js.split(f"    {selector} {{\n", 1)[1].split("}", 1)[0]
+    return dict(re.findall(r"--p-([\w-]+): (#[0-9a-fA-F]{3,6});", bloque))
+
+
+def _luminancia(h: str) -> float:
+    h = h.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    canales = []
+    for i in (0, 2, 4):
+        v = int(h[i : i + 2], 16) / 255
+        canales.append(v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * canales[0] + 0.7152 * canales[1] + 0.0722 * canales[2]
+
+
+def _contraste(a: str, b: str) -> float:
+    la, lb = sorted((_luminancia(a), _luminancia(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _mezcla(a: str, b: str, pct: float) -> str:
+    """color-mix(in srgb, a pct%, b) como hex."""
+    def canales(h: str) -> list[int]:
+        h = h.lstrip("#")
+        h = "".join(c * 2 for c in h) if len(h) == 3 else h
+        return [int(h[i : i + 2], 16) for i in (0, 2, 4)]
+
+    ca, cb = canales(a), canales(b)
+    return "#" + "".join(f"{round(x * pct + y * (1 - pct)):02x}" for x, y in zip(ca, cb, strict=True))
+
+
+def test_widget_tema_atributo_y_variables_del_anfitrion_mandan():
+    """`tema` (claro|oscuro|auto) sigue prefers-color-scheme y reacciona a su cambio; --asistente-* mandan sobre la paleta."""
+    js = _js()
+    assert '"tema"' in js and "prefers-color-scheme: dark" in js
+    assert 'addEventListener("change", this._alCambiarTema)' in js
+    assert 'removeEventListener("change", this._alCambiarTema)' in js  # no deja oyentes al desconectarse
+    assert 'getAttribute("tema") || "auto"' in js
+    # cambiar `tema` solo repinta: no reinicia la sesión (token, conversación)
+    assert 'if (nombre === "tema") { this._aplicarTema(); return; }' in js
+    for var, paleta in (("color", "c"), ("color-texto", "ct"), ("fondo", "f"), ("texto", "t"), ("borde", "b")):
+        assert f"var(--asistente-{var}, var(--p-{paleta}))" in js, var
+    assert "color-scheme: dark" in js and "color-scheme: light" in js
+    assert "scrollbar-color" in js
+
+
+def test_widget_colores_fijos_solo_en_las_paletas():
+    """Ningún color literal fuera de las paletas: todo lo demás sale de variables y se adapta al tema."""
+    import re
+
+    css = _js().split("const CSS = `", 1)[1].split("`;", 1)[0]
+    fuera = re.sub(r"\.raiz(\.oscuro)? \{\n\s+--p-.*?\}", "", css, flags=re.DOTALL)
+    literales = re.findall(r"#[0-9a-fA-F]{3,6}\b|rgba?\(", fuera)
+    # lo único permitido: sombra y velo del menú lateral (oculto), que son negros translúcidos en ambos temas
+    assert [x for x in literales if x != "rgba("] == [], literales
+    assert len(literales) <= 2, literales
+
+
+def test_widget_paletas_cumplen_contraste_wcag_aa():
+    """Texto normal ≥ 4,5:1 en ambos temas, sobre cada fondo que usa el widget (incluidos los derivados con color-mix)."""
+    js = _js()
+    claro, oscuro = _paleta(js, ".raiz"), _paleta(js, ".raiz.oscuro")
+    assert set(claro) == set(oscuro) and len(claro) >= 10, (claro, oscuro)
+    for nombre, p in (("claro", claro), ("oscuro", oscuro)):
+        f, t = p["f"], p["t"]
+        suave, codigo = _mezcla(t, f, 0.06), _mezcla(t, f, 0.09)
+        apagado = _mezcla(t, f, 0.70)  # --apagado
+        pares = {
+            "texto/fondo": (t, f), "texto/mensaje del usuario": (t, suave), "texto/código": (t, codigo),
+            "apagado/fondo": (apagado, f), "apagado/suave": (apagado, suave), "apagado/código": (apagado, codigo),
+            "enlace/fondo": (p["c"], f), "enlace/código": (p["c"], codigo),
+            "primario (Confirmar, Enviar)": (p["ct"], p["c"]),
+            "error/su fondo": (p["err-t"], p["err-f"]), "error/fondo": (p["err-t"], f),
+            "ok/fondo": (p["ok"], f), "micrófono grabando": (p["rec-t"], p["rec"]),
+        }
+        for par, (a, b) in pares.items():
+            assert _contraste(a, b) >= 4.5, (nombre, par, round(_contraste(a, b), 2))
+    assert "--apagado: color-mix(in srgb, var(--t) 70%, var(--f))" in js  # el porcentaje que se verificó arriba
+
+
+# ───────────────────────── modo voz: vista propia, resumen hablado, orbe ─────────────────────────
+
+
+def test_resumen_breve_de_respaldo_son_dos_oraciones_con_tope():
+    r = _utiles_voz(
+        """
+        const b = (t, m) => U.resumenBreve(t, m);
+        return {
+          dos: b("Tenés **870,5** ha de soja. Y 88,2 de maíz. Más detalle abajo. Otra más."),
+          decimal: b("Superficie total: 1.234,5 hectáreas en dos campos. Ver tabla."),
+          una: b("Sin punto final"),
+          largo: b("Una oración muy " + "larga ".repeat(80) + "termina. Segunda."),
+          tabla: b("| A | B |\\n|---|---|\\n| 1 | 2 |"),
+          vacio: b("   "),
+        };
+        """
+    )
+    assert r["dos"] == "Tenés 870,5 ha de soja. Y 88,2 de maíz."
+    assert r["decimal"] == "Superficie total: 1.234,5 hectáreas en dos campos. Ver tabla."
+    assert r["una"] == "Sin punto final"
+    assert len(r["largo"]) <= 301 and r["largo"].endswith("…")
+    assert "|" not in r["tabla"] and r["vacio"] == ""
+
+
+def test_comando_de_voz_para_salir_del_modo_voz_y_el_alias_viejo():
+    r = _utiles_voz(
+        """
+        const c = (t) => U.comandoDe(t);
+        return [c("Salir del modo voz"), c("apagar modo voz por favor"), c("salir de voz"), c("apagar manos libres"),
+                c("quiero salir de voz ahora")];
+        """
+    )
+    assert r == ["apagar", "apagar", "apagar", "apagar", None]
+
+
+def test_widget_modo_voz_tiene_vista_propia_y_se_alterna_con_el_chat():
+    js = _js()
+    # el nombre visible cambió; los atributos y las clases internas se conservan
+    assert 'manosLibres: "Voz"' in js and 'apagarManosLibres: "Salir del modo voz"' in js and 'verChat: "Ver el chat"' in js
+    assert "Manos libres" not in js.split("const CSS", 1)[0].split("const TEXTOS", 1)[1].split("const ERRORES", 1)[0]
+    assert 'getAttribute("manos-libres-inactividad")' in js
+    # dos vistas: la de voz oculta el chat y el campo, y el panel del micrófono es el mismo en ambas
+    for esperado in ('_vista = "chat"', "_aplicarVista(", ".vista-voz .scroll", 'class: "escena"', 'class: "ver-chat"'):
+        assert esperado in js, esperado
+    aplicar = js.split("_aplicarVista(foco = false) {", 1)[1].split("\n    }\n", 1)[0]
+    assert "insertBefore(this._mhCaja" in aplicar and 'toggle("vista-voz"' in aplicar
+    # el indicador de micrófono abierto no puede ocultarse: en la vista de chat vuelve sobre la entrada
+    assert "this._cajaEntrada.insertBefore(this._mhCaja, this._form)" in aplicar
+
+
+def test_widget_la_tarjeta_de_confirmacion_siempre_queda_a_la_vista_y_no_se_confirma_por_voz():
+    js = _js()
+    conf = js.split("_confirmacion(d) {", 1)[1].split("\n    }\n", 1)[0]
+    assert 'if (this._vista === "voz") { this._vista = "chat"; this._aplicarVista();' in conf
+    assert "this._propuestaTurno = true" in conf
+    assert "ev.isTrusted" in js  # solo un clic real confirma
+    # ninguna orden de voz confirma una acción: los comandos de voz son enviar, cancelar y apagar
+    assert 'confirmar:' not in js.split("const COMANDOS = {", 1)[1].split("};", 1)[0]
+
+
+def test_widget_modo_voz_pide_el_canal_voz_y_dice_el_resumen_una_sola_vez():
+    js = _js()
+    assert 'canal: canalVoz ? "voz" : "texto"' in js
+    assert 'case "voz": this._marca("voz"); if (hablarVoz) this._resumenHablado(datos.texto, "resumen"); break;' in js
+    # la lectura automática de la respuesta completa no corre en el modo voz; el resumen sí, con el altavoz apagado
+    assert "const leer = this._leerAuto && !canalVoz && puedeHablar();" in js
+    res = js.split("_resumenHablado(texto, fuente = \"resumen\") {", 1)[1].split("_mostrarDicho", 1)[0]
+    assert "this._dichoTurno ||" in res and "this._propuestaTurno ||" in res and "this._leerCortado" in res
+    # respaldo si el modelo no manda el bloque
+    assert 'this._resumenHablado(resumenBreve(acumulado), "respaldo")' in js
+    # la respuesta completa sigue yendo al chat y con su botón de escuchar
+    assert "this._botonEscuchar(burbuja, acumulado)" in js
+
+
+def test_widget_orbe_sin_dependencias_ni_mascaras_y_respeta_movimiento_reducido():
+    js = _js()
+    css = js.split("const CSS = `", 1)[1].split("`;", 1)[0]
+    assert "mask" not in css and "<canvas" not in js and "createElement(\"canvas\")" not in js and "filter:" not in css
+    # todas las animaciones del orbe viven bajo prefers-reduced-motion: no-preference
+    import re
+
+    fuera = re.sub(r"@media \(prefers-reduced-motion: no-preference\) \{.*?\n    \}\n", "", css, flags=re.DOTALL)
+    uso_animaciones = [l for l in fuera.splitlines() if "animation:" in l and ".mh" in l]
+    assert uso_animaciones == [], uso_animaciones
+    # cada estado tiene su glifo: se distinguen sin movimiento ni color
+    for estado, glifo in (("armado", "g-mic"), ("capturando", "g-esc"), ("confirmando", "g-pausa"),
+                          ("procesando", "g-pensar"), ("hablando", "g-habla")):
+        assert f'.mh[data-estado="{estado}"] .{glifo}' in css, estado
+    # el orbe es decorativo: el texto aria-live existente (.mh-estado) es lo que anuncia el estado
+    assert 'class: "orbe", "aria-hidden": "true"' in js and 'class: "mh-estado", role: "status", "aria-live": "polite"' in js
+
+
+def test_widget_paleta_pausa_es_distinguible_del_fondo():
+    """El ámbar de «confirmando» es gráfico (anillo), no texto: pide 3:1 contra el fondo (WCAG 1.4.11)."""
+    js = _js()
+    for nombre, selector in (("claro", ".raiz"), ("oscuro", ".raiz.oscuro")):
+        p = _paleta(js, selector)
+        assert _contraste(p["pausa"], p["f"]) >= 3, (nombre, round(_contraste(p["pausa"], p["f"]), 2))
+        assert _contraste(p["c"], p["f"]) >= 3, nombre
+
+
+# ───────────────────────── volumen del orbe y tiempos del turno por voz ─────────────────────────
+
+
+def test_nivel_de_volumen_a_partir_de_muestras_de_audio():
+    r = _utiles_voz(
+        """
+        const mk = (amp, n = 512) => Uint8Array.from({ length: n }, (_, i) => 128 + (i % 2 ? amp : -amp));
+        return { silencio: U.nivelDe(mk(0)), bajo: U.nivelDe(mk(4)), hablando: U.nivelDe(mk(25)), fuerte: U.nivelDe(mk(120)),
+                 vacio: U.nivelDe(new Uint8Array(0)), nulo: U.nivelDe(null) };
+        """
+    )
+    assert r["silencio"] == 0 and r["vacio"] == 0 and r["nulo"] == 0
+    assert 0 < r["bajo"] < r["hablando"] < r["fuerte"] <= 1
+    assert r["bajo"] < 0.15 and r["hablando"] > 0.3  # el ruido de fondo casi no mueve el orbe; la voz sí
+
+
+def test_suavizado_sube_rapido_y_baja_despacio_sin_pasarse():
+    r = _utiles_voz(
+        """
+        const sube = U.suavizar(0, 1, 1 / 30), baja = U.suavizar(1, 0, 1 / 30);
+        let v = 0; for (let i = 0; i < 60; i++) v = U.suavizar(v, 0.5, 1 / 30);
+        return { sube, baja, converge: v, tope: U.suavizar(0, 1, 5), igual: U.suavizar(0.4, 0.4, 0.1) };
+        """
+    )
+    assert r["sube"] > 1 - r["baja"]  # el ataque es más rápido que la caída
+    assert abs(r["converge"] - 0.5) < 0.01 and r["tope"] == 1 and r["igual"] == 0.4
+
+
+def test_widget_volumen_del_orbe_es_local_degradable_y_respeta_movimiento_reducido():
+    js = _js()
+    niv = js.split("async _nivelIniciar() {", 1)[1].split("_nivelPulso(x)", 1)[0]
+    # solo se mide: el flujo no se graba ni se envía; ningún fetch ni MediaRecorder en el camino del nivel
+    assert "fetch(" not in niv and "MediaRecorder" not in niv and "sendBeacon" not in niv
+    # sin movimiento no se abre nada; con orbe-volumen="no" tampoco; un fallo se traga y el orbe sigue sin nivel
+    assert 'prefers-reduced-motion: reduce' in niv and 'getAttribute("orbe-volumen")' in niv and "catch { /* sin nivel de micrófono */ }" in niv
+    # se apaga con el modo: se paran las pistas, se cierra el contexto y se cancela el bucle
+    det = js.split("_nivelDetener() {", 1)[1].split("\n    }\n", 1)[0]
+    assert "t.stop()" in det and "ctx.close()" in det and "cancelAnimationFrame" in det
+    assert "this._nivelDetener();" in js.split("_mhApagar(motivo, silencioso = false) {", 1)[1].split("\n    }\n", 1)[0]
+    # mientras habla el asistente no se lee el micrófono (se oiría a él) y la voz del asistente da pulsos por palabra
+    assert 'e === "armado" || e === "capturando" || e === "confirmando"' in niv.split("_nivelBucle() {", 1)[0] + js.split("_nivelBucle() {", 1)[1]
+    assert "u.onboundary" in js
+    assert "--nivel" in js and ".o-nivel { display: none !important; }" in js
+
+
+def test_widget_tiempos_del_turno_por_voz_sin_datos_del_usuario():
+    js = _js()
+    for esperado in ('"asistente:metricas"', "primer_delta_ms", "voz_ms", "habla_ms", "tts_ms", "servidor: t.servidor"):
+        assert esperado in js, esperado
+    met = js.split("_metricasIntentar(forzar = false) {", 1)[1].split("\n    }\n", 1)[0]
+    # el evento lleva solo números y la fuente («resumen» o «respaldo»): ni el mensaje ni la respuesta
+    assert "mensaje" not in met and "texto:" not in met and "acumulado" not in met
+    assert 'case "voz": this._marca("voz");' in js and "tiempos_ms" in js
+
+
+# ───────────────────────── acuse inmediato del modo voz ─────────────────────────
+
+
+def test_widget_acuse_solo_cuando_hace_falta_y_nunca_con_acciones():
+    js = _js()
+    assert "const MH_ACUSE_MS = 900;" in js
+    acuse = js.split("_acuseProgramar() {", 1)[1].split("\n    }\n", 1)[0]
+    # solo con el modo voz, voz disponible y sin «acuse=no»; texto fijo (sin datos ni LLM)
+    assert 'getAttribute("acuse")' in acuse and "puedeHablar()" in acuse
+    assert "fetch(" not in acuse and "textoParaVoz" not in acuse
+    # no se dice si el resumen ya llegó, si el turno propuso una acción, si se interrumpió, si terminó o si se apagó
+    for guarda in ("!this._mhActivo()", "this._t !== t", "!this._ocupado", "this._dichoTurno", "this._propuestaTurno", "this._leerCortado"):
+        assert guarda in acuse, guarda
+    # se programa solo en el modo voz, se cancela al apagarlo y se informa en las métricas
+    assert "this._metricasIniciar(); this._acuseProgramar();" in js
+    assert "clearTimeout(this._tAcuse);" in js.split("_mhApagar(motivo, silencioso = false) {", 1)[1].split("\n    }\n", 1)[0]
+    assert "acuse_ms: ms(t.acuse)" in js
+    # varias frases cortas, sin cifras ni nombres (es texto fijo)
+    frases = js.split("mhAcuse: [", 1)[1].split("]", 1)[0]
+    assert frases.count('"') >= 6 and not any(c.isdigit() for c in frases)
+
+
+def test_widget_un_turno_nuevo_empieza_sin_interrumpido():
+    """Dictar con la palabra de activación pone _leerCortado en true; si el turno no lo limpia al enviar, el acuse y el resumen no suenan."""
+    js = _js()
+    envio = js.split("async _enviarMensaje(texto) {", 1)[1].split("this._bloquear(true);", 1)[0]
+    assert "this._leerCortado = false;" in envio and envio.index("this._leerCortado = false;") < envio.index("this._acuseProgramar();")

@@ -35,6 +35,10 @@ Marca cada celda con ✅ / ⚠️ (funciona con reservas) / ❌ / — (no aplica
 | B6 Permiso de micrófono denegado | | | | | |
 | B7 Manos libres (auriculares) | ✅ | | | | |
 | B8 Manos libres: reinicio tras silencio largo | | | | | |
+| B9 Modo voz: ventana de voz y resumen hablado | | | | | |
+| B10 Modo voz: alternar con el chat, tarjeta de acción | | | | | |
+| B11 Tema oscuro y orbe (rendimiento en móvil) | | | | | |
+| B12 Volumen del orbe y tiempos (¿degrada el reconocimiento?) | | | | | |
 | C1 Layout y teclado en móvil | — | — | | — | |
 
 ## 2. Casos
@@ -60,6 +64,12 @@ Marca cada celda con ✅ / ⚠️ (funciona con reservas) / ❌ / — (no aplica
   - si pasa hablando justo cuando el asistente habla o también en los huecos entre oraciones;
   - lo que muestra el widget como texto parcial mientras hablas (¿aparece la palabra o no?). Eso distingue «el micrófono no te oye» de «te oye pero la palabra no llega al comienzo de la frase».
 - **B8 – Manos libres tras silencio largo.** Déjalo armado ~2 minutos sin hablar y luego di la palabra. *Esperado:* sigue respondiendo (Chrome corta el reconocimiento y el widget lo reinicia). Anota si hubo un aviso o si se apagó solo antes de los 5 min por defecto.
+
+- **B9 – Modo voz: ventana y resumen hablado (regresión del cambio de «manos libres»).** Pulsa **Voz**: debe abrirse la ventana con el orbe, sin chat. Di «asistente, ¿cuántas hectáreas de soja tengo?», pausa, «enviar». *Esperado:* el orbe pasa por escuchando → pausa (ámbar) → procesando → hablando; se oye **un resumen corto** (no la respuesta entera) y el mismo texto aparece bajo «Te digo». Prueba también una pregunta que devuelva una tabla (por ejemplo «armame una tabla de mis establecimientos»): el resumen no debe recitar las filas. Anota cuánto tarda en empezar a hablar desde que dices «enviar». Con una pregunta que tarde (varias tools), debe oírse un **acuse corto** («Un momento, lo consulto») a ~1 s y luego el resumen sin solaparse; con una respuesta rápida no debe oírse acuse; con `acuse="no"` tampoco.
+- **B10 – Modo voz: alternar y acciones.** Con el modo encendido, pulsa «Ver el chat»: debe estar tu pregunta y la **respuesta completa**, con el panel del micrófono compacto y su aviso de privacidad; el botón **Voz** vuelve a la ventana. Si el sistema tiene acciones: pide anotar algo; *esperado:* pasa solo al chat, se oye «Te pido confirmar en pantalla…», la tarjeta se ve y **decir «confirmar» no hace nada** (solo el clic). Esc y «salir del modo voz» apagan desde cualquiera de las dos vistas.
+- **B11 – Tema oscuro y orbe.** Cambia el tema del sistema con la página abierta: el widget debe seguirlo sin recargar. En el modo voz, comprueba en el móvil que el orbe no hace ir lenta la página ni calienta el equipo tras unos minutos en «armado», y que con «reducir movimiento» del sistema no hay animaciones.
+
+- **B12 – Volumen del orbe y tiempos (el que más importa).** El orbe mide el volumen con un **segundo flujo de audio** del mismo micrófono; en algún navegador eso podría empeorar el reconocimiento (en una prueba anterior la interrupción por voz exigió hablar muy fuerte). Compara **con y sin** (`orbe-volumen="no"` en el widget): (1) en «armado», di algo y comprueba que el anillo del orbe se mueve con tu voz y no con el ruido de fondo; (2) ¿la palabra de activación se reconoce igual de bien y a la misma distancia con y sin el atributo?; (3) ¿el modo voz sigue funcionando si denegas el permiso la segunda vez?; (4) abre la consola y mira `[asistente] tiempos del turno por voz` o escucha `asistente:metricas`: anota `voz_ms`, `habla_ms` y `tts_ms` de 3 preguntas. *Si con el segundo flujo el reconocimiento empeora en algún navegador, la salida es poner `orbe-volumen="no"` por defecto ahí.*
 
 ### C. Móvil
 

@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from asistente.core import events
@@ -23,6 +23,7 @@ from asistente.core.ports import (
     Limites,
     ResultadoTool,
 )
+from asistente.core.voz_resumen import FiltroVoz, limpiar
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,8 @@ class ConfigTurno:
     timeout_tool_s: float = 30.0
     max_tools_concurrentes: int = 4
     max_llamadas_por_iteracion: int = 8
+    # Canal de voz: el modelo abre su respuesta con un bloque `<voz>` que se emite aparte (evento `voz`).
+    resumen_voz: bool = False
 
 
 @dataclass
@@ -54,6 +57,8 @@ class ResultadoTurno:
     nuevos: list[Mensaje] = field(default_factory=list)
     texto: str = ""
     uso: Uso = field(default_factory=Uso)
+    # Milisegundos desde que empezó el turno: primer texto (`primer_delta`), resumen hablado (`voz`) y fin (`total`).
+    tiempos: dict[str, int] = field(default_factory=dict)
 
     @property
     def completo(self) -> bool:
@@ -75,6 +80,7 @@ async def run_turn(
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
+    estado.tiempos["_t0"] = time.monotonic_ns() // 1_000_000
     try:
         await limites.reservar_mensaje(ctx)
     except LimiteExcedido as e:
@@ -99,10 +105,27 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
     sem = asyncio.Semaphore(config.max_tools_concurrentes if usar_paralelas else 1)
 
-    async def delta(t: str) -> None:
-        await emit(events.DELTA, t)
+    def marca(nombre: str) -> None:
+        """Registra, una sola vez por turno, cuánto tardó en llegar `nombre` (para medir la latencia percibida)."""
+        if nombre not in estado.tiempos:
+            estado.tiempos[nombre] = time.monotonic_ns() // 1_000_000 - estado.tiempos["_t0"]
 
     for _ in range(config.max_iter):
+        filtro = FiltroVoz() if config.resumen_voz else None
+
+        async def delta(t: str, filtro=filtro) -> None:
+            if filtro is None:
+                marca("primer_delta")
+                await emit(events.DELTA, t)
+                return
+            visible, resumen = filtro.alimentar(t)
+            if resumen:
+                marca("voz")
+                await emit(events.VOZ, resumen)
+            if visible:
+                marca("primer_delta")
+                await emit(events.DELTA, visible)
+
         try:
             resp = await llm.stream(
                 modelo=ctx.modelo,
@@ -119,10 +142,16 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
             return
         estado.uso += resp.uso
         await limites.registrar_uso(ctx, resp.uso)
+        if filtro is not None:
+            resto = filtro.cerrar()
+            if resto:
+                await emit(events.DELTA, resto)
+            resp = replace(resp, texto=limpiar(resp.texto))  # el bloque `<voz>` no se guarda ni se reenvía al modelo
 
         if resp.motivo_fin != "tool":
             nuevos.append(resp.como_mensaje())
             estado.motivo, estado.nuevos, estado.texto = "fin", nuevos, resp.texto
+            marca("total")
             await emit(events.DONE, {"conversacion_id": conversacion_id})
             return
 

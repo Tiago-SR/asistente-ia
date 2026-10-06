@@ -33,6 +33,14 @@ Si el usuario no tiene permitido el asistente, responde `403` y el widget muestr
 | `tenants` | no | ids de organización del usuario, solo para métricas y cuotas. **Nunca se usa para autorizar** |
 | `locale` | no | p. ej. `es-UY` (si falta, el `locale_defecto` del registro, ver 6.3) |
 
+Ejemplo del payload de un token (RS256, 10 minutos de vida):
+
+```json
+{ "iss": "sgagro", "aud": "asistente", "sub": "u-4821", "scope": "asistente:lectura",
+  "iat": 1790000000, "exp": 1790000600, "jti": "3f6c2a9e-8d1b-4c77-9a52-0b7e5d1c4f10",
+  "nombre": "Ana Pérez", "tenants": ["org-17"], "locale": "es-UY" }
+```
+
 Firma recomendada: `RS256` o `EdDSA` (el sistema guarda la privada, el asistente solo la pública). Aceptado para sistemas legados y pruebas locales: `HS256` con secreto compartido. `alg: none` se rechaza siempre. Cómo se generan y dónde se guardan las claves: ver [sección 6](#6-credenciales-y-registro-del-sistema).
 
 ## 2. Manifiesto de tools
@@ -118,7 +126,28 @@ Recomendaciones:
 - Datos agregados y compactos, con unidades en el nombre del campo (`superficie_ha`, `rinde_kg_ha`) y fechas ISO 8601.
 - No devolver geometrías ni listas de miles de filas: resumir del lado del sistema.
 - El asistente trunca respuestas por encima de un límite configurable (p. ej. 50 KB) y se lo indica al modelo.
+- Cada cifra con su unidad, su entidad y su período en el mismo objeto. Hace falta para el modo voz ([7.4](#74-voz-opcional)): el asistente dice un resumen de una o dos cifras y deja el detalle en pantalla, y ese resumen solo puede usar cifras que salieron de la tool.
 - Más criterios y ejemplos buenos y malos en la [guía de diseño de tools](GUIA_TOOLS.md).
+
+**Ejemplo: una tool pensada para texto y voz.** `resumen_por_cultivo` devuelve el agregado ya calculado (el modelo no suma listas), con unidades y entidades en los nombres, y una sugerencia `ui` para ver el detalle:
+
+```json
+{
+  "ok": true,
+  "datos": {
+    "periodo": "zafra 2025/26",
+    "superficie_total_ha": 870.5,
+    "por_cultivo": [
+      { "cultivo": "soja", "superficie_ha": 660.5, "establecimientos": 2 },
+      { "cultivo": "maíz", "superficie_ha": 210.0, "establecimientos": 1 }
+    ]
+  },
+  "fuente": "resumen_por_cultivo",
+  "ui": [ { "tipo": "navegar", "url": "/cultivos/resumen", "etiqueta": "Ver el detalle por cultivo" } ]
+}
+```
+
+Con eso, en el chat el asistente escribe la tabla completa y, en el modo voz, solo dice algo como «Tenés unas 660 hectáreas de soja y 210 de maíz; el desglose está en pantalla». El sistema no hace nada especial para el canal de voz.
 
 ## 4. Salud (opcional)
 
@@ -194,6 +223,39 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
 - **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 
+**Ejemplo de entrada completa en `config/sistemas.yaml`** (todo lo que va después de `conector` es opcional):
+
+```yaml
+sistemas:
+  - id: sgagro                      # = claim iss
+    nombre: "SGAgro"
+    base_url: https://sgagro.example.com
+    origenes_permitidos: [https://sgagro.example.com]
+    auth: { algoritmo: RS256, clave_publica_env: SGAGRO_PUBKEY, audiencia: asistente }
+    conector:
+      tipo: http
+      ruta_manifiesto: /asistente/tools
+      ruta_ejecucion: /asistente/tools/{nombre}
+      token_manifiesto_env: SGAGRO_MANIFEST_TOKEN
+    prompt_dominio: prompts/dominio/sgagro.md   # vocabulario y reglas del negocio
+    locale_defecto: es-UY                       # idioma si el token no trae `locale`
+    acciones_habilitadas: [agregar_nota, modificar_nota]   # escrituras que el modelo puede proponer (vacío = solo lectura)
+    limites:
+      mensajes_por_usuario_min: 10
+      mensajes_por_usuario_dia: 200
+      tokens_por_mes: 5000000
+    retencion_dias: 30
+```
+
+**Costo por sistema.** `GET /admin/uso?mes=2026-10` (cabecera de administración; no se expone en el proxy) devuelve el consumo y el costo en USD por modelo, con una cota `valle` y otra `pico` porque la tarifa depende del horario del proveedor (tarifas en `config/precios.yaml`):
+
+```json
+{ "mes": "2026-10", "sistemas": [ { "id": "sgagro", "nombre": "SGAgro",
+  "modelos": [ { "modelo": "deepseek-flash", "llamadas": 412, "tokens_in": 1650000, "tokens_in_cache": 1440000,
+                 "tokens_out": 98000, "costo_usd": { "valle": 0.12, "pico": 0.24 } } ],
+  "costo_usd": { "valle": 0.12, "pico": 0.24 }, "sin_tarifa": [] } ] }
+```
+
 ### 6.4 Rotación y manejo
 
 - **Rotar** = generar un valor nuevo, cambiarlo en el sistema y en el `.env` del asistente y reiniciar el asistente. El asistente solo conoce una clave por sistema: entre ambos cambios, los tokens firmados con la clave anterior fallan (vida máxima 15 min, el widget pide uno nuevo). Hacerlo en una ventana de poco uso.
@@ -227,6 +289,23 @@ Comprueba: salud; token (schema, claims, `alg`, vida ≤ 15 min); manifiesto (cr
 | `--max-kb`, `--max-ms` | topes de tamaño (50 KB) y de tiempo (por defecto, el `timeout_s` de la tool) |
 
 Imprime un reporte por secciones con un resumen y termina con código `0` si todo pasa, `1` si algo falla. Sirve igual en CI.
+
+### 6.6 Evals propios del sistema
+
+Pasar el verificador prueba el **contrato**, no la **calidad** de las respuestas. Cada sistema debería tener su propio set de preguntas con respuestas verificables y correrlo antes de cambiar de modelo o de tocar el prompt de dominio: un modelo puede pasar las pruebas de conversación y aun así inventar cifras o romper el formato de las tools. Formato (`evals/preguntas.yaml` es el ejemplo; `preguntas_acciones.yaml` cubre propuestas de acción y `preguntas_voz.yaml` el resumen hablado):
+
+```yaml
+sistema: sgagro
+token_url: https://sgagro-pruebas.example.com/asistente/token
+base_numeros: [540.5, 210, 870.5, 660.5]     # cifras legítimas: toda otra cifra en la respuesta cuenta como inventada
+preguntas:
+  - {id: q09, categoria: agregado, usuario: ana, turnos: ["¿Cuántas hectáreas de soja tengo?"],
+     tools_requeridas: [resumen_por_cultivo], numeros: [660.5]}
+  - {id: q20, categoria: aislamiento, usuario: beto, turnos: ["¿Cuántas hectáreas tiene El Matorral?"],
+     sin_numeros: [540.5]}                    # El Matorral es de ana: beto no debe verlo
+```
+
+`docker compose run --rm asistente python evals/correr.py --preguntas evals/preguntas.yaml` mide aciertos, cifras no respaldadas, latencia, tokens y costo por pregunta (usa el LLM real: cuesta tokens).
 
 ## 7. Widget de chat (interfaz para el usuario)
 
@@ -266,10 +345,15 @@ El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessi
 | `idioma` | Idioma de la voz (BCP 47). Por defecto `es-UY`; si el sistema no tiene voces de ese idioma, el widget usa `es-ES` o la primera en español disponible. |
 | `voz` | Nombre exacto de una voz del navegador, para forzarla. |
 | `voz-motor` | `auto` (por defecto), `navegador` o `servidor`: qué usa el dictado (ver [7.4](#74-voz-opcional)). |
-| `palabra-activacion` | Palabra que despierta el modo manos libres (por defecto `asistente`). |
-| `manos-libres-inactividad` | Minutos sin interacción tras los que el modo manos libres se apaga solo (por defecto 5; `0` = no se apaga). |
+| `palabra-activacion` | Palabra que despierta el modo voz (por defecto `asistente`). |
+| `manos-libres-inactividad` | Minutos sin interacción tras los que el modo voz se apaga solo (por defecto 5; `0` = no se apaga; el atributo conserva su nombre anterior por compatibilidad). |
+| `acuse` | `auto` (por defecto) o `no`: en el modo voz, si pasan unos 0,9 s desde «enviar» sin nada que decir, el widget dice una frase corta («Un momento, lo consulto») para que no haya silencio; `no` la quita (ver [7.4](#74-voz-opcional)). |
+| `orbe-volumen` | `auto` (por defecto) o `no`: si el orbe del modo voz sigue el volumen del micrófono (ver [7.4](#74-voz-opcional)); `no` evita abrir el segundo flujo de audio que lo mide. |
+| `tema` | `claro`, `oscuro` o `auto` (por defecto). `auto` sigue `prefers-color-scheme` del navegador y reacciona si el usuario cambia el tema del sistema con la página abierta. Se puede cambiar en caliente (no reinicia la conversación). Un valor no reconocido equivale a `auto`. |
 
 Colores, tipografía y anchos se personalizan con variables CSS definidas en el elemento o en un ancestro: `--asistente-color`, `--asistente-color-texto`, `--asistente-fondo`, `--asistente-texto`, `--asistente-borde`, `--asistente-fuente`, `--asistente-radio`, `--asistente-ancho-lateral` (reservada para cuando se active el historial) y `--asistente-ancho-columna`.
+
+**Tema y variables.** El widget trae dos paletas (clara y oscura; texto normal con contraste ≥ 4,5:1, verificado por tests) que cubren la tarjeta de confirmación, el modo manos libres, los errores, el código y las tablas, y declara `color-scheme` para que los controles y barras de desplazamiento nativos sigan el tema. Las variables `--asistente-*` que defina el sistema **mandan siempre** sobre la paleta del tema activo. Quien personalice colores debe fijar los pares completos (`--asistente-fondo` con `--asistente-texto`, y `--asistente-color` con `--asistente-color-texto`); si solo los diseñó para un tema, debe fijar también `tema="claro"` u `"oscuro"`, porque con `auto` el otro tema aportaría los colores que no definió. El widget no incluye un botón para alternar el tema: lo decide el sistema (con su propio interruptor que cambie el atributo `tema`) o el sistema operativo.
 
 El widget emite eventos DOM (`CustomEvent`, que burbujean y atraviesan el Shadow DOM):
 
@@ -277,7 +361,53 @@ El widget emite eventos DOM (`CustomEvent`, que burbujean y atraviesan el Shadow
 |---|---|---|
 | `asistente:accion` | `{ tipo, url, etiqueta }` | Una tool devolvió una sugerencia `ui` (ver sección 3). Si el sistema llama a `preventDefault()`, el widget no muestra su botón y el sistema decide qué hacer (navegar, abrir un mapa, filtrar una tabla). Por defecto, solo se muestra un botón para URLs relativas del mismo origen. |
 | `asistente:estado` | `{ habilitado }` | Al decidir si el asistente está disponible. Si no lo está (`403` del token o sistema deshabilitado), el widget muestra un aviso en lugar del chat. |
+| `asistente:metricas` | `{ canal, fuente, acuse_ms, primer_delta_ms, voz_ms, habla_ms, tts_ms, servidor }` | Al terminar cada turno por voz: cuánto tardó en llegar el resumen hablado y en empezar a sonar (ver [7.4](#74-voz-opcional)). Solo números: no lleva el mensaje ni la respuesta. |
 | `asistente:confirmacion` | `{ id, tool, estado }` | Una acción propuesta por el asistente terminó (`ejecutada`, `cancelada`, `expirada`, `reemplazada` o `fallida`; [sección 8](#8-acciones-con-confirmación-opcional)). El sistema puede refrescar su pantalla tras una `ejecutada`. |
+
+#### Ejemplo: integración completa
+
+Una página con el tema atado al interruptor del propio sistema, colores de marca para ambos temas y los cuatro eventos del widget:
+
+```html
+<script src="https://asistente.example.com/widget.js" defer></script>
+<asistente-chat id="asistente" style="display:block;height:100vh"
+    servidor="https://asistente.example.com" token-url="/asistente/token"
+    titulo="Asistente SGAgro" idioma="es-UY" tema="auto"></asistente-chat>
+
+<style>
+  /* Colores de marca: siempre los pares completos (color con color-texto). El selector sigue al widget:
+     con tema="auto" manda el sistema operativo; con un tema fijado, el atributo. */
+  asistente-chat { --asistente-color: #2f6f3e; --asistente-color-texto: #fff; }
+  asistente-chat[tema="oscuro"] { --asistente-color: #6fcf88; --asistente-color-texto: #0d1a11; }
+  @media (prefers-color-scheme: dark) {
+    asistente-chat:not([tema="claro"]) { --asistente-color: #6fcf88; --asistente-color-texto: #0d1a11; }
+  }
+</style>
+
+<script>
+  const asistente = document.getElementById("asistente");
+
+  // El interruptor propio del sistema manda sobre el sistema operativo; el widget se repinta sin recargar ni perder la conversación.
+  document.getElementById("modo-oscuro").addEventListener("change", (e) =>
+    asistente.setAttribute("tema", e.target.checked ? "oscuro" : "claro"));
+
+  // Los oyentes van en `document` (los eventos burbujean y atraviesan el Shadow DOM) para no perder el primero.
+  document.addEventListener("asistente:estado", (e) => { menuAsistente.hidden = !e.detail.habilitado; });
+
+  // Tras una acción ejecutada, refrescar la pantalla para que el usuario vea el cambio sin recargar.
+  document.addEventListener("asistente:confirmacion", (e) => {
+    if (e.detail.estado === "ejecutada" && e.detail.tool === "agregar_nota") recargarNotas();
+  });
+
+  // Una sugerencia `ui` de una tool: navegar con el router propio en vez de un enlace.
+  document.addEventListener("asistente:accion", (e) => {
+    if (e.detail.tipo === "navegar") { e.preventDefault(); router.push(e.detail.url); }
+  });
+
+  // Latencia del modo voz a tu sistema de métricas (solo números).
+  document.addEventListener("asistente:metricas", (e) => enviarMetrica("asistente_voz", e.detail));
+</script>
+```
 
 ### 7.4 Voz (opcional)
 
@@ -290,17 +420,68 @@ El widget usa la **Web Speech API** del navegador, sin configurar nada en el ser
 - **Voz elegida:** la de `voz` si existe; si no, la del `idioma` pedido; si no, `es-ES`; si no, cualquiera en español. Sin ninguna voz en español, el navegador usa la suya por defecto.
 - **Sin garantías de servicio:** son APIs del navegador; su calidad, disponibilidad y versión no las controla el asistente.
 
-#### Modo «manos libres»
+#### Modo voz (antes «manos libres»)
 
-Un segundo modo del widget, además del chat de siempre (que no cambia). Un botón **Manos libres** en la barra superior lo enciende; la primera vez lo inicia el usuario con ese clic (el navegador exige un gesto del usuario para abrir el micrófono) y después el widget queda escuchando solo la **palabra de activación**.
+Un segundo modo del widget, además del chat de siempre. Un botón **Voz** en la barra superior lo enciende; la primera vez lo inicia el usuario con ese clic (el navegador exige un gesto del usuario para abrir el micrófono) y después el widget queda escuchando solo la **palabra de activación**.
 
-- **Disponibilidad:** el botón aparece solo si el navegador tiene reconocimiento y síntesis de voz, la página es un contexto seguro (HTTPS o `localhost`) y `voz-motor` no es `servidor`. Con `voz-motor="servidor"` no hay manos libres: la palabra de activación necesita el reconocimiento continuo del navegador, que es justo lo que ese valor evita.
-- **Estados:** apagado → **armado** (solo escucha la palabra de activación) → **capturando** (lo que se dice va al campo de texto) → **confirmando** (el texto queda en el campo; se envía con el botón o diciendo «enviar», se descarta con el botón o diciendo «cancelar») → **respondiendo** (el asistente responde y la respuesta se lee en voz alta, aunque el interruptor de lectura automática esté apagado) → armado de nuevo.
-- **Nada se envía solo al terminar de hablar.** Tras un silencio de unos 2 s, lo dictado pasa a confirmación; si se sigue hablando, se añade al texto. «Enviar», «cancelar» y «apagar manos libres» solo valen como frase completa y tras una pausa (no dentro de una frase como «quiero enviar un informe»). La exigencia de confirmación es la constante `MANOS_LIBRES_CONFIRMAR` del widget: en `false`, el mismo cierre de frase envía directamente.
+- **Dos vistas, siempre alternables.** Al encender el modo se abre la **vista de voz**: una ventana propia, sin chat ni campo de texto, con un orbe que muestra el estado, lo que se va dictando, lo que el asistente dice y los botones. «**Ver el chat**» pasa a la vista de chat sin apagar nada (el micrófono sigue abierto y el panel del modo, compacto y con el aviso de privacidad, queda sobre la entrada); el botón **Voz** de la barra vuelve a la vista de voz. El chat es el registro completo: conserva lo que dijiste y la **respuesta completa** (con sus tablas y cifras), no solo lo que se dijo en voz alta.
+- **Disponibilidad:** el botón aparece solo si el navegador tiene reconocimiento y síntesis de voz, la página es un contexto seguro (HTTPS o `localhost`) y `voz-motor` no es `servidor`. Con `voz-motor="servidor"` no hay modo voz: la palabra de activación necesita el reconocimiento continuo del navegador, que es justo lo que ese valor evita.
+- **Estados:** apagado → **armado** (solo escucha la palabra de activación) → **capturando** (lo que se dice se acumula en el campo de texto, oculto en la vista de voz pero visible en la escena) → **confirmando** (el texto queda pendiente; se envía con el botón o diciendo «enviar», se descarta con el botón o diciendo «cancelar») → **respondiendo** (el asistente responde y dice su resumen en voz alta, aunque el interruptor de lectura automática esté apagado) → armado de nuevo. El orbe distingue dentro de «respondiendo» entre **procesando** (esperando la respuesta) y **hablando** (diciendo el resumen); es solo presentación.
+- **Resumen hablado.** En el modo voz el widget pide el canal `voz` (`POST /v1/chat` con `{"canal": "voz"}`; el chat de texto envía `"texto"` o nada) y el asistente agrega a su respuesta final un bloque `<voz>…</voz>` con una a tres frases que cuentan *qué trae* la respuesta, sin leerla entera: a lo sumo una o dos cifras clave, con las mismas reglas que el resto (solo cifras de una tool; nada inventado), y la remisión a la pantalla para el detalle. El servicio lo separa del texto: lo emite como evento SSE `voz` (`{ "texto" }`), no lo incluye en los `delta` ni lo guarda en el historial, y registra en la versión del prompt que se usó la capa de voz. El widget dice solo ese resumen. Si el modelo no lo manda, el widget dice las dos primeras oraciones de la respuesta (con tope). La respuesta completa se escribe igual en el chat, con su botón para escucharla entera. El canal es opcional y no cambia el contrato con los sistemas anfitriones (las tools no se enteran del canal); un valor desconocido da `422`.
+- **Nada se envía solo al terminar de hablar.** Tras un silencio de unos 2 s, lo dictado pasa a confirmación; si se sigue hablando, se añade al texto. «Enviar», «cancelar» y «salir del modo voz» (también «apagar manos libres», alias anterior) solo valen como frase completa y tras una pausa (no dentro de una frase como «quiero enviar un informe»). La exigencia de confirmación es la constante `MANOS_LIBRES_CONFIRMAR` del widget: en `false`, el mismo cierre de frase envía directamente.
+- **Una acción propuesta nunca se confirma por voz y su tarjeta siempre queda a la vista:** si llega una propuesta mientras se está en la vista de voz, el widget pasa solo al chat (donde está la tarjeta con Confirmar/Cancelar), avisa en pantalla y dice la frase redactada por el sistema («Te pido confirmar en pantalla: …») en lugar del resumen del modelo. Ninguna orden de voz confirma.
 - **Palabra de activación:** `asistente` por defecto (atributo `palabra-activacion`; puede ser de varias palabras). Debe estar al comienzo de la frase (admite hasta dos palabras antes, como «oye asistente»); se ignoran mayúsculas, acentos y puntuación. Lo que se dice a continuación en la misma frase ya cuenta como dictado.
 - **Interrumpir la lectura:** la lectura se corta al tocar el botón de escuchar del mensaje o al decir la palabra de activación mientras el asistente habla. No hay detector de energía ni cancelación de eco: **por ahora hay que usar auriculares**, porque con parlantes el micrófono oiría al asistente.
-- **Privacidad:** mientras está encendido, el micrófono está abierto y, en Chrome, **todo el audio se envía de forma continua al servicio de voz del navegador (Google)**, no solo lo que sigue a la palabra de activación. Por eso el widget muestra un indicador siempre visible (punto rojo, estado, aviso de privacidad) con el botón **Apagar manos libres**, y se apaga también con la tecla Esc, diciendo «apagar manos libres» o solos tras `manos-libres-inactividad` minutos sin interacción (se avisa en pantalla). Un sistema cuyos usuarios no deban enviar audio a un tercero fija `voz-motor="servidor"` y el modo no aparece.
+- **Privacidad:** mientras está encendido, el micrófono está abierto (para el reconocimiento y, aparte y solo en local, para medir el volumen del orbe) y, en Chrome, **todo el audio se envía de forma continua al servicio de voz del navegador (Google)**, no solo lo que sigue a la palabra de activación. Por eso el widget muestra un indicador siempre visible, en las dos vistas (orbe, estado, aviso de privacidad), con el botón **Salir del modo voz**, y se apaga también con la tecla Esc, diciendo «salir del modo voz» o solo tras `manos-libres-inactividad` minutos sin interacción (se avisa en pantalla). Un sistema cuyos usuarios no deban enviar audio a un tercero fija `voz-motor="servidor"` y el modo no aparece.
 - **Continuidad:** Chrome corta el reconocimiento continuo tras un rato de silencio o unos 60 s; el widget lo reinicia solo mientras el modo siga encendido, con espera creciente si hay errores y se apaga con un aviso tras cinco fallos seguidos o si se deniega el micrófono. Mientras está encendido, el botón de dictado manual queda deshabilitado (dos reconocedores a la vez competirían por el micrófono).
+- **Accesibilidad y movimiento:** el orbe es decorativo (`aria-hidden`); el estado lo anuncia el texto `aria-live` del panel. Cada estado tiene su propio glifo y trazo, así que se distingue sin color ni movimiento. Con `prefers-reduced-motion: reduce` no hay ninguna animación. Los colores salen de las mismas variables (`--asistente-color` y el tema claro/oscuro); el ámbar de «confirmando» es del tema.
+
+#### Orbe, volumen y tiempos del modo voz
+
+- **El orbe reacciona al volumen real del micrófono** del usuario: el widget abre un **segundo flujo de audio local** (`getUserMedia` + un analizador de Web Audio) solo para medir el nivel. No se graba ni se envía a ningún lado; el audio que va al servicio de voz del navegador sigue siendo el del reconocimiento, sin cambios. Si el navegador no lo da (permiso, micrófono ocupado), el orbe sigue con sus animaciones y el reconocimiento no se entera. Se omite con `orbe-volumen="no"` y con `prefers-reduced-motion: reduce`. Mientras habla el asistente no se lee el micrófono (se oiría a él). Si en algún navegador abrir ese segundo flujo degrada el reconocimiento, se apaga con `orbe-volumen="no"` sin perder nada más.
+- **Con la voz del asistente el orbe da un pulso por palabra** (evento `boundary` de `speechSynthesis`). Los navegadores no entregan la amplitud de la síntesis, así que sigue el ritmo del habla pero no su volumen; algunas voces pueden no emitir `boundary` (se ha visto con voces de red) y entonces el orbe usa solo su animación.
+- **Acuse inmediato.** Con el modelo actual el resumen llega a los ~2 s (más si hay varias tools) y por voz ese silencio se siente roto. Pasados ~0,9 s desde «enviar» sin nada que decir, el widget dice una frase corta de texto fijo («Un momento, lo consulto», «Ya lo busco», «Dame un segundo»; rotan), sin costo de LLM y sin datos. Si el resumen llega antes, no se dice nada. Nunca se dice si el turno propuso una acción (ahí se dice la frase del sistema), si el usuario interrumpió, si el turno ya terminó o si se salió del modo voz. No se muestra en pantalla como respuesta. `acuse="no"` lo quita.
+- **Tiempos.** Cada turno por voz mide cuánto tarda en oírse algo desde que el usuario envía: el servicio lo informa en `done.tiempos_ms` (`voz`, `primer_delta`, `total`, en milisegundos desde que empezó el turno, y lo deja en el log) y el widget emite `asistente:metricas` con lo que ve el cliente. Con un modelo rápido, el resumen llega con el primer texto: lo que domina la espera es la primera vuelta del modelo con sus tools, no la generación de la respuesta.
+
+Ejemplo del flujo de un turno por voz en el flujo SSE de `POST /v1/chat` (con `{"canal": "voz"}`):
+
+```
+event: tool
+data: {"herramientas":["Consultando resumen_por_cultivo"]}
+
+event: voz
+data: {"texto":"Tenés unas 660 hectáreas de soja; el desglose por cultivo está en pantalla."}
+
+event: delta
+data: {"texto":"Tenés **660,5 ha** de soja en 2 establecimientos y **210 ha** de maíz.\n\n| Cultivo | Superficie (ha) |\n..."}
+
+event: done
+data: {"conversacion_id":"…","uso":{"tokens_in":4085,"tokens_out":187,"tokens_in_cache":3584},"tiempos_ms":{"voz":2327,"primer_delta":2327,"total":2475}}
+```
+
+y el evento del widget que resulta, al empezar a sonar el resumen:
+
+```json
+{ "canal": "voz", "fuente": "resumen", "acuse_ms": 930, "primer_delta_ms": 2410, "voz_ms": 2410, "habla_ms": 2690, "tts_ms": 280,
+  "servidor": { "voz": 2327, "primer_delta": 2327, "total": 2475 } }
+```
+
+`acuse_ms` es cuándo empezó a decirse el acuse (`null` si no hizo falta, porque el resumen llegó antes del plazo o `acuse="no"`). `fuente` es `"respaldo"` (y `voz_ms` es `null`) cuando el modelo no mandó su bloque `<voz>` y el widget dijo las dos primeras oraciones.
+
+#### Ejemplo: el modo voz dentro de un `iframe`
+
+El micrófono exige un contexto seguro y permiso delegado. Si el asistente va en un `iframe`, y el sistema usa `Permissions-Policy` y Content Security Policy:
+
+```html
+<iframe src="https://sgagro.example.com/asistente" allow="microphone" style="width:100%;height:100vh;border:0"></iframe>
+```
+
+```
+Permissions-Policy: microphone=(self)
+Content-Security-Policy: script-src 'self' https://asistente.example.com; connect-src 'self' https://asistente.example.com
+```
+
+Si los usuarios no deben enviar audio a un tercero (en Chrome el reconocimiento de voz va a Google), se fija `voz-motor="servidor"`: el modo voz no aparece y el dictado usa el STT del propio asistente, si el operador lo configuró.
 
 #### STT del servidor (alternativa)
 
@@ -317,11 +498,24 @@ Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), 
 - El contenido del modelo (Markdown) se construye con nodos DOM, nunca con `innerHTML`; los enlaces del modelo solo admiten `http`, `https` y `mailto`.
 - El navegador solo ve el JWT de vida corta, nunca la clave de firma ni el token de manifiesto.
 
+### 7.6 Lo que hoy no existe
+
+Para no dar por hecho algo que no está: **contexto de la pantalla actual** (que el asistente sepa en qué ficha está el usuario), **manifiesto de tools por rol** (es global por sistema: el sistema rechaza lo que el usuario no puede hacer, pero el modelo puede ofrecerlo), **avisos proactivos** (webhooks o consultas programadas), **memoria por usuario** entre conversaciones (hoy cada conversación empieza de cero), **síntesis de voz de servidor** (las respuestas se leen con las voces del navegador) y **borrar o deshacer** desde el asistente. Son decisiones de producto: conviene acordar el caso de uso antes de pedirlas.
+
 ## 8. Acciones con confirmación (opcional)
 
 Un sistema puede dejar que el asistente **proponga** escrituras acotadas (agregar o modificar un dato). Nunca se ejecutan sin que el usuario las confirme con un clic en el widget. Es opcional y está apagado por defecto: un sistema que no lo implemente sigue siendo de solo lectura. El borrado no se admite en esta versión (una tool marcada `destructiva: true` no se ofrece nunca).
 
 **Quién manda.** La autoridad es el sistema: ejecuta una escritura solo con un token de escritura que él mismo emitió para esa acción. Un asistente comprometido no puede fabricarlo. El resumen que el usuario confirma lo redacta el sistema, no el modelo.
+
+**Ejemplo punta a punta.** El usuario dice «anotá en El Matorral que hubo helada»: el modelo llama a `agregar_nota`; el asistente pide la propuesta al sistema (sin efectos), la guarda como pendiente y avisa al widget con este evento SSE:
+
+```
+event: confirmacion
+data: {"id":"c41f…","tool":"agregar_nota","resumen":"Agregar una nota al establecimiento «El Matorral»","lineas":["Texto: Hubo helada"],"huella":"9f2c…","expira":"2026-10-05T21:32:10Z"}
+```
+
+El widget dibuja la tarjeta **Confirmar / Cancelar** con ese resumen; solo un clic real confirma (nunca la voz). Al pulsar Confirmar, pide el token de escritura al `token-url` del sistema (`/asistente/token?confirmacion=c41f…&huella=9f2c…`), el asistente ejecuta la tool con ese token y la tarjeta muestra el `mensaje` del resultado. El sistema anfitrión se entera con `asistente:confirmacion` (`{ id, tool, estado: "ejecutada" }`) y puede refrescar su pantalla (ejemplo en [7.3](#73-atributos-estilos-y-eventos)).
 
 ### 8.1 Declararla en el manifiesto
 
@@ -386,7 +580,7 @@ Rechazar con `403` una escritura con token de lectura, una de lectura con token 
 - **El widget muestra una tarjeta** con el resumen del sistema, los botones Confirmar y Cancelar y la cuenta regresiva hasta el vencimiento. Solo un clic real confirma; el texto va como texto, nunca como HTML.
 - **Recargar la página:** `GET /v1/conversaciones/{id}` devuelve además `pendiente`: la propuesta vigente de esa conversación (`{ id, tool, estado, resumen, lineas, huella, expira }`) o `null`. El widget, al restaurar la conversación, vuelve a dibujar la tarjeta con su cuenta regresiva; una propuesta cancelada, confirmada, vencida o reemplazada no se restaura.
 - `POST /v1/confirmaciones/{id}/confirmar` (token de escritura) y `POST /v1/confirmaciones/{id}/cancelar` (token de lectura). Cada transición es atómica: dos clics o dos pestañas no ejecutan dos veces (`409 accion_no_pendiente` con el `estado` actual). Una acción ajena o inexistente da `404`.
-- **Nunca se confirma por voz**, tampoco en manos libres: allí el asistente lee la propuesta en voz alta («Te pido confirmar en pantalla: …») y espera el clic.
+- **Nunca se confirma por voz**, tampoco en el modo voz: allí el asistente dice la propuesta en voz alta («Te pido confirmar en pantalla: …»), el widget pasa al chat para que se vea la tarjeta y espera el clic.
 - Auditoría: la propuesta (`{tool}#propuesta`) y la ejecución quedan en `llamadas_tool`, y el ciclo de vida completo en la tabla `acciones`, con la misma retención que las conversaciones (30 días por defecto). El resultado se agrega al historial de la conversación. La acción queda a nombre del usuario que confirma (`sub`), con el asistente como origen.
 
 Las referencias de esta sección son el sistema mock (`ejemplos/sistema-mock`, tools `agregar_nota` y `modificar_nota`), la referencia PHP (`ejemplos/sistema-php`, mismas tools sobre SQLite, para copiar y adaptar) y `tests/test_mock_acciones.py`; el verificador (sección 6.5) las comprueba contra un sistema en marcha; cada regla de 8.2–8.4 tiene su prueba y su defecto deliberado (`propuesta_con_efectos`, `ph_ignorado`, `replay_aceptado`, `token_otra_tool`, `sin_idempotencia`, `token_escritura_largo`).

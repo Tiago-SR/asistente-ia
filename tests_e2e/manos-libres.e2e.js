@@ -1,4 +1,5 @@
-// E2E del modo «manos libres» del widget. Sin LLM, sin whisper y sin micrófono real: SpeechRecognition y
+// E2E del modo voz (antes «manos libres») del widget: máquina de estados y cableado. La vista de voz, el resumen hablado y el
+// paso al chat se prueban en modo-voz.e2e.js. Sin LLM, sin whisper y sin micrófono real: SpeechRecognition y
 // speechSynthesis se simulan con un guion que el test controla (window.__decir / __terminar / __error) y la
 // respuesta del chat se fabrica con page.route. Comprueba la máquina de estados y el cableado (no la calidad
 // del reconocimiento: eso se prueba a mano en Chrome real). Se ejecuta como widget.e2e.js (ver README.md).
@@ -78,14 +79,14 @@ async (page) => {
 
   // ── disponibilidad ──
   const sin = await abrir({ sinReco: true });
-  await caso("sin reconocimiento de voz del navegador no aparece el botón «Manos libres»", async () => {
+  await caso("sin reconocimiento de voz del navegador no aparece el botón «Voz»", async () => {
     await sin.waitForTimeout(800);
     afirma(!(await W(sin, "button.manos").isVisible()), "el botón es visible sin SpeechRecognition");
   });
   await sin.close();
 
   const p = await abrir();
-  await caso("el botón «Manos libres» aparece y no hay indicador de micrófono hasta activarlo", async () => {
+  await caso("el botón «Voz» aparece y no hay indicador de micrófono hasta activarlo", async () => {
     await W(p, "button.manos").waitFor({ state: "visible", timeout: 10000 });
     afirma(!(await W(p, ".mh").isVisible()), "indicador visible con el modo apagado");
   });
@@ -154,6 +155,7 @@ async (page) => {
     await esperarEtiqueta(p, /enviar.*cancelar/);
     await decir(p, "Enviar.");
     await esperarFin(p);
+    await W(p, "button.ver-chat").click();                   // la vista de voz no muestra el chat: se alterna para verlo
     await W(p, ".msg.assistant").waitFor();
     afirma(/870,5/.test(await W(p, ".msg.assistant").last().innerText()), "no llegó la respuesta");
     const dichas = await p.evaluate(() => window.__voz.dichas);
@@ -205,7 +207,7 @@ async (page) => {
   });
   await caso("la tecla Esc apaga (con el foco en el widget)", async () => {
     await activar(p);
-    await W(p, "textarea").focus();
+    await W(p, "button.ver-chat").focus();                   // en la vista de voz no hay campo: el foco está en «Ver el chat»
     await p.keyboard.press("Escape");
     afirma(!(await W(p, ".mh").isVisible()), "Esc no apagó el modo");
   });

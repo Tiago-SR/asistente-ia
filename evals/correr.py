@@ -6,6 +6,7 @@ Usa el asistente real por HTTP, así que prueba todo el camino (token, tools, pr
 Dentro del contenedor dev (el modelo y el LLM salen del .env del servicio asistente):
   docker compose -f docker-compose.dev.yml run --rm -v ./evals:/app/evals asistente python evals/correr.py
 
+Para el canal de voz (resumen hablado): --preguntas evals/preguntas_voz.yaml (el archivo fija `canal: voz`).
 Variables / opciones: ver --help. Los resultados quedan en evals/resultados/<modelo>_<fecha>.{json,md}.
 """
 
@@ -41,9 +42,9 @@ def leer_sse(r: httpx.Response):
 
 
 class Cliente:
-    def __init__(self, asistente: str, token_url: str, origen: str, timeout: float) -> None:
+    def __init__(self, asistente: str, token_url: str, origen: str, timeout: float, canal: str = "texto") -> None:
         self.http = httpx.Client(timeout=httpx.Timeout(timeout, connect=10.0))
-        self.asistente, self.token_url, self.origen = asistente.rstrip("/"), token_url, origen
+        self.asistente, self.token_url, self.origen, self.canal = asistente.rstrip("/"), token_url, origen, canal
 
     def token(self, usuario: str) -> str:
         r = self.http.get(self.token_url, params={"usuario": usuario})
@@ -61,9 +62,9 @@ class Cliente:
         return res
 
     def _turno(self, token: str, mensaje: str, conversacion: str | None) -> dict:
-        cuerpo = {"mensaje": mensaje, **({"conversacion_id": conversacion} if conversacion else {})}
+        cuerpo = {"mensaje": mensaje, "canal": self.canal, **({"conversacion_id": conversacion} if conversacion else {})}
         cabeceras = {"Authorization": f"Bearer {token}", "Origin": self.origen}
-        res = {"texto": "", "tools": [], "propuestas": [], "iteraciones": 1, "error": None, "uso": {}, "conversacion": conversacion,
+        res = {"texto": "", "voz": None, "voz_s": None, "tiempos_ms": {}, "tools": [], "propuestas": [], "iteraciones": 1, "error": None, "uso": {}, "conversacion": conversacion,
                "latencia_s": 0.0, "primer_token_s": None}
         inicio = time.monotonic()
         with self.http.stream("POST", f"{self.asistente}/v1/chat", json=cuerpo, headers=cabeceras) as r:
@@ -75,6 +76,9 @@ class Cliente:
                     if res["primer_token_s"] is None:
                         res["primer_token_s"] = round(time.monotonic() - inicio, 2)
                     res["texto"] += datos["texto"]
+                elif evento == "voz":
+                    res["voz"] = datos["texto"]
+                    res["voz_s"] = round(time.monotonic() - inicio, 2)
                 elif evento == "tool":
                     res["iteraciones"] += 1
                     res["tools"] += [h.removeprefix("Consultando ") for h in datos["herramientas"]]
@@ -86,6 +90,7 @@ class Cliente:
                     res["error"] = "token_expirado"
                 elif evento == "done":
                     res["conversacion"], res["uso"] = datos["conversacion_id"], datos.get("uso", {})
+                    res["tiempos_ms"] = datos.get("tiempos_ms", {})
         res["latencia_s"] = round(time.monotonic() - inicio, 2)
         return res
 
@@ -110,10 +115,10 @@ def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | Non
             total[k] += ultimo["uso"].get(k, 0)
         if ultimo["error"]:
             break
-    puntaje = puntuar(p, ultimo["texto"], herramientas, base, ultimo["error"], propuestas)
+    puntaje = puntuar(p, ultimo["texto"], herramientas, base, ultimo["error"], propuestas, ultimo.get("voz"), cli.canal)
     return {
         "id": p["id"], "categoria": p["categoria"], "usuario": p["usuario"], "turnos": p["turnos"],
-        "ok": puntaje["ok"], "fallos": puntaje["fallos"], "respuesta": ultimo["texto"], "tools": herramientas, "propuestas": propuestas,
+        "ok": puntaje["ok"], "fallos": puntaje["fallos"], "respuesta": ultimo["texto"], "voz": ultimo.get("voz"), "voz_s": ultimo.get("voz_s"), "tiempos_ms": ultimo.get("tiempos_ms"), "tools": herramientas, "propuestas": propuestas,
         "iteraciones": iteraciones, "latencia_s": round(latencia, 2), "primer_token_s": ultimo["primer_token_s"],
         "uso": total,
         "costo_usd": {h: costo(total, tarifa, h) for h in ("valle", "pico")} if tarifa else None,
@@ -139,6 +144,9 @@ def resumir(resultados: list[dict]) -> dict:
         "tokens_por_pregunta": {k: round(v / n) for k, v in suma.items()} if n else {},
         "cache_hit_pct": round(100 * suma["tokens_in_cache"] / suma["tokens_in"], 1) if suma["tokens_in"] else 0,
     }
+    voz = sorted(r["voz_s"] for r in resultados if r.get("voz_s") is not None)
+    if voz:   # latencia percibida en el canal de voz: segundos desde «enviar» hasta tener el resumen para decir
+        resumen["hasta_el_resumen_hablado_s"] = {"mediana": voz[len(voz) // 2], "p95": voz[min(len(voz) - 1, int(len(voz) * 0.95))]}
     if all(r["costo_usd"] for r in resultados) and n:
         resumen["costo_usd_por_pregunta"] = {
             h: round(statistics.mean(r["costo_usd"][h] for r in resultados), 6) for h in ("valle", "pico")
@@ -157,6 +165,8 @@ def informe_md(modelo: str, fecha: str, resumen: dict, resultados: list[dict], n
         f"- **Iteraciones por pregunta (llamadas al LLM):** {resumen['iteraciones_media']}",
         f"- **Latencia:** mediana {resumen['latencia_s']['mediana']} s, p95 {resumen['latencia_s']['p95']} s",
         f"- **Tokens por pregunta:** {resumen['tokens_por_pregunta']} · caché de entrada {resumen['cache_hit_pct']} %",
+        *([f"- **Hasta el resumen hablado:** mediana {resumen['hasta_el_resumen_hablado_s']['mediana']} s, p95 {resumen['hasta_el_resumen_hablado_s']['p95']} s"]
+          if resumen.get("hasta_el_resumen_hablado_s") else []),
         *([f"- **Costo por pregunta (USD):** valle {c['valle']:.6f} · pico {c['pico']:.6f}"] if c else []),
         "", "## Fallos", "",
     ]
@@ -167,6 +177,7 @@ def informe_md(modelo: str, fecha: str, resumen: dict, resultados: list[dict], n
         lineas += [f"### {r['id']} ({r['categoria']}, {r['usuario']}): {r['turnos'][-1]}",
                    *[f"- {f}" for f in r["fallos"]], f"- Tools: {r['tools'] or 'ninguna'}",
                    *([f"- Propuestas: {r['propuestas']}"] if r.get("propuestas") else []),
+                   *([f"- Resumen hablado: {r['voz']!r}"] if r.get("voz") is not None else []),
                    f"- Respuesta: {r['respuesta'][:400]!r}", ""]
     return "\n".join(lineas)
 
@@ -202,7 +213,7 @@ def main() -> int:
         preguntas = [p for p in preguntas if p["id"] in ids]
     tarifa = cargar_precios(args.precios).get(args.modelo)
 
-    cli = Cliente(args.asistente, token_url, origen, args.timeout)
+    cli = Cliente(args.asistente, token_url, origen, args.timeout, conjunto.get("canal", "texto"))
     resultados = []
     for p in preguntas:
         try:

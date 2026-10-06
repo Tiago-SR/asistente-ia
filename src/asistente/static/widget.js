@@ -22,21 +22,37 @@
  *               navegador (Web Speech; en Chrome el audio lo procesa el servicio de Google) y, si no existe,
  *               el STT del asistente (POST /v1/voz/transcribir). "servidor" evita enviar el audio a Google.
  *               La respuesta hablada usa siempre las voces del navegador (speechSynthesis).
- *   palabra-activacion        palabra que despierta el modo «manos libres» (por defecto "asistente").
- *   manos-libres-inactividad  minutos sin interacción tras los que el modo manos libres se apaga solo
- *               (por defecto 5; 0 = no se apaga). El botón «Manos libres» solo aparece si el navegador tiene
- *               reconocimiento y síntesis de voz, la página es un contexto seguro y voz-motor no es "servidor".
+ *   palabra-activacion        palabra que despierta el «modo voz» (por defecto "asistente").
+ *   manos-libres-inactividad  minutos sin interacción tras los que el modo voz se apaga solo
+ *               (por defecto 5; 0 = no se apaga; el nombre del atributo se conserva por compatibilidad).
+ *               El botón «Voz» solo aparece si el navegador tiene reconocimiento y síntesis de voz, la página
+ *               es un contexto seguro y voz-motor no es "servidor". El modo voz tiene su propia vista (un
+ *               orbe, lo que dices y lo que te dicen) y se alterna con el chat; el chat guarda todo lo dicho
+ *               y la respuesta completa, y por voz el asistente cuenta un resumen (canal «voz» del chat).
+ *
+ *   tema        "claro" | "oscuro" | "auto" (por defecto). "auto" sigue prefers-color-scheme y reacciona si el
+ *               usuario cambia el tema del sistema con la página abierta. Se puede cambiar en caliente.
+ *
+ *   acuse        "auto" (por defecto) | "no": en el modo voz, si el resumen tarda más de ~0,9 s se dice una frase corta («Un
+ *               momento, lo consulto») para que no haya silencio; "no" la quita.
+ *   orbe-volumen "auto" (por defecto) | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
+ *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre.
  *
  * Personalización por variables CSS (se heredan a través del Shadow DOM):
  *   --asistente-color, --asistente-color-texto, --asistente-fondo, --asistente-texto,
  *   --asistente-borde, --asistente-fuente, --asistente-radio,
  *   --asistente-ancho-lateral (260px), --asistente-ancho-columna (760px)
+ *   Las que el anfitrión defina mandan sobre la paleta del tema (clara u oscura). Quien fije colores de
+ *   fondo/texto propios debe fijar el par completo (fondo y texto, color y color-texto) y, si solo los
+ *   diseñó para un tema, fijar también `tema` en consecuencia.
  *
  * Eventos (CustomEvent, burbujean y atraviesan el Shadow DOM):
  *   asistente:accion   {detail: {tipo, url, etiqueta}} por cada sugerencia `ui` del sistema.
  *                      Si el anfitrión llama preventDefault(), el widget no muestra su botón.
  *   asistente:estado   {detail: {habilitado}} al decidir si el asistente está disponible
  *                      (si no lo está, el widget muestra un aviso en lugar del chat).
+ *   asistente:metricas {detail: {canal, fuente, acuse_ms, primer_delta_ms, voz_ms, habla_ms, tts_ms, servidor}} al terminar cada turno por
+ *                      voz: cuánto tardó en llegar el resumen hablado y en empezar a sonar (solo números).
  *   asistente:confirmacion  {detail: {id, tool, estado}} cuando una acción propuesta por el asistente termina
  *                      (estado: ejecutada | cancelada | expirada | reemplazada | fallida). El anfitrión puede
  *                      refrescar su pantalla tras una acción ejecutada.
@@ -80,15 +96,23 @@
     callar: "Dejar de escuchar",
     leerAuto: "Leer las respuestas en voz alta",
     noLeerAuto: "Dejar de leer en voz alta",
-    manosLibres: "Manos libres",
-    apagarManosLibres: "Apagar manos libres",
-    mhArmado: "Manos libres activo. Decí «{p}» para hablar.",
+    manosLibres: "Voz",
+    volverVoz: "Volver al modo voz",
+    apagarManosLibres: "Salir del modo voz",
+    verChat: "Ver el chat",
+    mhArmado: "Modo voz activo. Decí «{p}» para hablar.",
     mhCapturando: "Te escucho…",
     mhConfirmando: "¿Lo envío? Decí «enviar» o «cancelar».",
     mhRespondiendo: "Respondiendo… Decí «{p}» para interrumpir.",
     mhEsperar: "Esperá a que termine la respuesta para enviar.",
     mhPrivacidad: "Micrófono abierto: el audio se envía al servicio de voz del navegador (Google, en Chrome).",
-    mhInactividad: "Manos libres apagado por inactividad.",
+    mhInactividad: "Modo voz apagado por inactividad.",
+    // Acuse inmediato del modo voz: se dice solo si el resumen tarda; varias frases para que no cansen.
+    mhAcuse: ["Un momento, lo consulto.", "Ya lo busco.", "Dame un segundo."],
+    mhDicho: "Te digo",
+    mhChatCompleto: "La respuesta completa está en el chat.",
+    mhConfirmaEnChat: "Hay una acción para confirmar: está en el chat, con sus botones.",
+    escenaVoz: "Modo voz",
     cancelar: "Cancelar",
     confirmarTitulo: "Confirmá esta acción",
     confirmar: "Confirmar",
@@ -159,7 +183,7 @@
   }
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
 
-  // ── Modo «manos libres» (ver contrato 7.4) ──
+  // ── Modo voz (antes «manos libres»; ver contrato 7.4) ──
   // Decisión de producto: nada se envía solo al terminar de hablar; el usuario confirma («enviar» o botón).
   // Ponerlo en false hace que se envíe al cerrar la frase (mismo camino, sin código aparte).
   const MANOS_LIBRES_CONFIRMAR = true;
@@ -167,12 +191,13 @@
   const MH_INACTIVIDAD_MIN = 5;             // se apaga solo tras tantos minutos sin interacción; atributo manos-libres-inactividad (0 = nunca)
   const MH_CIERRE_MS = 1800;                // silencio tras el que una frase dictada pasa a confirmación
   const MH_ESPERA_MS = 8000;                // tras la palabra de activación, tiempo para empezar a hablar
+  const MH_ACUSE_MS = 900;                  // si pasado este tiempo tras «enviar» no hay nada que decir, se dice un acuse corto
   const MH_MAX_FALLOS = 5;                  // reinicios seguidos del reconocedor con error antes de apagar
 
   const COMANDOS = {
     enviar: ["enviar", "envia", "enviar mensaje", "enviar pregunta"],
     cancelar: ["cancelar", "cancela", "descartar", "descarta"],
-    apagar: ["apagar manos libres", "apaga manos libres", "desactivar manos libres"],
+    apagar: ["apagar modo voz", "apaga modo voz", "salir del modo voz", "salir de voz", "apagar manos libres", "apaga manos libres", "desactivar manos libres"],
   };
 
   // minúsculas, sin acentos ni puntuación, espacios simples: para comparar lo que reconoce el navegador.
@@ -233,6 +258,31 @@
       .replace(/[ \t]+/g, " ")
       .replace(/\n{2,}/g, "\n")
       .trim();
+  }
+  // Volumen (0..1) de un bloque de muestras de audio en el dominio del tiempo (bytes centrados en 128).
+  function nivelDe(muestras) {
+    if (!muestras || !muestras.length) return 0;
+    let suma = 0;
+    for (let i = 0; i < muestras.length; i++) { const v = (muestras[i] - 128) / 128; suma += v * v; }
+    return Math.min(1, Math.sqrt(suma / muestras.length) * 3.2);   // la voz normal ronda 0,05–0,3 de RMS
+  }
+  // Suavizado del nivel: sube rápido (ataque) y baja despacio (caída); `dt` en segundos.
+  function suavizar(actual, objetivo, dt) {
+    return actual + (objetivo - actual) * Math.min(1, dt * (objetivo > actual ? 18 : 5));
+  }
+  // Respaldo del resumen hablado: si el modelo no mandó su bloque, se leen las dos primeras oraciones (con tope).
+  function resumenBreve(md, max = 300) {
+    const plano = textoParaVoz(md).replace(/\s+/g, " ").trim();
+    const re = /[.!?…]+["')\]]?(?=\s|$)/g;
+    let corte = 0, n = 0, m;
+    while (n < 2 && (m = re.exec(plano))) {
+      const fin = m.index + m[0].length;
+      if (n > 0 && fin > max) break;
+      corte = fin; n++;
+    }
+    let t = plano.slice(0, corte || plano.length);
+    if (t.length > max) t = t.slice(0, max).replace(/\s+\S*$/, "") + "…";
+    return t;
   }
   // Índice (exclusivo) del último final de oración completo de `texto` a partir de `desde`; `desde` si no hay.
   function ultimoCorte(texto, desde) {
@@ -349,17 +399,30 @@
   const CSS = `
     :host { display: block; height: 100%; min-height: 360px; }
     * { box-sizing: border-box; }
+    /* Paletas por tema (--p-*). Las variables --asistente-* del anfitrión tienen siempre prioridad. */
     .raiz {
-      --c: var(--asistente-color, #2f6f3e);
-      --ct: var(--asistente-color-texto, #fff);
-      --f: var(--asistente-fondo, #fff);
-      --t: var(--asistente-texto, #1d2420);
-      --b: var(--asistente-borde, #d9ded9);
+      --p-c: #2f6f3e; --p-ct: #fff; --p-f: #fff; --p-t: #1d2420; --p-b: #d9ded9;
+      --p-err-f: #fdecec; --p-err-t: #8a1f1f; --p-ok: #1f6b3a; --p-rec: #c0392b; --p-rec-t: #fff; --p-pausa: #a8530a;
+      color-scheme: light;
+    }
+    .raiz.oscuro {
+      --p-c: #6fcf88; --p-ct: #0d1a11; --p-f: #151a17; --p-t: #e6ebe7; --p-b: #3a443e;
+      --p-err-f: #3b1d1d; --p-err-t: #ffb8b2; --p-ok: #7fdc9c; --p-rec: #ff6b5e; --p-rec-t: #1a0b09; --p-pausa: #f2b45a;
+      color-scheme: dark;
+    }
+    .raiz {
+      --c: var(--asistente-color, var(--p-c));
+      --ct: var(--asistente-color-texto, var(--p-ct));
+      --f: var(--asistente-fondo, var(--p-f));
+      --t: var(--asistente-texto, var(--p-t));
+      --b: var(--asistente-borde, var(--p-b));
       --suave: color-mix(in srgb, var(--t) 6%, var(--f));
-      --apagado: color-mix(in srgb, var(--t) 58%, var(--f));
+      --apagado: color-mix(in srgb, var(--t) 70%, var(--f));
+      --codigo: color-mix(in srgb, var(--t) 9%, var(--f));
       --r: var(--asistente-radio, 12px);
       display: flex; width: 100%; height: 100%; position: relative; overflow: hidden;
       background: var(--f); color: var(--t);
+      scrollbar-color: color-mix(in srgb, var(--t) 35%, var(--f)) transparent;
       font: 15px/1.55 var(--asistente-fuente, system-ui, -apple-system, "Segoe UI", sans-serif);
     }
     [hidden] { display: none !important; }
@@ -391,7 +454,7 @@
       border-radius: 6px; display: grid; place-items: center; opacity: 0;
     }
     .lista li:hover .borrar, .lista li:focus-within .borrar, .lista li.activa .borrar { opacity: 1; }
-    .lista .borrar:hover { color: #8a1f1f; }
+    .lista .borrar:hover { color: var(--p-err-t); }
     .lista .borrar svg { width: 16px; height: 16px; }
     .lista .vacio-hist { display: block; padding: 10px; color: var(--apagado); font-size: 13px; }
 
@@ -409,18 +472,102 @@
     .barra .manos[aria-pressed="true"] { background: var(--c); border-color: var(--c); color: var(--ct); }
     .barra .manos[hidden] { display: none; }
     .barra .manos svg { width: 16px; height: 16px; }
-    .mh { max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto 8px; padding: 8px 12px; border: 1px solid var(--c); border-radius: var(--r); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+    /* ── Modo voz: panel con orbe. En el chat va compacto sobre la entrada; en la vista de voz ocupa la escena. ── */
+    .entrada { container-type: inline-size; }
+    .mh {
+      --s: 34px; --acento: var(--c);
+      --fondo-mh: color-mix(in srgb, var(--acento) 5%, var(--f));
+      max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto 8px; padding: 6px 12px;
+      border: 1px solid color-mix(in srgb, var(--acento) 70%, var(--b)); border-radius: var(--r); background: var(--fondo-mh);
+      display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0 10px; font-size: 13px;
+    }
     .mh[hidden] { display: none; }
-    .mh-punto { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #c0392b; }
-    .mh-estado { font-weight: 600; }
-    .mh-parcial { flex: 1 1 120px; min-width: 0; color: var(--apagado); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mh[data-estado="confirmando"] { --acento: var(--p-pausa); }
+    .mh-texto { min-width: 0; }
+    .mh-estado { font-weight: 600; font-size: 12.5px; }
+    .mh-campo { display: none; }
+    .mh-parcial { color: var(--apagado); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mh-parcial:empty { display: none; }
+    .mh-botones { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
     .mh button { border: 1px solid var(--b); background: var(--f); color: inherit; border-radius: 999px; padding: 3px 12px; font: inherit; cursor: pointer; }
     .mh button:hover { border-color: var(--c); color: var(--c); }
     .mh .mh-enviar { background: var(--c); border-color: var(--c); color: var(--ct); }
     .mh .mh-enviar:hover { color: var(--ct); opacity: .9; }
     .mh button[hidden] { display: none; }
-    .mh-priv { flex-basis: 100%; font-size: 11px; color: var(--apagado); }
-    @media (prefers-reduced-motion: no-preference) { .mh.escuchando .mh-punto { animation: pulso 1.2s infinite; } }
+    .mh-priv { grid-column: 1 / -1; font-size: 10.5px; color: var(--apagado); }
+    @container (max-width: 560px) { .mh-botones { grid-column: 1 / -1; justify-content: flex-start; } }
+
+    /* Orbe: capas con transform/opacity, sin máscaras ni canvas. El estado se ve por su forma (glifo y trazo), no solo por el color. */
+    .orbe { position: relative; width: var(--s); height: var(--s); margin: calc(var(--s) * .16); flex: none; }
+    .orbe i, .orbe svg { position: absolute; inset: 0; border-radius: 50%; display: block; }
+    .o-halo { inset: -40% !important; background: radial-gradient(circle, color-mix(in srgb, var(--acento) 34%, transparent) 0, transparent 62%); opacity: calc(var(--halo, 0) * var(--halo-n, .5)); }
+    .o-aro { border: var(--g, 3px) solid transparent; opacity: var(--aro-n, 1);
+      background: linear-gradient(var(--fondo-mh), var(--fondo-mh)) padding-box,
+        conic-gradient(from 20deg, var(--acento), color-mix(in srgb, var(--acento) 35%, transparent) 18%, var(--acento) 34%, color-mix(in srgb, var(--acento) 55%, transparent) 58%, var(--acento) 74%, color-mix(in srgb, var(--acento) 40%, transparent) 90%, var(--acento)) border-box; }
+    .o-fino { inset: 17% !important; border: 1px solid color-mix(in srgb, var(--acento) 45%, transparent); }
+    /* anillo que sigue el volumen: --nivel (0..1) lo escribe el widget (micrófono del usuario; pulsos por palabra del asistente) */
+    .o-nivel { display: none; border: 2px solid var(--acento); opacity: calc(var(--nivel, 0) * .85); transform: scale(calc(1 + var(--nivel, 0) * .42)); }
+    .mh[data-estado="armado"] .o-nivel, .mh[data-estado="capturando"] .o-nivel, .mh[data-estado="confirmando"] .o-nivel, .mh[data-estado="hablando"] .o-nivel { display: block; }
+    @media (prefers-reduced-motion: reduce) { .o-nivel { display: none !important; } }
+    .o-barrido { inset: 7% !important; background: conic-gradient(from 0deg, transparent 0 240deg, color-mix(in srgb, var(--acento) 70%, transparent) 340deg, var(--acento) 360deg); opacity: 0; }
+    .o-disco { inset: calc(7% + 7px) !important; background: var(--fondo-mh); opacity: 0; }
+    .o-marcas { display: none; inset: -16% !important; width: 132%; height: 132%; fill: none; stroke: var(--acento); stroke-width: 3.4; stroke-dasharray: .9 4.9; border-radius: 0; }
+    .o-seg { inset: -3% !important; width: 106%; height: 106%; fill: none; stroke: var(--acento); stroke-width: 2.6; stroke-dasharray: 15 4; opacity: 0; border-radius: 0; }
+    .o-nucleo { inset: 30% !important; opacity: calc(var(--nuc-n, .6) + var(--nivel, 0) * .25); background: radial-gradient(circle, color-mix(in srgb, var(--acento) 85%, transparent) 0, color-mix(in srgb, var(--acento) 18%, transparent) 70%, transparent 72%); }
+    .o-onda { border: 1.5px solid var(--acento); opacity: 0; }
+    .o-glifo { inset: 28% !important; width: 44%; height: 44%; stroke: var(--acento); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; border-radius: 0; }
+    .mh[data-estado="armado"] .g-mic, .mh[data-estado="capturando"] .g-esc, .mh[data-estado="confirmando"] .g-pausa,
+    .mh[data-estado="procesando"] .g-pensar, .mh[data-estado="hablando"] .g-habla { opacity: 1; }
+    .mh[data-estado="armado"] { --aro-n: .6; --nuc-n: .25; --halo-n: .25; }
+    .mh[data-estado="capturando"] { --aro-n: 1; --nuc-n: .75; --halo-n: .9; }
+    .mh[data-estado="confirmando"] { --aro-n: 0; --nuc-n: .35; --halo-n: .5; }
+    .mh[data-estado="confirmando"] .o-seg { opacity: 1; }
+    .mh[data-estado="procesando"] { --aro-n: .55; --nuc-n: .5; --halo-n: .6; }
+    .mh[data-estado="procesando"] .o-barrido, .mh[data-estado="procesando"] .o-disco { opacity: 1; }
+    .mh[data-estado="hablando"] { --aro-n: 1; --nuc-n: .8; --halo-n: .9; }
+    .mh[data-estado="capturando"] .o-fino, .mh[data-estado="hablando"] .o-fino { border-width: 2px; }
+    .mh[data-estado="capturando"] .o-onda:first-of-type, .mh[data-estado="hablando"] .o-onda:first-of-type { opacity: .35; transform: scale(1.35); }
+    .raiz.oscuro .mh { --halo: 1; }
+    @media (prefers-reduced-motion: no-preference) {
+      .mh[data-estado="armado"] .o-nucleo { animation: respira 4.2s ease-in-out infinite; }
+      .mh[data-estado="capturando"] .o-onda { animation: onda 1.5s ease-out infinite; }
+      .mh[data-estado="capturando"] .o-onda.o2 { animation-delay: .75s; }
+      .mh[data-estado="capturando"] .o-nucleo, .mh.pulso .o-nucleo { animation: golpe .35s ease-out; }
+      .mh[data-estado="procesando"] .o-barrido { animation: gira 1.5s linear infinite; }
+      .mh[data-estado="procesando"] .o-nucleo { animation: respira 1.6s ease-in-out infinite; }
+      .mh[data-estado="hablando"] .o-onda { animation: onda 2.4s ease-out infinite; }
+      .mh[data-estado="hablando"] .o-onda.o2 { animation-delay: 1.2s; }
+      .mh[data-estado="hablando"] .o-nucleo { animation: habla 1.1s ease-in-out infinite; }
+      .mh[data-estado="confirmando"] .o-halo { animation: respira 2.8s ease-in-out infinite; }
+      .vista-voz .o-marcas { animation: gira 48s linear infinite; }
+      .vista-voz .mh[data-estado="procesando"] .o-marcas { animation-duration: 14s; animation-direction: reverse; }
+    }
+    @keyframes respira { 50% { transform: scale(1.06); } }
+    @keyframes onda { from { transform: scale(.92); opacity: .55; } to { transform: scale(1.6); opacity: 0; } }
+    @keyframes golpe { 40% { transform: scale(1.35); } }
+    @keyframes gira { to { transform: rotate(360deg); } }
+    @keyframes habla { 0%, 100% { transform: scale(.9); } 20% { transform: scale(1.22); } 45% { transform: scale(1); } 70% { transform: scale(1.14); } }
+
+    /* ── Vista de voz: otra «ventana» (sin chat ni campo); el chat sigue ahí y se alterna con «Ver el chat» ── */
+    .escena { display: none; flex: 1; min-height: 0; position: relative; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px 16px; overflow-y: auto; }
+    .escena::before, .escena::after { content: ""; position: absolute; width: 18px; height: 18px; border: 1.5px solid color-mix(in srgb, var(--c) 70%, var(--b)); }
+    .escena::before { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
+    .escena::after { bottom: 14px; right: 14px; border-left: 0; border-top: 0; }
+    .vista-voz .escena { display: flex; }
+    .raiz.vista-voz .scroll, .vista-voz .entrada form, .vista-voz .entrada .pie, .vista-voz .barra .manos, .vista-voz .barra .altavoz { display: none; }
+    .escena .mh { --s: clamp(112px, 26vh, 176px); grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 4px; border: 0; background: none; margin: 0; padding: 0; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }
+    .escena .mh-estado { font-size: 15px; letter-spacing: .02em; }
+    .escena .mh-campo { display: block; font-size: 17px; max-width: 100%; overflow-wrap: anywhere; min-height: 1.5em; }
+    .escena .mh-parcial { font-size: 15px; white-space: normal; max-width: 100%; }
+    .escena .mh-botones { grid-column: auto; justify-content: center; margin-top: 8px; }
+    .escena .mh-priv { margin-top: 6px; font-size: 11px; }
+    .escena .o-marcas { display: block; opacity: .55; }
+    .escena .o-aro { --g: 4px; }
+    .dicho { max-width: var(--asistente-ancho-columna, 760px); text-align: center; font-size: 15px; min-height: 1.5em; }
+    .dicho:empty { display: none; }
+    .dicho small { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); margin-bottom: 2px; }
+    button.ver-chat { border: 1px solid var(--b); background: var(--f); border-radius: 999px; padding: 6px 16px; font: inherit; cursor: pointer; }
+    button.ver-chat:hover { border-color: var(--c); color: var(--c); }
     .voz-acciones { margin-top: 6px; }
     .escuchar { width: 28px; height: 28px; border: 1px solid var(--b); border-radius: 50%; background: transparent; color: var(--apagado); cursor: pointer; display: inline-grid; place-items: center; padding: 0; }
     .escuchar:hover, .escuchar.hablando { color: var(--c); border-color: var(--c); }
@@ -438,13 +585,13 @@
     .msg { overflow-wrap: anywhere; }
     .msg.user { align-self: flex-end; max-width: 85%; padding: 8px 14px; background: var(--suave); border-radius: calc(var(--r) * 1.5); white-space: pre-wrap; }
     .msg.assistant { align-self: stretch; }
-    .msg.error { align-self: stretch; padding: 8px 12px; background: #fdecec; color: #8a1f1f; border-radius: var(--r); }
+    .msg.error { align-self: stretch; padding: 8px 12px; background: var(--p-err-f); color: var(--p-err-t); border-radius: var(--r); }
     .msg > :first-child { margin-top: 0; } .msg > :last-child { margin-bottom: 0; }
     .msg p, .msg ul, .msg ol, .msg pre, .msg h3, .msg h4, .msg h5, .msg h6 { margin: 0 0 10px; }
     .msg h3, .msg h4, .msg h5, .msg h6 { font-size: 16px; }
     .msg ul, .msg ol { padding-left: 22px; }
-    .msg code { font-family: ui-monospace, monospace; font-size: 13px; background: rgba(0,0,0,.07); padding: 1px 5px; border-radius: 4px; }
-    .msg pre { background: rgba(0,0,0,.07); padding: 10px; border-radius: 8px; overflow-x: auto; }
+    .msg code { font-family: ui-monospace, monospace; font-size: 13px; background: var(--codigo); padding: 1px 5px; border-radius: 4px; }
+    .msg pre { background: var(--codigo); padding: 10px; border-radius: 8px; overflow-x: auto; }
     .msg pre code { background: none; padding: 0; }
     .msg a { color: var(--c); text-decoration: underline; }
     .tabla { overflow-x: auto; margin-bottom: 10px; }
@@ -470,8 +617,8 @@
     .accion-botones button:disabled { opacity: .45; cursor: default; }
     .accion-botones[hidden] { display: none; }
     .accion-estado { margin-top: 8px; font-size: 13px; color: var(--apagado); }
-    .accion-estado.ok { color: #1f6b3a; }
-    .accion-error { margin-top: 6px; font-size: 13px; color: #8a1f1f; }
+    .accion-estado.ok { color: var(--p-ok); }
+    .accion-error { margin-top: 6px; font-size: 13px; color: var(--p-err-t); }
     .accion-error:empty { display: none; }
 
     .entrada { padding: 0 16px 8px; }
@@ -480,6 +627,7 @@
       padding: 8px 8px 8px 16px; background: var(--f); border: 1px solid var(--b); border-radius: calc(var(--r) * 1.8);
     }
     .entrada form:focus-within { border-color: var(--c); }
+    textarea::placeholder { color: var(--apagado); opacity: 1; }
     textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; font: inherit; color: inherit; max-height: 200px; padding: 6px 0; }
     form button {
       flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center;
@@ -488,11 +636,11 @@
     form button:disabled { opacity: .4; cursor: default; }
     form button.mic { background: transparent; color: var(--apagado); border: 1px solid var(--b); }
     form button.mic:hover:not(:disabled) { color: var(--c); border-color: var(--c); }
-    form button.mic.grabando { background: #c0392b; border-color: #c0392b; color: #fff; }
+    form button.mic.grabando { background: var(--p-rec); border-color: var(--p-rec); color: var(--p-rec-t); }
     form button.mic[hidden] { display: none; }
     .aviso-voz { font-size: 12px; color: var(--apagado); text-align: center; padding-top: 4px; min-height: 16px; }
     .aviso-voz:empty { display: none; }
-    .aviso-voz.err { color: #8a1f1f; }
+    .aviso-voz.err { color: var(--p-err-t); }
     @media (prefers-reduced-motion: no-preference) { form button.mic.grabando { animation: pulso 1.2s infinite; } }
     @keyframes pulso { 50% { opacity: .6; } }
     form button svg { width: 18px; height: 18px; }
@@ -522,6 +670,33 @@
     manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
     altavoz: "M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
   };
+  // Glifos del centro del orbe: cada estado tiene el suyo (se distinguen sin depender del color ni del movimiento).
+  const GLIFO = {
+    mic: "M12 4a2.5 2.5 0 0 0-2.5 2.5v5a2.5 2.5 0 0 0 5 0v-5A2.5 2.5 0 0 0 12 4zM6.5 11a5.5 5.5 0 0 0 11 0M12 16.5V20",
+    esc: "M5 10v4M9 7v10M13 4v16M17 8v8M21 11v2",
+    pausa: "M9 6v12M15 6v12",
+    pensar: "M6 12h.01M12 12h.01M18 12h.01",
+    habla: "M4 9v6h3l5 4V5L7 9H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11",
+  };
+  function orbe() {
+    const ns = "http://www.w3.org/2000/svg";
+    const capa = (cls) => el("i", { class: cls });
+    const svg = (cls, hijo) => { const e = document.createElementNS(ns, "svg"); e.setAttribute("class", cls); e.setAttribute("aria-hidden", "true"); e.append(hijo); return e; };
+    const circulo = (cls, r) => {
+      const c = document.createElementNS(ns, "circle");
+      c.setAttribute("cx", "50"); c.setAttribute("cy", "50"); c.setAttribute("r", String(r));
+      const e = svg(cls, c); e.setAttribute("viewBox", "0 0 100 100"); return e;
+    };
+    const glifo = (k) => {
+      const t = document.createElementNS(ns, "path"); t.setAttribute("d", GLIFO[k]);
+      if (k === "pensar") t.setAttribute("stroke-width", "3.2");
+      const e = svg("o-glifo g-" + k, t); e.setAttribute("viewBox", "0 0 24 24"); return e;
+    };
+    return el("div", { class: "orbe", "aria-hidden": "true" }, capa("o-halo"), capa("o-onda"), capa("o-onda o2"), circulo("o-marcas", 48),
+      capa("o-fino"), capa("o-nivel"), capa("o-barrido"), capa("o-disco"), capa("o-aro"), circulo("o-seg", 47), capa("o-nucleo"),
+      glifo("mic"), glifo("esc"), glifo("pausa"), glifo("pensar"), glifo("habla"));
+  }
+
   function icono(nombre) {
     const ns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(ns, "svg");
@@ -545,8 +720,8 @@
   // ───────────────────────── Componente ─────────────────────────
 
   class AsistenteChat extends HTMLElement {
-    static get observedAttributes() { return ["token-url", "servidor"]; }
-    static get _utiles() { return { textoParaVoz, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, retrasoReinicio }; }  // para los tests
+    static get observedAttributes() { return ["token-url", "servidor", "tema"]; }
+    static get _utiles() { return { textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, retrasoReinicio }; }  // para los tests
 
     constructor() {
       super();
@@ -564,6 +739,10 @@
       this._genVoz = 0;          // cambia al cortar la voz: ignora los eventos de lo cancelado
       this._leerCortado = false; // el usuario interrumpió la lectura de este turno (manos libres)
       // modo manos libres: estado y recursos (ver _mh* más abajo)
+      this._niv = { activo: false, valor: 0, pulso: 0, escrito: -1, ult: 0, raf: 0, ctx: null, flujo: null, analizador: null, buf: null };
+      this._t = null;            // tiempos del turno por voz (ver _metricas*)
+      this._tAcuse = 0;          // temporizador del acuse inmediato
+      this._nAcuse = 0;          // rota las frases
       this._mh = { estado: "apagado", reco: null, fallos: 0, ultimoError: "", siguiente: 0, idxActivacion: -1, tCierre: null, tInact: null, tReinicio: null };
       this.attachShadow({ mode: "open" });
     }
@@ -574,18 +753,22 @@
 
     connectedCallback() {
       this._construir();
+      this._vigilarTema();
       this._arrancar();
     }
 
     disconnectedCallback() {
+      this._vigilarTema(false);
       if (this._abort) this._abort.abort();
       this._detenerGrabacion(true);
       this._detenerReco(true);
       this._mhApagar("", true);
+      this._nivelDetener();
       this._pararVoz();
     }
 
     attributeChangedCallback(nombre, viejo, nuevo) {
+      if (nombre === "tema") { this._aplicarTema(); return; }   // solo repinta: no reinicia la sesión
       if (this.isConnected && this._iniciado && viejo !== nuevo) {
         this._token = null; this._iniciado = false; this._arrancar();
       }
@@ -621,6 +804,7 @@
       // manos libres: oculto hasta saber que el navegador puede (ver _actualizarVoz)
       this._manos = el("button", { class: "manos", type: "button", hidden: true, "aria-pressed": "false" }, icono("manos"), el("span", { textContent: TEXTOS.manosLibres }));
       this._manos.addEventListener("click", () => this._conmutarManosLibres());
+      this._vista = "chat";   // «chat» | «voz» (la vista de voz solo existe con el modo voz encendido)
       const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._altavoz, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
@@ -645,8 +829,8 @@
       const form = el("form", {}, this._entrada, this._mic, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
       // indicador de manos libres: visible siempre que el micrófono esté abierto, con el botón de apagar
-      this._mhPunto = el("span", { class: "mh-punto", "aria-hidden": "true" });
       this._mhEtiqueta = el("span", { class: "mh-estado", role: "status", "aria-live": "polite" });
+      this._mhCampo = el("div", { class: "mh-campo" });     // lo dictado hasta ahora (en la vista de voz el campo de texto no se ve)
       this._mhParcial = el("span", { class: "mh-parcial" });
       this._mhEnviar = el("button", { type: "button", class: "mh-enviar", textContent: TEXTOS.enviar });
       this._mhCancelar = el("button", { type: "button", class: "mh-cancelar", textContent: TEXTOS.cancelar });
@@ -654,15 +838,44 @@
       this._mhEnviar.addEventListener("click", () => this._mhEnviarTexto());
       this._mhCancelar.addEventListener("click", () => this._mhDescartar());
       this._mhApagarBtn.addEventListener("click", () => this._mhApagar(""));
-      this._mhCaja = el("div", { class: "mh", hidden: true }, this._mhPunto, this._mhEtiqueta, this._mhParcial,
-        this._mhEnviar, this._mhCancelar, this._mhApagarBtn, el("div", { class: "mh-priv", textContent: TEXTOS.mhPrivacidad }));
+      this._mhCaja = el("div", { class: "mh", hidden: true, "data-estado": "armado" }, orbe(),
+        el("div", { class: "mh-texto" }, this._mhEtiqueta, this._mhCampo, this._mhParcial),
+        el("div", { class: "mh-botones" }, this._mhEnviar, this._mhCancelar, this._mhApagarBtn),
+        el("div", { class: "mh-priv", textContent: TEXTOS.mhPrivacidad }));
+      this._entrada.addEventListener("input", () => this._mhPintarCampo());
+      // vista de voz: lo que te dice el asistente (resumen) y el paso al chat
+      this._mhDicho = el("div", { class: "dicho" });
+      this._verChat = el("button", { type: "button", class: "ver-chat", textContent: TEXTOS.verChat });
+      this._verChat.title = TEXTOS.mhChatCompleto;
+      this._verChat.addEventListener("click", () => { this._vista = "chat"; this._mhActividad(); this._aplicarVista(true); });
+      this._escena = el("section", { class: "escena", "aria-label": TEXTOS.escenaVoz }, this._mhDicho, this._verChat);
       this.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._mhActivo()) this._mhApagar(""); });
-      const principal = el("main", { class: "principal" }, barra, this._scroll,
-        el("div", { class: "entrada" }, this._mhCaja, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie })));
+      this._form = form;
+      this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
+      const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada);
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
       r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
       this._mostrarBienvenida();
+    }
+
+    // — tema (atributo `tema`: claro | oscuro | auto, por defecto auto = el del sistema) —
+    _vigilarTema(activar = true) {
+      const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+      if (this._mqTema) this._mqTema.removeEventListener("change", this._alCambiarTema);
+      this._mqTema = null;
+      if (!activar || !mq) { this._aplicarTema(); return; }
+      this._alCambiarTema = () => this._aplicarTema();       // el usuario cambió el tema del sistema con la página abierta
+      mq.addEventListener("change", this._alCambiarTema);
+      this._mqTema = mq;
+      this._aplicarTema();
+    }
+
+    _aplicarTema() {
+      if (!this._raiz) return;
+      const tema = (this.getAttribute("tema") || "auto").trim().toLowerCase();
+      const delSistema = !!(this._mqTema && this._mqTema.matches);
+      this._raiz.classList.toggle("oscuro", tema === "oscuro" || (tema !== "claro" && delSistema));
     }
 
     _menu(abrir) {
@@ -916,14 +1129,19 @@
     _palabra() { return (this.getAttribute("palabra-activacion") || PALABRA_ACTIVACION).trim() || PALABRA_ACTIVACION; }
 
     _conmutarManosLibres() {
-      if (this._mhActivo()) { this._mhApagar(""); return; }
+      if (this._mhActivo()) {                                  // ya encendido: el botón de la barra vuelve a la vista de voz
+        if (this._vista === "chat") { this._vista = "voz"; this._mhActividad(); this._aplicarVista(true); } else this._mhApagar("");
+        return;
+      }
       if (!reconocimiento() || this._ocupado) return;
       this._detenerReco(true); this._detenerGrabacion(true);   // un solo micrófono a la vez
       this._pararVoz();
       this._avisarVoz("");
       this._mh.fallos = 0; this._mh.ultimoError = "";
+      this._vista = "voz";
       this._mhEstado("armado");
       this._mhIniciarReco();                                   // dentro del gesto del usuario (el navegador lo exige)
+      this._nivelIniciar();
     }
 
     // `motivo`: "" (lo pidió el usuario), "voz", "inactividad" o un código de ERRORES_VOZ.
@@ -934,6 +1152,8 @@
       const r = mh.reco; mh.reco = null;
       if (r) { try { r.abort(); } catch { /* ya terminó */ } }
       this._leerCortado = true; this._pararVoz();
+      clearTimeout(this._tAcuse);
+      this._nivelDetener();
       this._mhEstado("apagado");
       if (silencioso) return;
       if (motivo === "inactividad") this._avisarVoz(TEXTOS.mhInactividad);
@@ -964,15 +1184,37 @@
       const mh = this._mh, e = mh.estado, activo = e !== "apagado";
       const p = this._palabra();
       this._mhCaja.hidden = !activo;
-      this._mhCaja.classList.toggle("escuchando", activo);
+      if (!activo) { this._vista = "chat"; this._mhDicho.replaceChildren(); }
       this._mhEtiqueta.textContent = ({
         armado: TEXTOS.mhArmado, capturando: TEXTOS.mhCapturando, confirmando: TEXTOS.mhConfirmando, respondiendo: TEXTOS.mhRespondiendo,
       }[e] || "").replace("{p}", p);
       this._mhParcial.textContent = "";
       this._mhEnviar.hidden = this._mhCancelar.hidden = !(e === "capturando" || e === "confirmando");
       this._manos.setAttribute("aria-pressed", String(activo));
-      const t = activo ? TEXTOS.apagarManosLibres : TEXTOS.manosLibres;
+      const t = activo ? TEXTOS.volverVoz : TEXTOS.manosLibres;
       this._manos.title = t; this._manos.setAttribute("aria-label", t);
+      this._mhFase();
+      this._mhPintarCampo();
+      this._aplicarVista();
+    }
+
+    // Estado visual del orbe: «respondiendo» se muestra como «procesando» (esperando) o «hablando» (leyendo el resumen).
+    _mhFase() {
+      const e = this._mh.estado;
+      this._mhCaja.dataset.estado = e === "respondiendo" ? (this._pendientesVoz > 0 ? "hablando" : "procesando") : (e === "apagado" ? "armado" : e);
+    }
+
+    _mhPintarCampo() { this._mhCampo.textContent = this._mhActivo() ? this._entrada.value : ""; }
+
+    // Cambia entre el chat y la vista de voz (solo hay vista de voz con el modo encendido). El panel del micrófono es el
+    // mismo en ambas: en la escena es el centro; en el chat va compacto sobre la entrada (siempre visible mientras el micrófono está abierto).
+    _aplicarVista(foco = false) {
+      const voz = this._mhActivo() && this._vista === "voz";
+      this._raiz.classList.toggle("vista-voz", voz);
+      if (voz) { if (this._mhCaja.parentNode !== this._escena) this._escena.insertBefore(this._mhCaja, this._mhDicho); }
+      else if (this._mhCaja.parentNode !== this._cajaEntrada) this._cajaEntrada.insertBefore(this._mhCaja, this._form);
+      if (foco) (voz ? this._verChat : this._entrada).focus();
+      if (!voz) this._bajar();
     }
 
     _mhIniciarReco() {
@@ -1052,6 +1294,9 @@
 
     // Parcial → indicador; final → campo de texto (sin enviar). Siempre rearma el cierre de la frase.
     _mhTexto(texto, final) {
+      if (this._mh.estado === "capturando" && !this._mhCaja.classList.contains("pulso")) {   // un golpe del orbe por cada resultado del reconocimiento
+        this._mhCaja.classList.add("pulso"); setTimeout(() => this._mhCaja.classList.remove("pulso"), 400);
+      }
       if (final && texto) { this._mhParcial.textContent = ""; this._anadirAlCampo(texto); }
       else this._mhParcial.textContent = texto ? "… " + texto : "";
       this._mhArmarCierre();
@@ -1096,6 +1341,103 @@
       if (this._mh.estado === "respondiendo" && !this._ocupado && this._pendientesVoz === 0) this._mhEstado("armado");
     }
 
+    // — volumen del orbe —
+    // El nivel del MICRÓFONO es real: un AnalyserNode local sobre un segundo flujo de audio (no se graba ni se envía a ningún
+    // lado). Si el navegador no lo da (permiso, micrófono ocupado, sin Web Audio) el orbe sigue con sus animaciones y el
+    // reconocimiento no se entera. Para la voz del ASISTENTE el navegador no entrega amplitud: el orbe da un pulso por cada
+    // palabra que dice (evento `boundary`), que sigue el ritmo real del habla pero no su volumen. Con
+    // prefers-reduced-motion no se hace nada. Atributo `orbe-volumen="no"` lo apaga (no se abre el segundo flujo).
+    async _nivelIniciar() {
+      const n = this._niv;
+      if (n.activo) return;
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      n.activo = true;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const quiere = (this.getAttribute("orbe-volumen") || "auto").toLowerCase() !== "no";
+      if (quiere && AC && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
+          if (!n.activo) { flujo.getTracks().forEach((t) => t.stop()); return; }   // se apagó mientras se pedía el permiso
+          const ctx = new AC();
+          const fuente = ctx.createMediaStreamSource(flujo), analizador = ctx.createAnalyser();
+          analizador.fftSize = 512; fuente.connect(analizador);
+          Object.assign(n, { flujo, ctx, analizador, buf: new Uint8Array(analizador.fftSize) });
+        } catch { /* sin nivel de micrófono */ }
+      }
+      if (n.activo && !n.raf) this._nivelBucle();
+    }
+
+    _nivelBucle() {
+      const n = this._niv;
+      const paso = (t) => {
+        n.raf = requestAnimationFrame(paso);
+        if (t - n.ult < 33) return;                            // ~30 fotogramas por segundo bastan y gastan menos batería
+        const dt = Math.min(0.1, (t - n.ult) / 1000); n.ult = t;
+        const e = this._mhCaja.dataset.estado;
+        let objetivo = 0;
+        if (n.analizador && (e === "armado" || e === "capturando" || e === "confirmando")) {   // mientras el asistente habla, el micrófono lo oiría a él
+          n.analizador.getByteTimeDomainData(n.buf);
+          objetivo = nivelDe(n.buf);
+        }
+        n.pulso = Math.max(0, n.pulso - dt * 2.2);
+        if (e === "hablando") objetivo = Math.max(objetivo, n.pulso);
+        n.valor = suavizar(n.valor, objetivo, dt);
+        const v = Math.round(n.valor * 100) / 100;
+        if (v !== n.escrito) { n.escrito = v; this._mhCaja.style.setProperty("--nivel", String(v)); }
+      };
+      n.raf = requestAnimationFrame(paso);
+    }
+
+    _nivelPulso(x) { this._niv.pulso = Math.max(this._niv.pulso, x); }
+
+    _nivelDetener() {
+      const n = this._niv;
+      n.activo = false;
+      if (n.raf) cancelAnimationFrame(n.raf);
+      if (n.flujo) n.flujo.getTracks().forEach((t) => { try { t.stop(); } catch { /* ya parado */ } });
+      if (n.ctx) { try { n.ctx.close(); } catch { /* ya cerrado */ } }
+      Object.assign(n, { raf: 0, flujo: null, ctx: null, analizador: null, buf: null, valor: 0, pulso: 0, escrito: -1, ult: 0 });
+      if (this._mhCaja) this._mhCaja.style.removeProperty("--nivel");
+    }
+
+    // — acuse inmediato —
+    // El silencio entre «enviar» y el resumen (mediana ≈ 2 s con el modelo actual, más si hay varias tools) se siente roto por voz.
+    // Pasado MH_ACUSE_MS sin nada que decir se dice una frase corta; si el resumen llega antes, no se dice nada. Sin costo de LLM
+    // y sin datos: es texto fijo. Nunca con una acción propuesta (ahí se dice la frase del sistema), ni tras interrumpir, ni si
+    // el turno ya terminó o el modo se apagó. `acuse="no"` lo quita.
+    _acuseProgramar() {
+      clearTimeout(this._tAcuse);
+      if ((this.getAttribute("acuse") || "auto").toLowerCase() === "no" || !puedeHablar()) return;
+      const t = this._t;
+      this._tAcuse = setTimeout(() => {
+        this._tAcuse = 0;
+        if (!this._mhActivo() || this._t !== t || !this._ocupado || this._dichoTurno || this._propuestaTurno || this._leerCortado) return;
+        const frases = TEXTOS.mhAcuse;
+        t.acuse = performance.now();
+        this._decir(frases[this._nAcuse++ % frases.length]);
+      }, MH_ACUSE_MS);
+    }
+
+    // — tiempos del turno por voz: cuánto tarda en oírse algo desde «enviar» —
+    // Evento `asistente:metricas` (ver contrato 7.3): acuse_ms (null si no hubo), primer_delta_ms, voz_ms (llegada del resumen), habla_ms (empieza a sonar),
+    // tts_ms (de tener el texto a que suene) y los tiempos del servidor. No incluye texto ni datos del usuario.
+    _metricasIniciar() { this._t = { envio: performance.now(), hablara: false, fin: false, emitido: false, servidor: null }; }
+
+    _marca(nombre) { const t = this._t; if (t && t[nombre] === undefined) t[nombre] = performance.now(); }
+
+    _metricasIntentar(forzar = false) {
+      const t = this._t;
+      if (!t || t.emitido || !t.fin || !(forzar || t.habla !== undefined || !t.hablara)) return;
+      t.emitido = true;
+      const ms = (x) => (x === undefined ? null : Math.round(x - t.envio));
+      const detalle = {
+        canal: "voz", fuente: t.fuente || null, acuse_ms: ms(t.acuse), primer_delta_ms: ms(t.primer_delta), voz_ms: ms(t.voz), habla_ms: ms(t.habla),
+        tts_ms: t.habla !== undefined && t.texto !== undefined ? Math.round(t.habla - t.texto) : null, servidor: t.servidor,
+      };
+      try { console.debug("[asistente] tiempos del turno por voz", detalle); } catch { /* sin consola */ }
+      this.dispatchEvent(new CustomEvent("asistente:metricas", { detail: detalle, bubbles: true, composed: true }));
+    }
+
     // — respuesta hablada (speechSynthesis) —
     _conmutarLeerAuto() {
       this._leerAuto = !this._leerAuto;
@@ -1112,7 +1454,7 @@
     }
 
     // Encola `texto` (ya sin Markdown); varias llamadas se leen en orden. `alTerminar` al acabar esta pieza.
-    _decir(texto, alTerminar) {
+    _decir(texto, alTerminar, alIniciar) {
       if (!puedeHablar() || !texto.trim()) { if (alTerminar) alTerminar(); return; }
       const u = new window.SpeechSynthesisUtterance(texto);
       const idioma = this.getAttribute("idioma") || "es-UY";
@@ -1123,14 +1465,19 @@
       const fin = () => {
         if (gen === this._genVoz) this._pendientesVoz = Math.max(0, this._pendientesVoz - 1);
         if (alTerminar) alTerminar();
+        this._mhFase();
         this._mhRevisarFin();
       };
       u.onend = fin; u.onerror = fin;
+      if (alIniciar) u.onstart = alIniciar;
+      u.onboundary = () => { if (this._mhActivo()) this._nivelPulso(0.5 + Math.random() * 0.4); };
       window.speechSynthesis.speak(u);
+      this._mhFase();
     }
 
     _pararVoz() {
       this._genVoz++; this._pendientesVoz = 0;
+      if (this._mhCaja) this._mhFase();
       if (puedeHablar()) window.speechSynthesis.cancel();
       if (this._raiz) for (const b of this._raiz.querySelectorAll(".escuchar.hablando")) b.classList.remove("hablando");
     }
@@ -1242,11 +1589,15 @@
     _bloquear(si) {
       this._ocupado = si; this._enviar.disabled = si;
       this._raiz.setAttribute("aria-busy", String(si));
+      this._mhFase();
       if (!si) this._mhRevisarFin();
     }
 
     async _enviarMensaje(texto) {
       this._pararVoz();
+      // un turno nuevo empieza sin «interrumpido» (decir la palabra de activación para dictar lo deja en true hasta la respuesta)
+      this._dichoTurno = false; this._propuestaTurno = false; this._leerCortado = false; this._mhDicho.replaceChildren();
+      if (this._mhActivo()) { this._metricasIniciar(); this._acuseProgramar(); } else this._t = null;
       if (this._mhActivo()) this._mhEstado("respondiendo");   // también si se envió con Enter o el botón
       this._bloquear(true);
       this._burbuja("user").textContent = texto;
@@ -1273,7 +1624,8 @@
 
     // Devuelve "ok" | "token_expirado" | "error".
     async _turno(texto, burbuja, estado) {
-      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto });
+      const canalVoz = this._mhActivo();   // en el modo voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual)
+      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto" });
       const r = await this._conToken((h) => fetch(this._servidor + "/v1/chat", {
         method: "POST", signal: this._abort.signal, body: cuerpo,
         headers: { ...h, "Content-Type": "application/json", Accept: "text/event-stream" },
@@ -1285,7 +1637,8 @@
       }
       let acumulado = "", resultado = "ok";
       this._leidoHasta = 0; this._leerCortado = false;
-      const leer = (this._leerAuto || this._mhActivo()) && puedeHablar();   // en manos libres siempre se lee
+      const leer = this._leerAuto && !canalVoz && puedeHablar();   // lectura automática de la respuesta completa (no en el modo voz)
+      const hablarVoz = canalVoz && puedeHablar();                 // modo voz: se dice el resumen, aunque la lectura automática esté apagada
       const pintar = () => {
         const acciones = burbuja.querySelector(".acciones");
         burbuja.replaceChildren(); markdown(acumulado, burbuja);
@@ -1295,9 +1648,11 @@
       await leerSSE(r.body, (evento, datos) => {
         switch (evento) {
           case "delta":
+            this._marca("primer_delta");
             acumulado += datos.texto || ""; pintar();
             if (leer && !this._leerCortado) this._leerIncremental(acumulado, false);
             break;
+          case "voz": this._marca("voz"); if (hablarVoz) this._resumenHablado(datos.texto, "resumen"); break;
           case "tool":
             estado.textContent = TEXTOS.consultando + "… " + (datos.herramientas || []).join(", ");
             if (!estado.isConnected) burbuja.append(estado);
@@ -1305,7 +1660,9 @@
           case "ui": this._acciones(datos.acciones || [], burbuja); break;
           case "confirmacion": this._confirmacion(datos); break;
           case "done":
-            if (datos.conversacion_id) { this._convId = datos.conversacion_id; this._recordar(); } break;
+            if (datos.conversacion_id) { this._convId = datos.conversacion_id; this._recordar(); }
+            if (this._t) this._t.servidor = datos.tiempos_ms || null;
+            break;
           case "token_expirado": resultado = "token_expirado"; break;
           case "error":
             if (!acumulado) burbuja.remove(); else estado.remove();
@@ -1315,9 +1672,31 @@
       estado.remove();
       if (resultado === "ok" && acumulado.trim()) {
         if (leer && !this._leerCortado) this._leerIncremental(acumulado, true);
+        if (hablarVoz && !this._leerCortado) this._resumenHablado(resumenBreve(acumulado), "respaldo");   // respaldo: el modelo no mandó su resumen
         this._botonEscuchar(burbuja, acumulado);
       }
+      if (this._t) {   // después de pedir la voz de respaldo: así sabe si hay que esperar a que empiece a sonar
+        this._t.fin = true;
+        this._metricasIntentar();
+        const t = this._t;
+        setTimeout(() => { if (this._t === t) this._metricasIntentar(true); }, 3000);   // algunos navegadores no avisan cuándo empieza a sonar
+      }
       return resultado;
+    }
+
+    // Lo que se dice en el modo voz (resumen del modelo o, si falta, las primeras oraciones); también se muestra en la vista de voz.
+    // Una sola vez por turno, y nunca si ese turno propuso una acción (ahí se dice la frase del sistema, ver _confirmacion).
+    _resumenHablado(texto, fuente = "resumen") {
+      if (typeof texto !== "string" || !texto.trim() || this._dichoTurno || this._propuestaTurno || this._leerCortado) return;
+      this._dichoTurno = true;
+      this._mostrarDicho(texto.trim());
+      const t = this._t;
+      if (t) { t.hablara = true; t.fuente = fuente; t.texto = performance.now(); }
+      this._decir(textoParaVoz(texto), undefined, () => { this._marca("habla"); this._metricasIntentar(); });
+    }
+
+    _mostrarDicho(texto) {
+      this._mhDicho.replaceChildren(el("small", { textContent: TEXTOS.mhDicho }), document.createTextNode(texto));
     }
 
     // — acciones con confirmación (contrato, sección 8) —
@@ -1354,7 +1733,14 @@
       if (!Number.isNaN(expiraMs)) { tick(); t.timer = setInterval(tick, 1000); }
       this._tarjetaActiva = t;
       // En manos libres la propuesta se lee en voz alta, pero se confirma siempre con un clic.
-      if (this._mhActivo() && puedeHablar()) this._decir(TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen));
+      this._propuestaTurno = true;
+      if (this._mhActivo()) {
+        // La tarjeta tiene que estar a la vista: si se está en la vista de voz, se pasa al chat. Se confirma siempre con un clic.
+        const frase = TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen);
+        this._mostrarDicho(frase);
+        if (puedeHablar()) this._decir(frase);
+        if (this._vista === "voz") { this._vista = "chat"; this._aplicarVista(); this._avisarVoz(TEXTOS.mhConfirmaEnChat); }
+      }
       this._bajar();
     }
 

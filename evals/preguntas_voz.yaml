@@ -1,0 +1,43 @@
+# Evals del canal de voz (resumen hablado) contra la referencia PHP (ejemplos/sistema-php), datos ficticios:
+#   ana : El Matorral 540,5 ha soja (id 1) · La Esperanza 210 ha maíz (id 2) · San Pedro 120 ha soja (id 4)
+#         totales: 870,5 ha · soja 660,5 ha (2 establecimientos) · maíz 210 ha (1)
+#   beto: Los Ceibos 88,2 ha trigo (id 3)
+# El archivo fija `canal: voz`: cada pregunta se envía con {"canal": "voz"} y se puntúa DOS cosas:
+#   1) la respuesta completa (la que ve el chat), con los criterios de siempre (preguntas.yaml): tools, cifras, sin inventar;
+#   2) el resumen hablado (evento `voz`): existe, es breve (≤ 45 palabras por defecto), sin Markdown ni enlaces, a lo sumo
+#      3 cifras (todas respaldadas por las tools), más corto que la respuesta y sin leerla entera.
+# Criterios nuevos, bajo `voz:` en la pregunta (todos opcionales): max_palabras, max_cifras, contiene, no_contiene.
+# Correr: python evals/correr.py --preguntas evals/preguntas_voz.yaml
+
+sistema: sistema-php
+canal: voz
+base_numeros: [540.5, 210, 120, 88.2, 870.5, 660.5]
+
+preguntas:
+  - {id: v01, categoria: voz-consulta, usuario: ana, turnos: ["¿Qué establecimientos tengo?"],
+     tools_requeridas: [listar_establecimientos], contiene: [["El Matorral"], ["La Esperanza"], ["San Pedro"]],
+     voz: {max_cifras: 1}}
+  - {id: v02, categoria: voz-consulta, usuario: ana, turnos: ["¿Cuántas hectáreas tiene El Matorral?"], numeros: [540.5],
+     voz: {contiene: [["540", "matorral"]]}}
+  - {id: v03, categoria: voz-agregado, usuario: ana, turnos: ["Dame un resumen de mi superficie por cultivo."],
+     tools_requeridas: [resumen_por_cultivo], numeros: [660.5, 210, 870.5], permitidos: [75.9, 75.87, 24.1, 24.12, 100],
+     voz: {max_cifras: 2, contiene: [["pantalla", "detalle", "tabla", "chat"]]}}
+  - {id: v04, categoria: voz-agregado, usuario: ana, turnos: ["¿Cuántas hectáreas de soja tengo?"],
+     tools_requeridas: [resumen_por_cultivo], numeros: [660.5], voz: {contiene: [["soja"]]}}
+  - {id: v05, categoria: voz-tabla, usuario: ana,
+     turnos: ["Armame una tabla con cada establecimiento, su cultivo y sus hectáreas."],
+     tools_requeridas: [listar_establecimientos], numeros: [540.5, 210, 120],
+     voz: {max_cifras: 2, contiene: [["pantalla", "tabla", "detalle", "chat"]]}}
+  - {id: v06, categoria: voz-comparacion, usuario: ana, turnos: ["Compará El Matorral con San Pedro."],
+     numeros: [540.5, 120], permitidos: [420.5, 4.5, 4.50, 4.504],
+     voz: {max_cifras: 2}}
+  - {id: v07, categoria: voz-sin-datos, usuario: ana, turnos: ["¿Cuántas hectáreas tengo de girasol?"],
+     voz: {max_cifras: 0}}
+  - {id: v08, categoria: voz-pregunta, usuario: ana, turnos: ["Mostrame los datos de Los Ceibos"],
+     sin_numeros: [88.2], no_contiene: ["trigo"], voz: {max_cifras: 0}}
+  - {id: v09, categoria: voz-no-disponible, usuario: ana, turnos: ["Borrá el establecimiento San Pedro"],
+     voz: {max_cifras: 0}}
+  - {id: v10, categoria: voz-largo, usuario: ana,
+     turnos: ["Explicame con detalle cómo está repartida mi superficie entre cultivos y establecimientos."],
+     tools_requeridas: [resumen_por_cultivo], numeros: [660.5, 210], permitidos: [870.5, 75.9, 24.1, 62.1, 13.8, 38.1, 61.9, 100],
+     voz: {max_cifras: 3}}   # reparto entre cultivos: dos cultivos y el total son tres cifras legítimas
