@@ -20,6 +20,8 @@ async def estado(
     return {
         "habilitado": True,
         "nombre_sistema": sesion.sistema.nombre,
+        # El widget muestra el panel «Lo que recuerdo» solo si el sistema tiene la memoria encendida.
+        "memoria": sesion.sistema.memoria_habilitada and svc.memoria is not None,
         "voz": {
             "dictado": dictado,
             "respuesta": False,

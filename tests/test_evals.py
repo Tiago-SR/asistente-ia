@@ -238,3 +238,86 @@ def test_el_set_de_evals_de_voz_es_valido_y_fija_el_canal():
     assert conjunto["canal"] == "voz" and len(conjunto["preguntas"]) >= 10
     ids = [q["id"] for q in conjunto["preguntas"]]
     assert len(ids) == len(set(ids)) and all({"id", "categoria", "usuario", "turnos"} <= q.keys() for q in conjunto["preguntas"])
+
+
+# ───────────────────────── memoria por usuario (Fase 1) ─────────────────────────
+
+
+def test_el_set_de_memoria_fase1_es_valido():
+    conjunto = yaml.safe_load((EVALS / "preguntas_memoria_fase1.yaml").read_text(encoding="utf-8"))
+    assert conjunto["sistema"] == "mock-a" and conjunto["memoria"] is True
+    ids = [q["id"] for q in conjunto["preguntas"]]
+    assert len(ids) == len(set(ids)) >= 15
+    permitidos = {"turnos", "id", "categoria", "usuario", "previas", "tools_requeridas", "tools_prohibidas", "numeros",
+                  "sin_numeros", "contiene", "no_contiene", "permitidos", "propone", "sin_propuesta",
+                  "propuesta_contiene", "propuesta_no_contiene"}
+    for q in conjunto["preguntas"]:
+        assert set(q) <= permitidos, q["id"]
+        assert q["turnos"] and q["usuario"] in ("ana", "beto", "ines"), q["id"]
+        assert not (q.get("propone") and q.get("sin_propuesta")), q["id"]
+        for previa in q.get("previas", []):
+            assert isinstance(previa, str) or (set(previa) <= {"mensaje", "turnos", "usuario", "confirmar"}
+                                               and bool(previa.get("mensaje")) != bool(previa.get("turnos"))), q["id"]
+    assert {"recordar", "sin_pedido", "inyeccion", "uso", "olvidar", "aislamiento"} <= {q["categoria"] for q in conjunto["preguntas"]}
+    # las propuestas que se miden solo pueden ser las tools locales
+    assert {q["propone"] for q in conjunto["preguntas"] if q.get("propone")} == {"recordar", "olvidar"}
+
+
+class ClienteDeMemoria:
+    """Cliente falso: registra tokens, limpiezas, turnos y confirmaciones; cada turno propone una tarjeta (local o del anfitrión)."""
+
+    canal = "texto"
+
+    def __init__(self, propuestas):
+        self.propuestas, self.turnos, self.confirmadas, self.limpiadas = propuestas, [], [], []
+
+    def token(self, usuario):
+        return f"tok-{usuario}"
+
+    def limpiar_memoria(self, token):
+        self.limpiadas.append(token)
+
+    def confirmar_local(self, token, accion_id):
+        self.confirmadas.append((token, accion_id))
+        return True
+
+    def turno(self, token, mensaje, conversacion):
+        self.turnos.append((token, mensaje, conversacion))
+        n = len(self.turnos)
+        return {"texto": "Listo.", "voz": None, "voz_s": None, "tiempos_ms": {}, "propuestas": self.propuestas(n),
+                "tools": [], "iteraciones": 1, "error": None, "conversacion": f"c{n}",
+                "uso": {"tokens_in": 10, "tokens_out": 1, "tokens_in_cache": 0}, "latencia_s": 1.0, "primer_token_s": 0.5}
+
+
+def tarjeta(n, local=True):
+    return [{"tool": "recordar", "resumen": "Recordar: x", "lineas": [], "id": f"acc-{n}", "local": local or None}]
+
+
+def test_las_previas_con_confirmar_confirman_solo_tarjetas_locales_con_el_usuario_que_las_hizo():
+    cli = ClienteDeMemoria(lambda n: tarjeta(n, local=n != 2))
+    q = {"id": "x", "categoria": "uso", "usuario": "beto", "turnos": ["¿y ahora?"],
+         "previas": [{"mensaje": "guardá", "usuario": "ana", "confirmar": True},
+                     {"turnos": ["uno", "dos"], "confirmar": True}, "sin confirmar"]}
+    r = correr.correr_pregunta(cli, q, BASE, None, limpiar_memoria=True)
+    # cada entrada abre su conversación; los turnos de una entrada comparten la suya; el usuario de cada una es el suyo
+    assert [t[1:] for t in cli.turnos] == [("guardá", None), ("uno", None), ("dos", "c2"), ("sin confirmar", None),
+                                           ("¿y ahora?", None)]
+    assert [t[0] for t in cli.turnos] == ["tok-ana", "tok-beto", "tok-beto", "tok-beto", "tok-beto"]
+    # la tarjeta del turno 2 no es local (acción del anfitrión): no se confirma; las demás con `confirmar`, sí
+    assert cli.confirmadas == [("tok-ana", "acc-1"), ("tok-beto", "acc-3")]
+    assert sorted(cli.limpiadas) == ["tok-ana", "tok-beto"]  # parten sin recuerdos, todos los usuarios involucrados
+    assert not any("previa" in f for f in r["fallos"])  # todas las previas con `confirmar` produjeron su tarjeta
+
+
+def test_una_previa_que_no_produjo_tarjeta_es_un_fallo_de_precondicion():
+    cli = ClienteDeMemoria(lambda n: [])
+    q = {"id": "x", "categoria": "uso", "usuario": "ana", "turnos": ["¿y ahora?"],
+         "previas": [{"mensaje": "Cuando digo la sojera es El Matorral", "confirmar": True}]}
+    r = correr.correr_pregunta(cli, q, BASE, None)
+    assert not r["ok"] and "no produjo ninguna tarjeta local" in r["fallos"][0]
+
+
+def test_sin_memoria_en_el_set_no_se_limpia_nada_ni_se_confirma():
+    cli = ClienteDeMemoria(lambda n: tarjeta(n))
+    correr.correr_pregunta(cli, {"id": "x", "categoria": "c", "usuario": "ana", "turnos": ["a"], "previas": ["b"]}, BASE, None)
+    assert cli.limpiadas == [] and cli.confirmadas == []

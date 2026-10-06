@@ -57,6 +57,11 @@
  *                      (estado: ejecutada | cancelada | expirada | reemplazada | fallida). El anfitrión puede
  *                      refrescar su pantalla tras una acción ejecutada.
  *
+ * Memoria por usuario: si el sistema la habilitó (`memoria: true` en /v1/estado), el asistente puede guardar, solo a pedido
+ * del usuario y con el mismo botón Confirmar, preferencias, alias y consultas guardadas. Esas tarjetas llevan `local: true`:
+ * se confirman con la sesión normal (POST /v1/confirmaciones/{id}/confirmar-local), sin pedir token al sistema anfitrión.
+ * Un botón de la barra abre el panel «Lo que recuerdo», donde el usuario ve y olvida cada cosa (o todo). Nunca por voz.
+ *
  * Acciones con confirmación: si el sistema habilitó escrituras, el asistente solo las PROPONE; el widget muestra
  * una tarjeta con el resumen que redactó el sistema y los botones Confirmar / Cancelar. Confirmar pide al
  * token-url del anfitrión (con su sesión) un token de escritura para esa confirmación. Nunca se confirma por voz.
@@ -120,6 +125,21 @@
     ejecutando: "Ejecutando…",
     mhConfirmarPantalla: "Te pido confirmar en pantalla: {r}",
     pie: "Las respuestas pueden contener errores; verificá los datos importantes.",
+    memoria: "Lo que recuerdo",
+    memoriaTitulo: "Lo que recuerdo de vos",
+    memoriaIntro: "Esto es lo que me pediste que recuerde. Lo uso solo en tus conversaciones y, si pasa un tiempo sin usarlo, se olvida solo.",
+    memoriaVacio: "Todavía no guardé nada. Podés pedirme, por ejemplo: «recordá que quiero las hectáreas sin decimales».",
+    memoriaCerrar: "Cerrar",
+    memoriaOlvidar: "Olvidar",
+    memoriaOlvidarTodo: "Olvidar todo",
+    memoriaOlvidarEsto: "Olvidar: {d}",
+    memoriaVence: "Se olvida solo el {f} si no lo uso",
+    memoriaOlvidado: "Listo, lo olvidé.",
+    memoriaOlvidadoTodo: "Listo, olvidé todo.",
+    memoriaCargando: "Cargando…",
+    memoriaErrorCargar: "No pude cargar lo que recuerdo. Probá de nuevo.",
+    memoriaErrorBorrar: "No pude olvidarlo. Probá de nuevo.",
+    memoriaTipos: { preferencia: "Preferencia", alias: "Alias", consulta_guardada: "Consulta guardada" },
   };
   const ERRORES = {
     mensajes_min: "Enviaste demasiados mensajes seguidos. Esperá un momento.",
@@ -151,6 +171,9 @@
     timeout: "El sistema tardó demasiado: verificá en el sistema si se hizo antes de repetirlo.",
     error_sistema: "El sistema no pudo realizar la acción.",
     confirmacion_invalida: "La confirmación no es válida. Pedilo de nuevo.",
+    accion_no_local: "La confirmación no es válida. Pedilo de nuevo.",
+    memoria_no_habilitada: "La memoria no está habilitada en este sistema.",
+    tope_alcanzado: "Ya hay 20 cosas guardadas. Olvidá alguna desde «Lo que recuerdo» y pedilo de nuevo.",
     token_invalido: "Tu sesión venció. Volvé a intentarlo.",
     token_expirado: "Tu sesión venció. Volvé a intentarlo.",
     sin_autorizacion: "El sistema no autorizó la acción (puede que haya vencido). Pedilo de nuevo.",
@@ -462,7 +485,7 @@
     .lista .borrar svg { width: 16px; height: 16px; }
     .lista .vacio-hist { display: block; padding: 10px; color: var(--apagado); font-size: 13px; }
 
-    .principal { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .principal { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
     .barra { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--b); }
     .barra h1 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .barra .menu, .barra .accion, .barra .altavoz { background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer; display: grid; place-items: center; }
@@ -558,7 +581,7 @@
     .escena::before { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
     .escena::after { bottom: 14px; right: 14px; border-left: 0; border-top: 0; }
     .vista-voz .escena { display: flex; }
-    .raiz.vista-voz .scroll, .vista-voz .entrada form, .vista-voz .entrada .pie, .vista-voz .barra .manos, .vista-voz .barra .altavoz { display: none; }
+    .raiz.vista-voz .scroll, .vista-voz .entrada form, .vista-voz .entrada .pie, .vista-voz .barra .manos, .vista-voz .barra .altavoz, .vista-voz .barra .memoria { display: none; }
     .escena .mh { --s: clamp(112px, 26vh, 176px); grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 4px; border: 0; background: none; margin: 0; padding: 0; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }
     .escena .mh-estado { font-size: 15px; letter-spacing: .02em; }
     .escena .mh-campo { display: block; font-size: 17px; max-width: 100%; overflow-wrap: anywhere; min-height: 1.5em; }
@@ -625,6 +648,33 @@
     .accion-error { margin-top: 6px; font-size: 13px; color: var(--p-err-t); }
     .accion-error:empty { display: none; }
 
+    /* Panel «Lo que recuerdo»: cubre la columna principal; todo con las variables del tema. */
+    .barra .memoria[aria-expanded="true"] { color: var(--c); }
+    .memoria-panel { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--f); }
+    .memoria-panel[hidden] { display: none; }
+    .mem-cab { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--b); }
+    .mem-cab h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; }
+    .mem-cab button { background: none; border: 1px solid var(--b); border-radius: 999px; padding: 4px 14px; cursor: pointer; }
+    .mem-cab button:hover { border-color: var(--c); }
+    .mem-cuerpo { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; }
+    .mem-col { max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto; }
+    .mem-intro { margin: 0 0 12px; font-size: 14px; color: var(--apagado); }
+    .mem-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .mem-lista li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--b); border-radius: var(--r); background: var(--f); }
+    .mem-dato { flex: 1; min-width: 0; }
+    .mem-tipo { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--apagado); }
+    .mem-desc { overflow-wrap: anywhere; }
+    .mem-vence { font-size: 12px; color: var(--apagado); }
+    .mem-lista button, .mem-pie button { flex: none; padding: 5px 14px; border-radius: 999px; border: 1px solid var(--c); background: var(--f); color: var(--c); cursor: pointer; }
+    .mem-lista button:hover:not(:disabled), .mem-pie button:hover:not(:disabled) { background: var(--c); color: var(--ct); }
+    .mem-lista button:disabled, .mem-pie button:disabled { opacity: .45; cursor: default; }
+    .mem-vacio { color: var(--apagado); font-size: 14px; }
+    .mem-estado { margin-top: 10px; font-size: 13px; color: var(--apagado); min-height: 1.4em; }
+    .mem-error { margin-top: 6px; font-size: 13px; color: var(--p-err-t); }
+    .mem-error:empty { display: none; }
+    .mem-pie { padding: 10px 16px; border-top: 1px solid var(--b); }
+    .mem-pie .mem-col { display: flex; justify-content: flex-end; }
+
     .entrada { padding: 0 16px 8px; }
     .entrada form {
       max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
@@ -673,6 +723,7 @@
     parar: "M7 7h10v10H7z",
     manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
     altavoz: "M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
+    memoria: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z",
   };
   // Glifos del centro del orbe: cada estado tiene el suyo (se distinguen sin depender del color ni del movimiento).
   const GLIFO = {
@@ -809,7 +860,10 @@
       this._manos = el("button", { class: "manos", type: "button", hidden: true, "aria-pressed": "false" }, icono("manos"), el("span", { textContent: TEXTOS.manosLibres }));
       this._manos.addEventListener("click", () => this._conmutarManosLibres());
       this._vista = "chat";   // «chat» | «voz» (la vista de voz solo existe con el modo voz encendido)
-      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._altavoz, otra]));
+      // memoria por usuario: oculto hasta que /v1/estado diga `memoria: true`
+      this._memBtn = el("button", { class: "accion memoria", type: "button", hidden: true, title: TEXTOS.memoria, "aria-label": TEXTOS.memoria, "aria-expanded": "false" }, icono("memoria"));
+      this._memBtn.addEventListener("click", () => (this._memPanel.hidden ? this._memoriaAbrir() : this._memoriaCerrar()));
+      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._memBtn, this._altavoz, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
       this._scroll = el("div", { class: "scroll" }, this._mensajes);
@@ -856,7 +910,8 @@
       this.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._mhActivo()) this._mhApagar(""); });
       this._form = form;
       this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
-      const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada);
+      this._construirMemoria();
+      const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada, this._memPanel);
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
       r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
@@ -921,6 +976,7 @@
           const e = await r.json();
           habilitado = e.habilitado !== false;
           this._nombreSistema = e.nombre_sistema || "";
+          this._memoria = e.memoria === true;
           const voz = e.voz || {};
           this._maxAudioS = Number(voz.max_audio_s) > 0 ? Number(voz.max_audio_s) : 60;
           this._dictadoServidor = voz.dictado === true && puedeGrabar();
@@ -928,6 +984,7 @@
         }
       } catch { /* sin acceso: se muestra el aviso */ }
       this._actualizarVoz();
+      this._memBtn.hidden = !(habilitado && this._memoria);
       this._raiz.classList.toggle("sin-acceso", !habilitado);
       this._raiz.hidden = false;
       if (habilitado) { this._cargarHistorial(); this._entrada.focus(); this._restaurar(); }
@@ -1703,6 +1760,85 @@
       this._mhDicho.replaceChildren(el("small", { textContent: TEXTOS.mhDicho }), document.createTextNode(texto));
     }
 
+    // — memoria por usuario: panel «Lo que recuerdo» (contrato 6.8) —
+    // Todo con nodos DOM y textContent. Borrar es un clic del propio usuario sobre sus datos: no pide confirmación.
+    _construirMemoria() {
+      this._memLista = el("ul", { class: "mem-lista" });
+      this._memVacio = el("p", { class: "mem-vacio", textContent: TEXTOS.memoriaVacio, hidden: true });
+      this._memEstado = el("div", { class: "mem-estado", role: "status" });
+      this._memError = el("div", { class: "mem-error", role: "alert" });
+      this._memTodo = el("button", { type: "button", textContent: TEXTOS.memoriaOlvidarTodo });
+      this._memTodo.addEventListener("click", () => this._memoriaOlvidar(null));
+      this._memCerrar = el("button", { type: "button", textContent: TEXTOS.memoriaCerrar });
+      this._memCerrar.addEventListener("click", () => this._memoriaCerrar());
+      const titulo = el("h2", { id: "mem-titulo", textContent: TEXTOS.memoriaTitulo });
+      this._memPanel = el("section", { class: "memoria-panel", hidden: true, role: "dialog", "aria-labelledby": "mem-titulo" },
+        el("div", { class: "mem-cab" }, titulo, this._memCerrar),
+        el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
+          el("p", { class: "mem-intro", textContent: TEXTOS.memoriaIntro }),
+          this._memLista, this._memVacio, this._memEstado, this._memError)),
+        el("div", { class: "mem-pie" }, el("div", { class: "mem-col" }, this._memTodo)));
+      this._memPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._memoriaCerrar(); } });
+    }
+
+    _memoriaAbrir() {
+      if (!this._memoria) return;
+      this._memPanel.hidden = false; this._memBtn.setAttribute("aria-expanded", "true");
+      this._memCerrar.focus();
+      this._memoriaCargar();
+    }
+
+    _memoriaCerrar() {
+      this._memPanel.hidden = true; this._memBtn.setAttribute("aria-expanded", "false");
+      this._memBtn.focus();
+    }
+
+    async _memoriaCargar() {
+      this._memError.textContent = ""; this._memEstado.textContent = TEXTOS.memoriaCargando;
+      try {
+        const r = await this._conToken((h) => fetch(this._servidor + "/v1/memoria", { headers: h }));
+        if (!r.ok) throw new Error("memoria " + r.status);
+        const datos = await r.json();
+        this._memEstado.textContent = "";
+        this._memoriaPintar(Array.isArray(datos) ? datos : []);
+      } catch { this._memEstado.textContent = ""; this._memError.textContent = TEXTOS.memoriaErrorCargar; }
+    }
+
+    _memoriaPintar(lista) {
+      const validos = lista.filter((x) => x && typeof x.id === "string" && typeof x.descripcion === "string");
+      this._memLista.replaceChildren(...validos.map((x) => {
+        const boton = el("button", { type: "button", textContent: TEXTOS.memoriaOlvidar, "aria-label": TEXTOS.memoriaOlvidarEsto.replace("{d}", x.descripcion) });
+        boton.addEventListener("click", () => this._memoriaOlvidar(x.id));
+        const vence = new Date(x.vence);
+        return el("li", {},
+          el("div", { class: "mem-dato" },
+            el("div", { class: "mem-tipo", textContent: TEXTOS.memoriaTipos[x.tipo] || "" }),
+            el("div", { class: "mem-desc", textContent: x.descripcion }),
+            ...(Number.isNaN(vence.getTime()) ? [] : [el("div", { class: "mem-vence", textContent: TEXTOS.memoriaVence.replace("{f}", vence.toLocaleDateString()) })])),
+          boton);
+      }));
+      this._memVacio.hidden = validos.length > 0;
+      this._memTodo.disabled = validos.length === 0;
+    }
+
+    // `id` = null: olvidar todo.
+    async _memoriaOlvidar(id) {
+      this._memError.textContent = ""; this._memEstado.textContent = "";
+      this._memPanel.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+      try {
+        const url = this._servidor + "/v1/memoria" + (id ? "/" + encodeURIComponent(id) : "");
+        const r = await this._conToken((h) => fetch(url, { method: "DELETE", headers: h }));
+        if (!r.ok && r.status !== 404) throw new Error("memoria " + r.status);
+        this._memEstado.textContent = id ? TEXTOS.memoriaOlvidado : TEXTOS.memoriaOlvidadoTodo;
+      } catch { this._memError.textContent = TEXTOS.memoriaErrorBorrar; }
+      this._memPanel.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+      const estado = this._memEstado.textContent, error = this._memError.textContent;
+      await this._memoriaCargar();
+      this._memCerrar.focus();   // el botón que se usó ya no existe: el foco no se pierde (y Escape sigue cerrando)
+      if (estado) this._memEstado.textContent = estado;
+      if (error) { this._memError.textContent = error; }
+    }
+
     // — acciones con confirmación (contrato, sección 8) —
     // El resumen y el detalle los redactó el SISTEMA (no el modelo). Todo el texto va con textContent.
     _confirmacion(d) {
@@ -1783,19 +1919,27 @@
       t.ocupada = true; t.confirmar.disabled = t.cancelar.disabled = true;
       t.err.textContent = ""; t.estado.textContent = TEXTOS.ejecutando;
       try {
-        const token = await this._tokenEscritura(t.d);
-        if (!token) { this._errorTarjeta(t, "sin_autorizacion"); return; }
-        const r = await fetch(`${this._servidor}/v1/confirmaciones/${encodeURIComponent(t.d.id)}/confirmar`, {
-          method: "POST", headers: { Authorization: "Bearer " + token },
-        });
+        let r;
+        if (t.d.local === true) {
+          // Acción local del asistente (memoria): no escribe en el sistema anfitrión, así que no hay token de
+          // escritura que pedirle. Basta la sesión normal; el clic humano (isTrusted) es la confirmación.
+          r = await this._conToken((h) => fetch(`${this._servidor}/v1/confirmaciones/${encodeURIComponent(t.d.id)}/confirmar-local`, { method: "POST", headers: h }));
+        } else {
+          const token = await this._tokenEscritura(t.d);
+          if (!token) { this._errorTarjeta(t, "sin_autorizacion"); return; }
+          r = await fetch(`${this._servidor}/v1/confirmaciones/${encodeURIComponent(t.d.id)}/confirmar`, {
+            method: "POST", headers: { Authorization: "Bearer " + token },
+          });
+        }
         let c = {}; try { c = await r.json(); } catch { /* sin cuerpo */ }
         if (r.status === 409) { this._cerrarTarjeta(t, c.estado in ESTADOS_ACCION ? c.estado : "fallida"); return; }
         if (r.ok && c.ok === true) {
           this._cerrarTarjeta(t, "ejecutada", typeof c.mensaje === "string" && c.mensaje ? c.mensaje : ESTADOS_ACCION.ejecutada);
+          if (t.d.local === true && this._memPanel && !this._memPanel.hidden) this._memoriaCargar();
           this._acciones(Array.isArray(c.ui) ? c.ui : [], t.tarjeta);
           return;
         }
-        if (r.ok) { this._cerrarTarjeta(t, "fallida", ERRORES_ACCION[c.error] || ESTADOS_ACCION.fallida); return; }
+        if (r.ok) { this._cerrarTarjeta(t, "fallida", ERRORES_ACCION[c.error] || ESTADOS_ACCION.fallida); return; }  // incluye tope_alcanzado
         if (r.status === 403 || r.status === 404) { this._cerrarTarjeta(t, "fallida", ERRORES_ACCION[c.error] || ESTADOS_ACCION.fallida); return; }
         this._errorTarjeta(t, c.error);
       } catch { this._errorTarjeta(t); }

@@ -69,7 +69,7 @@ Firma recomendada: `RS256` o `EdDSA` (el sistema guarda la privada, el asistente
 
 Reglas (si no se cumplen, la tool o el manifiesto se rechazan y se loguea):
 
-- `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único. `consultas_recientes` está **reservado**: es una tool local del asistente ([6.7](#67-lo-mismo-que-ayer-consultas_recientes)) y una tool del sistema con ese nombre se descarta.
+- `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único. `consultas_recientes`, `recordar` y `olvidar` están **reservados**: son tools locales del asistente ([6.7](#67-lo-mismo-que-ayer-consultas_recientes) y [6.8](#68-memoria-por-usuario-recordar-y-olvidar)) y una tool del sistema con alguno de esos nombres se descarta.
 - `descripcion`: ≤ 1 000 caracteres. `parametros`: JSON Schema válido, tipo `object`.
 - `efecto` ∈ {`lectura`, `escritura`}. Al modelo solo se exponen las de `lectura`, salvo las escrituras que declaran `confirmacion` y que el operador del asistente habilitó explícitamente ([sección 8](#8-acciones-con-confirmación-opcional)); ni siquiera esas se ejecutan sin la confirmación del usuario.
 - Máximo 40 tools por sistema y 256 KB por manifiesto.
@@ -222,6 +222,7 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **`locale_defecto` (opcional):** idioma (`es-UY`) de los usuarios cuyo token no trae el claim `locale`; si el token lo trae, manda el del token. Lo usan el prompt («idioma preferido del usuario») y el dictado del servidor.
 - **`zona_horaria` (opcional):** zona IANA (`America/Montevideo`) de los usuarios cuyo navegador no la informa. El widget envía la del navegador en cada mensaje y esa manda; sin ninguna de las dos se usa UTC. Define qué día es «hoy» para el asistente (la fecha de la sesión) y se guarda con cada consulta. Una zona desconocida en el registro deshabilita ese sistema; una inválida enviada por el navegador se ignora.
 - **`consultas_recientes` (opcional, `true` por defecto):** `false` desactiva para este sistema la tool local de «lo mismo que ayer» ([6.7](#67-lo-mismo-que-ayer-consultas_recientes)).
+- **`memoria_habilitada` (opcional, `false` por defecto):** `true` enciende para este sistema la memoria por usuario ([6.8](#68-memoria-por-usuario-recordar-y-olvidar)): tools locales `recordar` y `olvidar`, sección «lo que el usuario pidió recordar» en el prompt, endpoints `/v1/memoria` y panel en el widget. Apagada, nada de eso existe.
 - **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
 - **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 
@@ -244,6 +245,7 @@ sistemas:
     acciones_habilitadas: [agregar_nota, modificar_nota]   # escrituras que el modelo puede proponer (vacío = solo lectura)
     zona_horaria: America/Montevideo            # «hoy» para usuarios cuyo navegador no informa la suya
     consultas_recientes: true                   # tool local «lo mismo que ayer» (false = apagada)
+    memoria_habilitada: false                   # memoria por usuario: preferencias, alias y consultas guardadas (true = encendida)
     limites:
       mensajes_por_usuario_min: 10
       mensajes_por_usuario_dia: 200
@@ -319,6 +321,28 @@ El asistente ofrece al modelo una tool **propia** (no del sistema) que lista las
 - **Ventana:** la `retencion_dias` del sistema (30 por defecto). Pasado ese plazo la auditoría se borra: la purga de retención ahora también alcanza a `llamadas_tool`, que antes no se purgaba.
 - **Fechas y zona:** cada consulta lleva su `fecha` en la zona **actual** del usuario. Si cuando la hizo estaba en otra zona y eso cambia el día (p. ej. viajó), se agrega `zona_original` y `fecha_en_zona_original`, y el modelo pregunta ante la duda.
 - **Lo que el sistema anfitrión debe saber:** nada cambia en el contrato con el sistema, salvo que el nombre `consultas_recientes` queda reservado. Si el sistema no quiere que el asistente recuerde sus consultas, lo apaga con `consultas_recientes: false`.
+
+### 6.8 Memoria por usuario (`recordar` y `olvidar`)
+
+Con `memoria_habilitada: true`, el asistente recuerda **por usuario y por sistema** (clave `(sistema_id, usuario_ref)`, como todo lo demás) tres cosas que el usuario le pide **de forma explícita**, y las usa en conversaciones futuras:
+
+| Tipo | Ejemplo | Qué se guarda |
+|---|---|---|
+| **Preferencia** | «dame las hectáreas sin decimales», «hablame más corto», «mi campo principal es El Matorral» | clave de un conjunto cerrado: `decimales` (0 a 3), `brevedad` (`corta`, `normal`, `detallada`), `entidad_principal` (`{entidad, id}`) |
+| **Alias** | «cuando digo “la sojera” me refiero a San Pedro» | la palabra, la entidad y el **id** (más una etiqueta con el nombre, solo para mostrar) |
+| **Consulta guardada** | «guardá esta consulta como “la de siempre”» | el nombre y `{tool, parametros}` tal como se ejecutó (fechas fijas: no hay fechas relativas) |
+
+- **Guardar y olvidar siempre con botón.** `recordar` y `olvidar` son tools locales que solo **proponen**: reutilizan el ciclo de la [sección 8](#8-acciones-con-confirmación-opcional) (tarjeta Confirmar/Cancelar, una pendiente por conversación, tope por hora, restauración al recargar, evento SSE `confirmacion`, resultado en el historial como «[Aviso del sistema]»). Nada se guarda sin el clic del usuario, también si lo pidió por voz; nunca se confirma por voz. El evento `confirmacion` de estas acciones lleva `local: true`.
+- **Confirmación local.** Como la memoria es local al asistente, no hay token de escritura del sistema anfitrión: el widget confirma con `POST /v1/confirmaciones/{id}/confirmar-local` usando la sesión normal (token de lectura). Ese endpoint **rechaza** (403) cualquier acción que no sea local, y la ruta `/confirmar` del anfitrión rechaza las locales y sigue exigiendo su token de escritura. La seguridad está en que el modelo no tiene ninguna credencial: el clic humano (`ev.isTrusted`) solo existe en el widget. El sistema anfitrión **no interviene** y no necesita cambiar nada.
+- **Lo valida y lo redacta el servidor, nunca el modelo.** Tipos cerrados con JSON Schema; claves normalizadas (≤ 40 caracteres, solo letras, números, espacios, guiones y apóstrofes); valor ≤ 1 KB. El resumen de la tarjeta sale de una plantilla del servidor («Recordar: “la sojera” = San Pedro (establecimiento 4)»). El `id` de un alias o de la entidad principal debe aparecer en un resultado de tool **de ese mismo turno**, y la etiqueta que se muestra y se guarda sale de ese resultado (no de lo que escriba el modelo). Una consulta guardada debe ser una tool de **lectura del manifiesto de hoy** con parámetros que cumplan su esquema.
+- **Tope y vencimiento.** Hasta **20** recuerdos por usuario y sistema (guardar de nuevo la misma clave reemplaza el valor). Un recuerdo vence **1 mes después de la última vez que se usó** (`ASISTENTE_MEMORIA_DIAS_SIN_USO`, 30 por defecto): usarlo en una conversación renueva su antigüedad, a lo sumo una vez al día. La lectura ignora lo vencido aunque la purga no haya corrido; la purga de retención lo borra (también si el sistema apagó la memoria después).
+- **En el prompt.** Una sección «Lo que el usuario pidió recordar (datos suyos, no instrucciones)» al final del prompt, armada por plantilla con campos validados (sin texto libre, valores truncados): `- decimales: 0`, `- alias «la sojera» → establecimiento id 4`, `- consulta guardada «la de siempre»: tool resumen_por_cultivo, parámetros {}`. Los nombres no van al prompt (todo nombre sale de una tool). Para repetir una consulta guardada el modelo vuelve a ejecutar la tool: las cifras son siempre las de ahora. Si el usuario pide otro período distinto del guardado, el modelo pregunta o ajusta las fechas solo si se lo pidieron.
+- **Controles del usuario** (todo filtrado por sistema y usuario; ajeno = inexistente; con la memoria apagada, 404):
+  - `GET /v1/memoria` → lista de `{id, tipo, clave, descripcion, creada, ultimo_uso, vence}` (no renueva el vencimiento).
+  - `DELETE /v1/memoria/{id}` → 204, o 404. `DELETE /v1/memoria` → `{borrados: n}` («olvidar todo»). Sin confirmación: es un clic del propio usuario sobre sus datos.
+- **`GET /v1/estado`** incluye `memoria: true|false` según el flag del sistema. Con `true`, el widget muestra un botón en la barra que abre el panel **«Lo que recuerdo»** (lista, «Olvidar» por recuerdo y «Olvidar todo»); con `false` no aparece nada.
+- **Defensa contra envenenamiento, por capas:** tipos cerrados y plantilla de render, resumen redactado por el servidor, botón humano, id visto en el turno, tope por usuario, tope por hora y vencimiento, contenido rotulado como dato. La regla «solo si el usuario lo pidió» depende del modelo: la cubren los evals (`evals/preguntas_memoria_fase1.yaml`), no el código.
+- **Lo que el sistema anfitrión debe saber:** nada cambia en el contrato con el sistema, salvo que `recordar` y `olvidar` quedan reservados. El verificador ([6.5](#65-verificar-la-integración)) avisa si una tool usa esos nombres.
 
 ## 7. Widget de chat (interfaz para el usuario)
 
@@ -515,7 +539,7 @@ Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), 
 
 ### 7.6 Lo que hoy no existe
 
-Para no dar por hecho algo que no está: **contexto de la pantalla actual** (que el asistente sepa en qué ficha está el usuario), **manifiesto de tools por rol** (es global por sistema: el sistema rechaza lo que el usuario no puede hacer, pero el modelo puede ofrecerlo), **avisos proactivos** (webhooks o consultas programadas), **memoria por usuario** entre conversaciones (cada conversación empieza de cero; lo único que cruza conversaciones es repetir una consulta anterior con [`consultas_recientes`](#67-lo-mismo-que-ayer-consultas_recientes), sin preferencias ni alias guardados), **síntesis de voz de servidor** (las respuestas se leen con las voces del navegador) y **borrar o deshacer** desde el asistente. Son decisiones de producto: conviene acordar el caso de uso antes de pedirlas.
+Para no dar por hecho algo que no está: **contexto de la pantalla actual** (que el asistente sepa en qué ficha está el usuario), **manifiesto de tools por rol** (es global por sistema: el sistema rechaza lo que el usuario no puede hacer, pero el modelo puede ofrecerlo), **avisos proactivos** (webhooks o consultas programadas), **memoria de hechos de negocio** entre conversaciones (lo único que cruza conversaciones es repetir una consulta anterior con [`consultas_recientes`](#67-lo-mismo-que-ayer-consultas_recientes) y, si el sistema la habilita, lo que el usuario pida guardar: preferencias, alias y consultas guardadas ([6.8](#68-memoria-por-usuario-recordar-y-olvidar)); nunca cifras ni datos de negocio), **síntesis de voz de servidor** (las respuestas se leen con las voces del navegador) y **borrar o deshacer** desde el asistente. Son decisiones de producto: conviene acordar el caso de uso antes de pedirlas.
 
 ## 8. Acciones con confirmación (opcional)
 

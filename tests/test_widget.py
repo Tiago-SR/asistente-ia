@@ -561,3 +561,82 @@ def test_widget_un_turno_nuevo_empieza_sin_interrumpido():
     js = _js()
     envio = js.split("async _enviarMensaje(texto) {", 1)[1].split("this._bloquear(true);", 1)[0]
     assert "this._leerCortado = false;" in envio and envio.index("this._leerCortado = false;") < envio.index("this._acuseProgramar();")
+
+
+# ───────────────────────── memoria por usuario: tarjeta local y panel «Lo que recuerdo» ─────────────────────────
+
+
+def test_widget_tarjeta_local_confirma_con_la_sesion_y_no_pide_token_al_anfitrion():
+    js = _js()
+    cuerpo = js.split("async _confirmarAccion(t) {", 1)[1].split("async _cancelarAccion", 1)[0]
+    rama_local, rama_anfitrion = cuerpo.split("} else {", 1)
+    assert "t.d.local === true" in rama_local and "/confirmar-local`" in rama_local
+    assert "_conToken" in rama_local  # la sesión normal de lectura
+    # la rama local no toca el token-url del anfitrión (ni su token de escritura)
+    for prohibido in ("_tokenEscritura", "token-url", "searchParams", "Bearer"):
+        assert prohibido not in rama_local, prohibido
+    # la del anfitrión sigue igual: token de escritura del sistema y /confirmar
+    assert "await this._tokenEscritura(t.d)" in rama_anfitrion and "/confirmar`" in rama_anfitrion
+    assert "confirmar-local" not in rama_anfitrion
+    # solo _confirmarAccion llama a _tokenEscritura (y solo en la rama del anfitrión)
+    assert js.count("this._tokenEscritura(") == 1
+    # el clic humano sigue siendo la única confirmación, también para las tarjetas locales
+    assert 'confirmar.addEventListener("click", (ev) => { if (ev.isTrusted) this._confirmarAccion(t); });' in js
+
+
+def test_widget_la_tarjeta_local_se_ve_igual_y_se_restaura_con_su_marca():
+    js = _js()
+    conf = js.split("_confirmacion(d) {", 1)[1].split("\n    }\n", 1)[0]
+    assert "local" not in conf.replace("localStorage", "")  # nada distinto al pintarla: mismos botones y modo voz
+    assert "if (d.pendiente) this._confirmacion(d.pendiente);" in js  # lo restaurado conserva `local` (viene en d)
+
+
+def test_widget_panel_de_memoria_solo_con_el_estado_del_servicio_y_sin_innerhtml():
+    js = _js()
+    assert "this._memoria = e.memoria === true;" in js
+    assert "this._memBtn.hidden = !(habilitado && this._memoria);" in js
+    assert 'class: "accion memoria", type: "button", hidden: true' in js  # nace oculto
+    assert "_memoriaAbrir() {\n      if (!this._memoria) return;" in js
+    panel = js.split("// — memoria por usuario: panel", 1)[1].split("// — acciones con confirmación", 1)[0]
+    for prohibido in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "localStorage"):
+        assert prohibido not in panel, prohibido
+    assert "textContent: x.descripcion" in panel and "replaceChildren" in panel
+    # lo que dice el servidor (descripcion, tipo, fecha) entra solo como texto
+    assert panel.count("textContent") >= 6
+    # usa los endpoints del contrato: listar, borrar uno y borrar todo, con la sesión normal
+    assert '"/v1/memoria"' in panel and 'method: "DELETE"' in panel and "encodeURIComponent(id)" in panel
+    assert "_conToken" in panel
+    # Escape lo cierra y no apaga el modo voz que pudiera estar debajo
+    assert 'e.key === "Escape") { e.stopPropagation(); this._memoriaCerrar(); }' in panel
+    # en la vista de voz el botón no está
+    assert ".vista-voz .barra .memoria" in js
+
+
+def test_widget_panel_de_memoria_borra_sin_confirmacion_pero_nunca_guarda():
+    """Olvidar es un clic del propio usuario; guardar solo existe por la tarjeta (nada en el panel crea recuerdos)."""
+    panel = _js().split("// — memoria por usuario: panel", 1)[1].split("// — acciones con confirmación", 1)[0]
+    assert "window.confirm" not in panel and "confirm(" not in panel
+    assert 'method: "POST"' not in panel and 'method: "PUT"' not in panel
+
+
+def test_widget_panel_de_memoria_usa_solo_colores_de_la_paleta_con_contraste_verificado():
+    """El panel usa solo las combinaciones que ya verifica test_widget_paletas_cumplen_contraste_wcag_aa:
+    texto/fondo, apagado/fondo, color/fondo (botones), color-texto/color (hover) y error/fondo."""
+    import re
+
+    css = _js().split("const CSS = `", 1)[1].split("`;", 1)[0]
+    bloque = css.split("/* Panel «Lo que recuerdo»", 1)[1].split(".entrada { padding", 1)[0]
+    assert re.findall(r"#[0-9a-fA-F]{3,6}\b|rgba?\(|color-mix", bloque) == []
+    colores = set(re.findall(r"(?<![-\w])(?:color|background|border-color|background-color):\s*(var\(--[\w-]+\))", bloque))
+    assert colores <= {"var(--c)", "var(--ct)", "var(--f)", "var(--apagado)", "var(--p-err-t)", "var(--b)"}, colores
+    # texto con un color de acento o de error solo sobre el fondo del tema (verificado ≥ 4,5:1)
+    assert ".mem-error { margin-top: 6px; font-size: 13px; color: var(--p-err-t); }" in bloque
+    assert ".mem-lista li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--b); border-radius: var(--r); background: var(--f); }" in bloque
+    # los botones de la barra respetan el foco visible y el tamaño táctil de los demás
+    assert "aria-expanded" in _js() and 'role: "dialog"' in _js()
+
+
+def test_widget_textos_de_memoria_en_espanol_rioplatense():
+    js = _js()
+    for frase in ("Lo que recuerdo", "Olvidar todo", "Podés pedirme", "Listo, lo olvidé."):
+        assert frase in js, frase

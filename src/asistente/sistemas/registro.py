@@ -102,6 +102,9 @@ class Sistema(_Modelo):
     zona_horaria: str | None = None
     # Tool local `consultas_recientes` («lo mismo que ayer»): lee las consultas que ya se auditan, sin guardar nada nuevo.
     consultas_recientes: bool = True
+    # Memoria por usuario (Fase 1): tools locales `recordar` y `olvidar`, sección «lo que pidió recordar» en el prompt
+    # y panel en el widget. Apagada por defecto; sin esto no se expone ni se inyecta nada.
+    memoria_habilitada: bool = False
 
     @field_validator("zona_horaria")
     @classmethod

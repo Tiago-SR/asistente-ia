@@ -1,6 +1,6 @@
 """Puertos del core. Sin dependencias de api/, sistemas/ ni store/."""
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
@@ -19,8 +19,13 @@ __all__ = [
     "Contexto",
     "LimiteExcedido",
     "Limites",
+    "Memoria",
     "Recientes",
+    "Recuerdo",
+    "Recuerdos",
     "ResultadoPropuesta",
+    "TopeMemoria",
+    "TurnoMemoria",
 ]
 
 
@@ -87,6 +92,9 @@ class ResultadoPropuesta:
     error: str | None = None
     detalle_error: str | None = None
     status_http: int | None = None
+    # Tools locales: los parámetros ya validados y normalizados por el servidor. Son los que se guardan y se
+    # aplican al confirmar (no los que escribió el modelo), así lo confirmado es exactamente lo mostrado.
+    parametros_finales: dict | None = None
 
     @property
     def token_expirado(self) -> bool:
@@ -145,6 +153,11 @@ class Conector(Protocol):
         """Pide al sistema validar y resumir una acción de escritura, sin ejecutarla."""
         ...
 
+    async def validar_parametros(self, nombre: str, parametros: dict) -> ResultadoTool | None:
+        """Comprueba, sin llamar al sistema, que `nombre` es una tool de LECTURA del manifiesto actual y que
+        los parámetros cumplen su JSON Schema. `None` si es válida; si no, el fallo (`ResultadoTool`)."""
+        ...
+
 
 class Acciones(Protocol):
     """Propuestas pendientes de confirmación del usuario."""
@@ -195,3 +208,58 @@ class Limites(Protocol):
     async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int) -> None:
         """Cuenta un dictado del usuario (contador aparte del de mensajes); lanza
         `LimiteExcedido("voz_min")` si supera el tope."""
+
+
+@dataclass(frozen=True)
+class Recuerdo:
+    """Algo que el usuario pidió recordar. `valor` ya validado por tipo (ver `core/memoria.py`)."""
+
+    id: str
+    tipo: str  # preferencia | alias | consulta_guardada
+    clave: str
+    valor: Any
+    creada: datetime
+    actualizada: datetime
+    ultimo_uso: datetime
+
+
+class TopeMemoria(Exception):
+    """El usuario ya tiene el máximo de recuerdos en este sistema."""
+
+
+class Recuerdos(Protocol):
+    """Almacén de la memoria por usuario. TODO filtra por `(sistema_id, usuario_ref)`; lo vencido (sin uso en
+    `ASISTENTE_MEMORIA_DIAS_SIN_USO` días) no se ve aunque la purga no haya corrido."""
+
+    async def listar(self, sistema_id: str, usuario_ref: str, *, renovar: bool = False) -> list[Recuerdo]:
+        """Los recuerdos vigentes. Con `renovar`, su antigüedad se renueva (a lo sumo una vez al día cada uno)."""
+        ...
+
+    async def obtener(self, sistema_id: str, usuario_ref: str, tipo: str, clave: str) -> Recuerdo | None: ...
+
+    async def contar(self, sistema_id: str, usuario_ref: str) -> int: ...
+
+    async def guardar(self, sistema_id: str, usuario_ref: str, tipo: str, clave: str, valor: Any) -> Recuerdo:
+        """Crea o reemplaza (misma clave) de forma atómica. Lanza `TopeMemoria` si no hay lugar."""
+        ...
+
+    async def borrar_clave(self, sistema_id: str, usuario_ref: str, tipo: str, clave: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class TurnoMemoria:
+    """Lo que el servicio de memoria necesita saber del turno en curso para validar una propuesta."""
+
+    mensajes: Sequence[Mensaje]  # los del turno actual (los resultados de tool incluidos), no el historial
+    lectura: frozenset[str]  # tools de lectura del manifiesto de hoy
+    conector: Conector
+
+
+class Memoria(Protocol):
+    """Propuestas de las tools locales `recordar` y `olvidar`."""
+
+    async def proponer(
+        self, ctx: Contexto, nombre: str, parametros: dict, turno: TurnoMemoria
+    ) -> ResultadoPropuesta:
+        """Valida y redacta el resumen con una plantilla del SERVIDOR. No escribe nada."""
+        ...

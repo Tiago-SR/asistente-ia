@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Acciones con confirmación (Fase 5): propuestas por usuario y hora.
     acciones_max_por_hora: int = _env("ASISTENTE_ACCIONES_MAX_POR_HORA", 20)
 
+    # Memoria por usuario (Fase 1): un recuerdo vence cuando pasan estos días desde la última vez que se usó.
+    memoria_dias_sin_uso: int = _env("ASISTENTE_MEMORIA_DIAS_SIN_USO", 30)
+
     # Voz (Fase 4). Sin STT_PROVEEDOR el dictado queda deshabilitado.
     stt_proveedor: str | None = _env("STT_PROVEEDOR", None)
     stt_base_url: str | None = _env("STT_BASE_URL", None)

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from asistente.api import admin, chat, confirmaciones, conversaciones, estado, voz, widget
+from asistente.api import admin, chat, confirmaciones, conversaciones, estado, memoria, voz, widget
 from asistente.api.cors import CorsSistemas
 from asistente.api.errores import ErrorApi, manejar_error_api
 from asistente.config import Settings
@@ -34,7 +34,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
             svc = app.state.servicios
             purga = asyncio.create_task(
                 bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s, svc.acciones,
-                            svc.auditoria))
+                            svc.auditoria, svc.memoria))
         try:
             yield
         finally:
@@ -57,8 +57,8 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
     app.state.servicios = servicios
     app.add_exception_handler(ErrorApi, manejar_error_api)
     app.add_middleware(CorsSistemas)
-    routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, voz.router,
-               admin.router, widget.router)
+    routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
+               voz.router, admin.router, widget.router)
     for r in routers:
         app.include_router(r)
 

@@ -17,6 +17,7 @@ from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
 from asistente.core import events, zona
 from asistente.core.agent import ConfigTurno, run_turn
+from asistente.core.memoria import ServicioMemoria
 from asistente.core.ports import Contexto, LimitesUso
 from asistente.servicios import LLMNoConfigurado, Servicios
 
@@ -72,10 +73,18 @@ async def chat(
 
     request_id = uuid.uuid4().hex
     zona_usuario = zona.resolver(body.zona_horaria, sistema.zona_horaria)
+    # Memoria por usuario: solo con el flag del sistema. Un fallo al leerla no tumba el chat.
+    memoria, recuerdos = None, []
+    if sistema.memoria_habilitada and svc.memoria is not None:
+        memoria = ServicioMemoria(svc.memoria)
+        try:
+            recuerdos = await svc.memoria.listar(u.sistema_id, u.usuario_ref, renovar=True)
+        except Exception:
+            log.exception("[%s] no se pudo leer la memoria del usuario", request_id)
     prompt, version = svc.prompts.componer(
         sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
         usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
-        canal=body.canal,
+        canal=body.canal, memoria=recuerdos,
     )
     lim = sistema.limites
     ctx = Contexto(
@@ -104,7 +113,8 @@ async def chat(
 
             res = await run_turn(ctx, llm, conector, svc.auditoria, svc.limites, historial,
                                  texto, filtrado, conv_id, config, acciones=svc.acciones,
-                                 recientes=svc.recientes if sistema.consultas_recientes else None)
+                                 recientes=svc.recientes if sistema.consultas_recientes else None,
+                                 memoria=memoria)
             if res.completo:
                 try:
                     await asyncio.shield(svc.repo.guardar_turno(

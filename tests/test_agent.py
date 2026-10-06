@@ -29,6 +29,9 @@ class ConectorFalso:
     async def tools(self):
         return [TOOL]
 
+    async def validar_parametros(self, nombre, parametros):
+        return None if nombre == TOOL.nombre else ResultadoTool(False, error="no_disponible", detalle="desconocida")
+
     async def ejecutar(self, nombre, parametros):
         self.llamadas.append((nombre, parametros))
         self.activas += 1

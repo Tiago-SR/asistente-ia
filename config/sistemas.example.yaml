@@ -29,3 +29,8 @@ sistemas:
     # (tool y parámetros, nunca resultados) y volver a ejecutarlas con datos actuales. Activa por defecto; `false` la apaga
     # para este sistema. Solo ve los últimos `retencion_dias` días.
     # consultas_recientes: true
+    # Memoria por usuario (apagada por defecto): el asistente puede guardar, SOLO a pedido del usuario y con su botón de
+    # confirmación, preferencias (decimales, brevedad, entidad principal), alias («la sojera») y consultas guardadas
+    # («la de siempre»), por usuario y por sistema. Vencen al mes sin usarse (ASISTENTE_MEMORIA_DIAS_SIN_USO) y el
+    # usuario los ve y borra desde el widget. Los nombres `recordar` y `olvidar` quedan reservados en el manifiesto.
+    # memoria_habilitada: true

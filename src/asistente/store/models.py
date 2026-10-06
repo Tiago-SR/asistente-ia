@@ -10,6 +10,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -155,3 +156,26 @@ class Accion(Base):
     ok: Mapped[bool | None] = mapped_column(Boolean)
     error: Mapped[str | None] = mapped_column(String(500))
     status_http: Mapped[int | None] = mapped_column(Integer)
+
+
+class MemoriaUsuario(Base):
+    """Lo que el usuario pidió recordar (Fase 1 de memoria): preferencias, alias y consultas guardadas.
+    Clave de aislamiento `(sistema_id, usuario_ref)`. Un recuerdo vence cuando pasan
+    `ASISTENTE_MEMORIA_DIAS_SIN_USO` días desde `ultimo_uso`, que se renueva al usarlo."""
+
+    __tablename__ = "memoria_usuario"
+    __table_args__ = (
+        UniqueConstraint("sistema_id", "usuario_ref", "tipo", "clave", name="uq_memoria_clave"),
+        CheckConstraint("tipo in ('preferencia', 'alias', 'consulta_guardada')", name="ck_memoria_tipo"),
+        Index("ix_memoria_sistema_usuario", "sistema_id", "usuario_ref"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    usuario_ref: Mapped[str] = mapped_column(String(256))
+    tipo: Mapped[str] = mapped_column(String(24))
+    clave: Mapped[str] = mapped_column(String(64))
+    valor: Mapped[dict | list | str | int] = mapped_column(JSONB)
+    creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    actualizada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    ultimo_uso: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())

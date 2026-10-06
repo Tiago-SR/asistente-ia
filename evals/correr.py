@@ -51,6 +51,16 @@ class Cliente:
         r.raise_for_status()
         return r.json()["token"]
 
+    def confirmar_local(self, token: str, accion_id: str) -> bool:
+        """Hace de usuario: el clic en «Confirmar» de una tarjeta LOCAL (memoria). Nunca se usa con acciones del anfitrión."""
+        r = self.http.post(f"{self.asistente}/v1/confirmaciones/{accion_id}/confirmar-local",
+                           headers={"Authorization": f"Bearer {token}", "Origin": self.origen})
+        return r.status_code == 200 and r.json().get("ok") is True
+
+    def limpiar_memoria(self, token: str) -> None:
+        """«Olvidar todo» del usuario (el panel del widget): cada pregunta de memoria parte sin recuerdos."""
+        self.http.delete(f"{self.asistente}/v1/memoria", headers={"Authorization": f"Bearer {token}", "Origin": self.origen})
+
     def turno(self, token: str, mensaje: str, conversacion: str | None) -> dict:
         """Un mensaje. Reintenta (sin contarlo) si se topa con el tope por minuto del usuario."""
         for _ in range(6):
@@ -83,7 +93,7 @@ class Cliente:
                     res["iteraciones"] += 1
                     res["tools"] += [h.removeprefix("Consultando ") for h in datos["herramientas"]]
                 elif evento == "confirmacion":
-                    res["propuestas"].append({k: datos.get(k) for k in ("tool", "resumen", "lineas")})
+                    res["propuestas"].append({k: datos.get(k) for k in ("tool", "resumen", "lineas", "id", "local")})
                 elif evento == "error":
                     res["error"] = datos["codigo"]
                 elif evento == "token_expirado":
@@ -100,16 +110,38 @@ def costo(uso: dict, tarifa: dict | None, horario: str) -> float | None:
                         tarifa, horario)
 
 
-def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | None) -> dict:
-    token = cli.token(p["usuario"])
+def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | None, limpiar_memoria: bool = False) -> dict:
+    tokens: dict[str, str] = {}
+
+    def token_de(usuario: str) -> str:
+        if usuario not in tokens:
+            tokens[usuario] = cli.token(usuario)
+        return tokens[usuario]
+
+    token = token_de(p["usuario"])
     conv, total, herramientas, propuestas, ultimo = None, {"tokens_in": 0, "tokens_out": 0, "tokens_in_cache": 0}, [], [], None
     latencia = iteraciones = 0
+    precondicion: list[str] = []
     # `previas`: consultas que el usuario hizo ANTES, cada una en su propia conversación (alimentan `consultas_recientes`).
-    # No se puntúan ni cuentan sus tools; su costo sí entra en el total.
-    for anterior in p.get("previas", []):
-        r = cli.turno(token, anterior, None)
-        for k in total:
-            total[k] += r["uso"].get(k, 0)
+    # No se puntúan ni cuentan sus tools; su costo sí entra en el total. Cada entrada es un texto o un objeto
+    # `{mensaje | turnos: [...], usuario, confirmar}`: `turnos` comparten conversación, `usuario` es quien las hizo (por
+    # defecto el de la pregunta) y `confirmar: true` hace de usuario y confirma por API las tarjetas LOCALES de memoria
+    # que propongan (nunca una acción del anfitrión).
+    entradas = [a if isinstance(a, dict) else {"mensaje": a} for a in p.get("previas", [])]
+    if limpiar_memoria:  # toda pregunta de memoria parte sin recuerdos, también los de quienes hacen las previas
+        for u in {p["usuario"], *(e.get("usuario", p["usuario"]) for e in entradas)}:
+            cli.limpiar_memoria(token_de(u))
+    for entrada in entradas:
+        tok, conv_previa, confirmadas = token_de(entrada.get("usuario", p["usuario"])), None, 0
+        for mensaje in entrada.get("turnos") or [entrada["mensaje"]]:
+            r = cli.turno(tok, mensaje, conv_previa)
+            conv_previa = r["conversacion"]
+            for k in total:
+                total[k] += r["uso"].get(k, 0)
+            if entrada.get("confirmar"):
+                confirmadas += sum(1 for x in r["propuestas"] if x.get("local") and cli.confirmar_local(tok, x["id"]))
+        if entrada.get("confirmar") and not confirmadas:
+            precondicion.append(f"la previa {(entrada.get('turnos') or [entrada['mensaje']])[-1]!r} no produjo ninguna tarjeta local que confirmar")
     for mensaje in p["turnos"]:
         ultimo = cli.turno(token, mensaje, conv)
         conv = ultimo["conversacion"]
@@ -122,6 +154,8 @@ def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | Non
         if ultimo["error"]:
             break
     puntaje = puntuar(p, ultimo["texto"], herramientas, base, ultimo["error"], propuestas, ultimo.get("voz"), cli.canal)
+    puntaje["fallos"] = [*precondicion, *puntaje["fallos"]]
+    puntaje["ok"] = puntaje["ok"] and not precondicion
     return {
         "id": p["id"], "categoria": p["categoria"], "usuario": p["usuario"], "turnos": p["turnos"],
         "ok": puntaje["ok"], "fallos": puntaje["fallos"], "respuesta": ultimo["texto"], "voz": ultimo.get("voz"), "voz_s": ultimo.get("voz_s"), "tiempos_ms": ultimo.get("tiempos_ms"), "tools": herramientas, "propuestas": propuestas,
@@ -223,7 +257,7 @@ def main() -> int:
     resultados = []
     for p in preguntas:
         try:
-            r = correr_pregunta(cli, p, conjunto["base_numeros"], tarifa)
+            r = correr_pregunta(cli, p, conjunto["base_numeros"], tarifa, bool(conjunto.get("memoria")))
         except httpx.HTTPError as e:
             print(f"{p['id']}: no se pudo consultar el asistente ({type(e).__name__}: {e})", file=sys.stderr)
             return 2

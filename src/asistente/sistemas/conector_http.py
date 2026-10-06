@@ -68,6 +68,11 @@ class ConectorHttp:
             return _fallo_propuesta(r.error or "error_sistema", r.detalle or "", r.status_http)
         return _interpretar_propuesta(r, tool.confirmacion_ttl_s or 120)
 
+    async def validar_parametros(self, usuario: Usuario, nombre_tool: str, parametros: dict) -> ResultadoTool | None:
+        """Sin llamar al sistema: `nombre_tool` debe ser una tool de LECTURA del manifiesto de hoy y los
+        parámetros cumplir su esquema. `None` si es válida; si no, el fallo."""
+        return (await self._preparar(usuario, nombre_tool, parametros, False))[2]
+
     async def _preparar(self, usuario, nombre_tool, parametros, escritura):
         """Resuelve sistema y tool y valida los parámetros. Devuelve (sistema, tool, fallo)."""
         sistema = self._registro.obtener(usuario.sistema_id)
@@ -247,3 +252,6 @@ class ConectorDeUsuario:
 
     async def proponer(self, nombre: str, parametros: dict) -> ResultadoPropuesta:
         return await self._conector.proponer(self._usuario, nombre, parametros, self._request_id)
+
+    async def validar_parametros(self, nombre: str, parametros: dict) -> ResultadoTool | None:
+        return await self._conector.validar_parametros(self._usuario, nombre, parametros)

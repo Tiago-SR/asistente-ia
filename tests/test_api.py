@@ -24,6 +24,7 @@ from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
+from asistente.store.memoria import MemoriaSql
 from asistente.store.models import Base, UsoModelo
 from asistente.store.models import LlamadaTool as FilaLlamada
 from asistente.store.recientes import RecientesSql
@@ -83,15 +84,16 @@ def llm():
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
-                   consultas_recientes=True):
+                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
             entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes,
                             acciones_habilitadas=list(acciones_habilitadas),
-                            consultas_recientes=consultas_recientes),
-            entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes),
+                            consultas_recientes=consultas_recientes, memoria_habilitada=memoria_habilitada),
+            entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes,
+                            memoria_habilitada=memoria_habilitada),
         ])
         registro = RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
         manifiestos = CacheManifiestos(registro, cliente_mocks)
@@ -109,6 +111,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
             prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt,
             acciones=AccionesSql(sesiones, max_acciones_hora), recientes=RecientesSql(sesiones),
+            memoria=MemoriaSql(sesiones, memoria_dias),
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")
@@ -189,6 +192,7 @@ async def test_estado(api):
     assert r.json() == {
         "habilitado": True,
         "nombre_sistema": "MOCK-A",
+        "memoria": False,
         "voz": {"dictado": False, "respuesta": False, "max_audio_s": 60},
     }
 

@@ -15,7 +15,8 @@ from fastapi.responses import JSONResponse
 
 from asistente.api.deps import Sesion, servicios, sesion_actual, sesion_escritura
 from asistente.api.errores import ErrorApi
-from asistente.core.ports import Contexto, LimitesUso
+from asistente.core import memoria as memorias
+from asistente.core.ports import Contexto, LimitesUso, ResultadoTool
 from asistente.servicios import Servicios
 from asistente.store.models import Accion
 
@@ -32,8 +33,11 @@ def _acciones(svc: Servicios):
 
 
 def vista_accion(a: Accion) -> dict:
-    return {"id": str(a.id), "tool": a.tool, "estado": a.estado, "resumen": a.resumen,
-            "lineas": list(a.lineas or []), "huella": a.huella, "expira": a.expira.isoformat()}
+    vista = {"id": str(a.id), "tool": a.tool, "estado": a.estado, "resumen": a.resumen,
+             "lineas": list(a.lineas or []), "huella": a.huella, "expira": a.expira.isoformat()}
+    if a.tool in memorias.NOMBRES:
+        vista["local"] = True  # se confirma con la sesión normal (`confirmar-local`), sin token del anfitrión
+    return vista
 
 
 async def _propia(svc: Servicios, sesion: Sesion, accion_id: uuid.UUID) -> Accion:
@@ -65,6 +69,19 @@ async def _anotar(svc: Servicios, sesion: Sesion, a: Accion, texto: str) -> None
         log.exception("no se pudo anotar el resultado de la acción %s", a.id)
 
 
+async def _auditar(svc: Servicios, sesion: Sesion, a: Accion, r, ms: int, request_id: str) -> None:
+    u = sesion.usuario
+    try:
+        ctx = Contexto(
+            sistema_id=u.sistema_id, sistema_nombre=sesion.sistema.nombre, usuario_ref=u.usuario_ref,
+            jti=u.jti, request_id=request_id, modelo="", prompt_system="", prompt_version="",
+            limites=LimitesUso(0, 0, 0),
+        )
+        await svc.auditoria.registrar_tool(ctx, a.conversacion_id, a.tool, a.parametros, r, ms)
+    except Exception:
+        log.exception("[%s] no se pudo auditar la acción %s", request_id, a.id)
+
+
 @router.get("/v1/confirmaciones/{accion_id}")
 async def ver(
     accion_id: uuid.UUID, sesion: Sesion = Depends(sesion_actual), svc: Servicios = Depends(servicios)
@@ -90,6 +107,9 @@ async def confirmar(
 ):
     u = sesion.usuario
     accion = await _propia(svc, sesion, accion_id)
+    if accion.tool in memorias.NOMBRES:
+        # Una acción local se aplica en `confirmar-local`; esta ruta es solo para escrituras del anfitrión.
+        raise ErrorApi(403, "confirmacion_invalida")
     c = u.accion
     # El token debe ser para ESTA acción, tool y parámetros. Se comprueba antes de reclamar: un token
     # equivocado no gasta la confirmación.
@@ -109,16 +129,7 @@ async def confirmar(
         escritura=True, idempotencia=str(reclamada.id),
     )
     ms = int((time.monotonic() - inicio) * 1000)
-    try:
-        ctx = Contexto(
-            sistema_id=u.sistema_id, sistema_nombre=sesion.sistema.nombre, usuario_ref=u.usuario_ref,
-            jti=u.jti, request_id=request_id, modelo="", prompt_system="", prompt_version="",
-            limites=LimitesUso(0, 0, 0),
-        )
-        await svc.auditoria.registrar_tool(ctx, reclamada.conversacion_id, reclamada.tool,
-                                           reclamada.parametros, r, ms)
-    except Exception:
-        log.exception("[%s] no se pudo auditar la acción %s", request_id, accion_id)
+    await _auditar(svc, sesion, reclamada, r, ms, request_id)
     await _acciones(svc).finalizar(accion_id, ok=r.ok, error=r.error, status_http=r.status_http)
 
     if r.ok:
@@ -130,4 +141,44 @@ async def confirmar(
              if r.error == "conflicto" else "")
     await _anotar(svc, sesion, reclamada,
                   f"{AVISO} La acción NO se realizó ({r.error}): {reclamada.resumen}. No se guardó nada.{extra}")
+    return {"estado": "fallida", "ok": False, "error": r.error, "detalle": (r.detalle or "")[:MAX_MENSAJE]}
+
+
+@router.post("/v1/confirmaciones/{accion_id}/confirmar-local")
+async def confirmar_local(
+    accion_id: uuid.UUID, sesion: Sesion = Depends(sesion_actual), svc: Servicios = Depends(servicios)
+):
+    """Confirma una acción LOCAL del asistente (`recordar`, `olvidar`): escribe en su propia memoria, no en el
+    sistema anfitrión, así que no hay token de escritura que emitir. Basta la sesión normal del usuario.
+
+    La seguridad no está en un token sino en que el modelo no tiene ninguna credencial: este endpoint solo lo
+    llama el widget con el clic humano. Por eso rechaza cualquier acción que no sea local: una escritura del
+    anfitrión solo se confirma con el token que emite el sistema (`confirmar`)."""
+    u = sesion.usuario
+    accion = await _propia(svc, sesion, accion_id)
+    if accion.tool not in memorias.NOMBRES:
+        raise ErrorApi(403, "accion_no_local")
+    if not sesion.sistema.memoria_habilitada or svc.memoria is None:
+        raise ErrorApi(403, "memoria_no_habilitada")
+
+    reclamada = await _acciones(svc).reclamar(u.sistema_id, u.usuario_ref, accion_id, u.jti)
+    if reclamada is None:  # doble clic o dos pestañas: solo el primero aplica
+        return _no_pendiente(await _propia(svc, sesion, accion_id))
+
+    request_id = uuid.uuid4().hex
+    inicio = time.monotonic()
+    try:
+        r = await memorias.aplicar(svc.memoria, u.sistema_id, u.usuario_ref, reclamada.tool, reclamada.parametros)
+    except Exception:
+        log.exception("[%s] falló la acción local %s", request_id, accion_id)
+        r = ResultadoTool(False, error="error_sistema", detalle="no se pudo guardar")
+    ms = int((time.monotonic() - inicio) * 1000)
+    await _auditar(svc, sesion, reclamada, r, ms, request_id)
+    await _acciones(svc).finalizar(accion_id, ok=r.ok, error=r.error, status_http=None)
+
+    if r.ok:
+        await _anotar(svc, sesion, reclamada, f"{AVISO} Acción realizada: {reclamada.resumen}")
+        return {"estado": "ejecutada", "ok": True, "mensaje": r.datos["mensaje"], "ui": []}
+    await _anotar(svc, sesion, reclamada,
+                  f"{AVISO} La acción NO se realizó ({r.error}): {reclamada.resumen}. No se guardó nada.")
     return {"estado": "fallida", "ok": False, "error": r.error, "detalle": (r.detalle or "")[:MAX_MENSAJE]}

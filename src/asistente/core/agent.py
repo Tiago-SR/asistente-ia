@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from asistente.core import events
+from asistente.core import memoria as memorias
 from asistente.core import recientes as consultas
 from asistente.core.llm.base import LlamadaTool, LLMError, Mensaje, Uso
 from asistente.core.ports import (
@@ -22,8 +23,10 @@ from asistente.core.ports import (
     Contexto,
     LimiteExcedido,
     Limites,
+    Memoria,
     Recientes,
     ResultadoTool,
+    TurnoMemoria,
 )
 from asistente.core.voz_resumen import FiltroVoz, limpiar
 
@@ -80,6 +83,7 @@ async def run_turn(
     config: ConfigTurno | None = None,
     acciones: Acciones | None = None,
     recientes: Recientes | None = None,
+    memoria: Memoria | None = None,
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
@@ -92,7 +96,7 @@ async def run_turn(
     try:
         async with asyncio.timeout(config.timeout_turno_s):
             await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                        conversacion_id, config, estado, acciones, recientes)
+                        conversacion_id, config, estado, acciones, recientes, memoria)
     except TimeoutError:
         estado.motivo, estado.nuevos = "error", []
         await emit(events.ERROR, "timeout_turno")
@@ -100,12 +104,14 @@ async def run_turn(
 
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                conversacion_id, config, estado, acciones=None, recientes=None) -> None:
+                conversacion_id, config, estado, acciones=None, recientes=None, memoria=None) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
     lectura = {t.nombre for t in tools if not t.escritura}
     if recientes is not None:
         tools = [*tools, consultas.TOOL]  # tool local del asistente: no existe en el sistema
+    if memoria is not None:
+        tools = [*tools, *memorias.TOOLS]  # `recordar` y `olvidar`: locales, siempre con botón
     propuesta_hecha = False  # una sola propuesta por turno
     nuevos = [Mensaje("user", texto)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
@@ -165,19 +171,22 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         # Se reenvía solo lo atendido: todo tool_call enviado debe tener su resultado.
         nuevos.append(Mensaje("assistant", resp.texto, llamadas))
         await emit(events.TOOL, [
-            (_LEGIBLE_ACCION if c.nombre in escrituras else _LEGIBLE).format(nombre=c.nombre)
+            (_LEGIBLE_ACCION if c.nombre in escrituras or (memoria is not None and c.nombre in memorias.NOMBRES)
+             else _LEGIBLE).format(nombre=c.nombre)
             for c in llamadas
         ])
         atenciones = []
         for c in llamadas:
-            if c.nombre in escrituras:
+            local = memoria is not None and c.nombre in memorias.NOMBRES
+            if c.nombre in escrituras or local:
                 # Se decide antes de cualquier await: dos escrituras en la misma iteración no compiten.
                 if propuesta_hecha:
                     atenciones.append(_rechazar_extra(c))
                     continue
                 propuesta_hecha = True
+                turno = TurnoMemoria(tuple(nuevos), frozenset(lectura), conector) if local else None
                 atenciones.append(_proponer(ctx, conector, acciones, auditoria, conversacion_id,
-                                            c, config, emit))
+                                            c, config, emit, memoria if local else None, turno))
             elif recientes is not None and c.nombre == consultas.NOMBRE:
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
@@ -246,9 +255,11 @@ async def _rechazar_extra(c: LlamadaTool) -> ResultadoTool:
 
 
 async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: LlamadaTool, config,
-                    emit) -> ResultadoTool:
+                    emit, memoria: Memoria | None = None, turno: TurnoMemoria | None = None) -> ResultadoTool:
     """Una tool de escritura nunca se ejecuta aquí: se pide al sistema un resumen, se guarda como
-    pendiente y se avisa al widget para que el usuario confirme. El modelo recibe «pendiente»."""
+    pendiente y se avisa al widget para que el usuario confirme. El modelo recibe «pendiente».
+    Con `memoria` (tools locales `recordar` y `olvidar`) el resumen lo redacta el servidor, no el sistema."""
+    local = memoria is not None
     inicio = time.monotonic()
     if acciones is None:
         r = ResultadoTool(False, error="no_disponible", detalle="las acciones no están habilitadas")
@@ -256,7 +267,10 @@ async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: Llam
         r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
     else:
         try:
-            p = await asyncio.wait_for(conector.proponer(c.nombre, c.parametros), config.timeout_tool_s)
+            if local:
+                p = await asyncio.wait_for(memoria.proponer(ctx, c.nombre, c.parametros, turno), config.timeout_tool_s)
+            else:
+                p = await asyncio.wait_for(conector.proponer(c.nombre, c.parametros), config.timeout_tool_s)
         except TimeoutError:
             r = ResultadoTool(False, error="timeout", detalle="el sistema tardó demasiado")
         except Exception:
@@ -267,17 +281,21 @@ async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: Llam
                 r = ResultadoTool(False, error=p.error, detalle=p.detalle_error, status_http=p.status_http)
             else:
                 try:
-                    creada = await acciones.crear(ctx, conversacion_id, c.nombre, c.parametros, p)
+                    guardados = p.parametros_finales if p.parametros_finales is not None else c.parametros
+                    creada = await acciones.crear(ctx, conversacion_id, c.nombre, guardados, p)
                 except LimiteExcedido as e:
                     r = ResultadoTool(False, error=e.cual, detalle="demasiadas propuestas; intenta más tarde")
                 except Exception:
                     log.exception("[%s] no se pudo guardar la propuesta de %s", ctx.request_id, c.nombre)
                     r = ResultadoTool(False, error="error_sistema", detalle="no se pudo preparar la acción")
                 else:
-                    await emit(events.CONFIRMACION, {
+                    tarjeta = {
                         "id": creada.id, "tool": c.nombre, "resumen": p.resumen,
                         "lineas": list(p.lineas), "huella": p.huella, "expira": creada.expira,
-                    })
+                    }
+                    if local:
+                        tarjeta["local"] = True  # el widget no pide token al anfitrión: confirma con su sesión
+                    await emit(events.CONFIRMACION, tarjeta)
                     r = ResultadoTool(
                         True, {"estado": "pendiente_de_confirmacion", "resumen": p.resumen,
                                "instruccion": _PENDIENTE}, status_http=p.status_http)

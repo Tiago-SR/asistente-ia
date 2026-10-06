@@ -5,8 +5,12 @@ Devuelve también una versión (`hash base + hash dominio`) que se guarda en cad
 
 import hashlib
 import logging
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+
+from asistente.core import memoria as memorias
+from asistente.core.ports import Recuerdo
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +55,7 @@ class Prompts:
         locale: str | None,
         hoy: date,
         canal: str = "texto",
+        memoria: Sequence[Recuerdo] | None = None,
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -66,4 +71,10 @@ class Prompts:
             partes.append("## Canal de voz\n" + self._voz)
             version += f"+v{_hash(self._voz)}"
         partes.append("## Contexto de la sesión\n" + "\n".join(sesion))
+        # Lo que el usuario pidió recordar es por usuario: va al final para no romper el prefijo cacheable (base y
+        # dominio) y no entra en la versión, solo una marca.
+        recordado = memorias.seccion_prompt(memoria or ())
+        if recordado:
+            partes.append(recordado)
+            version += "+m"
         return "\n\n".join(partes), version
