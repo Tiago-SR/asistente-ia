@@ -31,6 +31,8 @@ class SttFalso:
 
 class TtsFalso:
     tipo_mime = "audio/mpeg"
+    proveedor = "falso"
+    modelo = "falso"
 
     def __init__(self, audio: bytes = b"AUDIO", *, disponible: bool = True, falla: bool = False) -> None:
         self.audio = audio

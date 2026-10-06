@@ -131,6 +131,25 @@ class UsoModelo(Base):
     tokens_out: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
+class UsoVoz(Base):
+    """Caracteres sintetizados por sistema, mes y motor de voz del servidor (ElevenLabs u otro).
+
+    Base del costo de TTS en `GET /admin/uso`: lo que se factura es por carácter, no por token.
+    Solo cuenta la voz del servidor (la del navegador no cuesta). Como `uso_modelo`, no se purga.
+    """
+
+    __tablename__ = "uso_voz"
+    __table_args__ = (UniqueConstraint("sistema_id", "mes", "proveedor", "modelo"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    mes: Mapped[datetime] = mapped_column(_ahora())  # primer instante del mes (UTC)
+    proveedor: Mapped[str] = mapped_column(String(64))
+    modelo: Mapped[str] = mapped_column(String(200))
+    llamadas: Mapped[int] = mapped_column(Integer, default=0)  # síntesis pedidas (una por frase)
+    caracteres: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
 class Accion(Base):
     """Propuesta de una escritura y su ciclo de vida (Fase 5). El `id` es aleatorio de 128 bits y
     no adivinable; la fila es la autoridad del estado: pendiente → confirmada → ejecutada | fallida,

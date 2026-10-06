@@ -29,6 +29,7 @@ def _motivo(r: httpx.Response) -> str:
 
 class TtsElevenLabs:
     tipo_mime = "audio/mpeg"
+    proveedor = "elevenlabs"
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class TtsElevenLabs:
         self._api_key = api_key
         self._voz = quote(voz_id, safe="")
         self._modelo = modelo
+        self.modelo = modelo
         self._base = base_url.rstrip("/")
         self._cliente = cliente or httpx.AsyncClient(follow_redirects=False)
         self._timeout = httpx.Timeout(timeout_s, connect=5.0)

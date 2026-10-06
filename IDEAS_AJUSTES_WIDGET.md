@@ -1,6 +1,8 @@
 # Ideas: panel de ajustes en el widget (engranaje)
 
-Solo ideas, nada decidido ni implementado.
+Estado (2026-10-06): la **Fase 1 está implementada** (engranaje y panel con motor de voz, volumen, lectura automática,
+acuse, «probar voz» y «restablecer»; atributo `ajustes`; guardado en `localStorage`; e2e `tests_e2e/ajustes.e2e.js`).
+También el costo de TTS en `/admin/uso` (tabla `uso_voz`). Lo demás sigue siendo solo ideas, nada decidido.
 
 ## Concepto
 

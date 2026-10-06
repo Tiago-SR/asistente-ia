@@ -259,8 +259,12 @@ sistemas:
 { "mes": "2026-10", "sistemas": [ { "id": "sgagro", "nombre": "SGAgro",
   "modelos": [ { "modelo": "deepseek-flash", "llamadas": 412, "tokens_in": 1650000, "tokens_in_cache": 1440000,
                  "tokens_out": 98000, "costo_usd": { "valle": 0.12, "pico": 0.24 } } ],
-  "costo_usd": { "valle": 0.12, "pico": 0.24 }, "sin_tarifa": [] } ] }
+  "voz": [ { "proveedor": "elevenlabs", "modelo": "eleven_flash_v2_5", "llamadas": 530, "caracteres": 41200,
+             "costo_usd": 1.648 } ],
+  "costo_usd": { "valle": 1.768, "pico": 1.888 }, "sin_tarifa": [] } ] }
 ```
+
+`voz` es la voz del servidor (TTS): cada síntesis correcta suma una llamada y sus caracteres a `uso_voz` (sistema, mes, proveedor y modelo; solo números, nunca el texto; no se purga). Se factura por carácter y no por horario, así que `costo_usd` es un solo número (precio de lista de `config/precios.yaml`, clave `proveedor:modelo`; un plan de créditos mensuales puede salir más barato) que se suma a las dos cotas del total del sistema. Un motor sin tarifa figura en `sin_tarifa` y no entra en el total. La voz del navegador no cuesta y no aparece.
 
 ### 6.4 Rotación y manejo
 
@@ -387,6 +391,7 @@ El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessi
 | `voz-respuesta` | `auto` (por defecto), `servidor` o `navegador`: con qué voz habla el asistente. `auto` usa la voz del servidor (`POST /v1/voz/sintetizar`) si el sistema la tiene (`voz.respuesta` en `/v1/estado`) y, si falla o no existe, la del navegador; `navegador` no envía el texto de las respuestas a ningún tercero; `servidor` no cae al navegador (ver [7.4](#74-voz-opcional)). |
 | `palabra-activacion` | Palabra que despierta el modo voz (por defecto `asistente`). |
 | `manos-libres-inactividad` | Minutos sin interacción tras los que el modo voz se apaga solo (por defecto 5; `0` = no se apaga; el atributo conserva su nombre anterior por compatibilidad). |
+| `ajustes` | `auto` (por defecto) o `no`: engranaje con el panel de ajustes del usuario (voz del asistente —navegador o servidor, si hay las dos—, volumen, lectura automática, acuse, «probar voz» y «restablecer»). Se guardan en el navegador (`localStorage`, por servidor; nunca el token ni texto del chat) y lo que el usuario elige manda sobre `voz-respuesta` y `acuse`; con `no` no hay panel y mandan los atributos. |
 | `acuse` | `auto` (por defecto) o `no`: en el modo voz, si pasan unos 0,9 s desde «enviar» sin nada que decir, el widget dice una frase corta («Un momento, lo consulto») para que no haya silencio; `no` la quita (ver [7.4](#74-voz-opcional)). |
 | `orbe-volumen` | `auto` (por defecto) o `no`: si el orbe del modo voz sigue el volumen del micrófono (ver [7.4](#74-voz-opcional)); `no` evita abrir el segundo flujo de audio que lo mide. |
 | `tema` | `claro`, `oscuro` o `auto` (por defecto). `auto` sigue `prefers-color-scheme` del navegador y reacciona si el usuario cambia el tema del sistema con la página abierta. Se puede cambiar en caliente (no reinicia la conversación). Un valor no reconocido equivale a `auto`. |

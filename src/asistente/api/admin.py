@@ -14,7 +14,7 @@ from asistente.api.deps import servicios
 from asistente.api.errores import ErrorApi
 from asistente.servicios import Servicios
 from asistente.sistemas.manifiesto import ManifiestoInvalido
-from asistente.store.uso import consumo_del_mes
+from asistente.store.uso import consumo_del_mes, consumo_voz_del_mes
 
 router = APIRouter(prefix="/admin")
 
@@ -58,7 +58,8 @@ async def uso(
 ) -> dict:
     """Consumo y costo por sistema y modelo en un mes. El costo sale de `config/precios.yaml`:
     `costo_usd` trae la cota inferior (`valle`) y la superior (`pico`) porque la tarifa depende del
-    horario del proveedor; un modelo sin tarifa se informa con `costo_usd: null`."""
+    horario del proveedor; un modelo sin tarifa se informa con `costo_usd: null`. La voz del servidor (TTS)
+    va aparte en `voz` (caracteres y costo por motor) y su costo se suma al total del sistema."""
     if mes is not None and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", mes):
         raise ErrorApi(422, "mes_invalido")
     if svc.sesiones is None:
@@ -69,13 +70,18 @@ async def uso(
     tarifas = precios.cargar(svc.settings.precios_path)
     nombres = {s.id: s.nombre for s in svc.registro.todos()}
     sistemas: dict[str, dict] = {}
+
+    def entrada(sistema_id: str) -> dict:
+        return sistemas.setdefault(sistema_id, {"id": sistema_id, "nombre": nombres.get(sistema_id),
+                                                "modelos": [], "voz": [],
+                                                "costo_usd": {h: 0.0 for h in precios.HORARIOS},
+                                                "sin_tarifa": []})
+
     for f in filas:
         tarifa = tarifas.get(f.modelo)
         costo = {h: precios.costo(f.tokens_in, f.tokens_in_cache, f.tokens_out, tarifa, h)
                  for h in precios.HORARIOS} if tarifa else None
-        s = sistemas.setdefault(f.sistema_id, {"id": f.sistema_id, "nombre": nombres.get(f.sistema_id),
-                                               "modelos": [], "costo_usd": {h: 0.0 for h in precios.HORARIOS},
-                                               "sin_tarifa": []})
+        s = entrada(f.sistema_id)
         s["modelos"].append({"modelo": f.modelo, "llamadas": f.llamadas, "tokens_in": f.tokens_in,
                              "tokens_in_cache": f.tokens_in_cache, "tokens_out": f.tokens_out,
                              "costo_usd": costo})
@@ -84,4 +90,15 @@ async def uso(
                 s["costo_usd"][h] = round(s["costo_usd"][h] + costo[h], 6)
         else:
             s["sin_tarifa"].append(f.modelo)  # el total del sistema no los incluye
+    for v in await consumo_voz_del_mes(svc.sesiones, datetime(anio, num, 1, tzinfo=UTC)):
+        clave = precios.clave_tts(v.proveedor, v.modelo)
+        costo_voz = precios.costo_tts(v.caracteres, tarifas.get(clave))
+        s = entrada(v.sistema_id)
+        s["voz"].append({"proveedor": v.proveedor, "modelo": v.modelo, "llamadas": v.llamadas,
+                         "caracteres": v.caracteres, "costo_usd": costo_voz})
+        if costo_voz is not None:
+            for h in precios.HORARIOS:   # la voz no tiene valle/pico: suma lo mismo a las dos cotas
+                s["costo_usd"][h] = round(s["costo_usd"][h] + costo_voz, 6)
+        else:
+            s["sin_tarifa"].append(clave)
     return {"mes": f"{anio:04d}-{num:02d}", "sistemas": list(sistemas.values())}

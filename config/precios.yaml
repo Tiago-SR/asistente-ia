@@ -8,3 +8,10 @@ deepseek-flash:
   entrada_cache_miss: {valle: 0.15, pico: 0.3}
   salida: {valle: 0.6, pico: 1.2}
   nota: "Admite modo thinking (activo por defecto) y no-thinking. Línea base con el modo por defecto."
+
+# Voz del servidor (TTS): clave `proveedor:modelo`, USD por 1000 caracteres de precio de lista (promociones aparte).
+# Es un estimado: ElevenLabs cobra por plan de créditos mensuales. Ver PROVEEDORES_VOZ.md (datos del 2026-10-04).
+"elevenlabs:eleven_flash_v2_5": {usd_por_1k_caracteres: 0.04}
+"elevenlabs:eleven_turbo_v2_5": {usd_por_1k_caracteres: 0.04}
+"elevenlabs:eleven_multilingual_v2": {usd_por_1k_caracteres: 0.08}
+"elevenlabs:eleven_v3": {usd_por_1k_caracteres: 0.08}

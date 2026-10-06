@@ -25,7 +25,7 @@ from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
-from asistente.store.models import Base, UsoModelo
+from asistente.store.models import Base, UsoModelo, UsoVoz
 from asistente.store.models import LlamadaTool as FilaLlamada
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo, recortar
@@ -375,6 +375,43 @@ m-caro:
         assert (await c.get("/admin/uso", headers=h)).status_code == 200  # mes en curso
 
 
+async def test_admin_uso_suma_el_costo_de_la_voz_del_servidor(construir_app, sesiones, tmp_path):
+    precios = tmp_path / "precios.yaml"
+    precios.write_text("""
+m-caro:
+  entrada_cache_hit: {valle: 1, pico: 2}
+  entrada_cache_miss: {valle: 10, pico: 20}
+  salida: {valle: 100, pico: 200}
+"elevenlabs:con-tarifa": {usd_por_1k_caracteres: 0.04}
+""", encoding="utf-8")
+    mes = datetime(2019, 5, 1, tzinfo=UTC)  # un mes que nadie usa (la BD de desarrollo se comparte)
+    async with sesiones.begin() as s:
+        await s.execute(delete(UsoModelo).where(UsoModelo.mes == mes))
+        await s.execute(delete(UsoVoz).where(UsoVoz.mes == mes))
+        s.add_all([
+            UsoModelo(sistema_id="mock-a", mes=mes, modelo="m-caro", llamadas=1, tokens_in=1_000_000,
+                      tokens_in_cache=0, tokens_out=0),
+            UsoVoz(sistema_id="mock-a", mes=mes, proveedor="elevenlabs", modelo="con-tarifa", llamadas=40,
+                   caracteres=50_000),
+            UsoVoz(sistema_id="mock-a", mes=mes, proveedor="elevenlabs", modelo="sin-tarifa", llamadas=1,
+                   caracteres=10),
+            UsoVoz(sistema_id="mock-b", mes=mes, proveedor="elevenlabs", modelo="con-tarifa", llamadas=1,
+                   caracteres=1_000),   # un sistema que solo usó voz también aparece
+        ])
+    async with construir_app(admin_token="adm1n", precios_path=str(precios)) as c:
+        r = (await c.get("/admin/uso?mes=2019-05", headers={"Authorization": "Bearer adm1n"})).json()
+    a = next(s for s in r["sistemas"] if s["id"] == "mock-a")
+    voz = {v["modelo"]: v for v in a["voz"]}
+    assert voz["con-tarifa"]["caracteres"] == 50_000 and voz["con-tarifa"]["llamadas"] == 40
+    assert voz["con-tarifa"]["costo_usd"] == pytest.approx(2.0)   # 50 x 0,04
+    assert voz["sin-tarifa"]["costo_usd"] is None
+    assert a["sin_tarifa"] == ["elevenlabs:sin-tarifa"]
+    # LLM (10 USD valle / 20 pico) + voz (2 USD en las dos cotas)
+    assert a["costo_usd"]["valle"] == pytest.approx(12.0) and a["costo_usd"]["pico"] == pytest.approx(22.0)
+    b = next(s for s in r["sistemas"] if s["id"] == "mock-b")
+    assert b["modelos"] == [] and b["costo_usd"]["valle"] == pytest.approx(0.04)
+
+
 async def test_salud_verifica_la_bd(api):
     r = await api.get("/salud")
     assert r.status_code == 200 and r.json() == {"ok": True, "bd": True, "sistemas": 2}
@@ -598,6 +635,46 @@ async def test_sintetizar_ok_devuelve_audio_sin_cache(construir_app):
     assert r.status_code == 200 and r.content == b"MP3"
     assert r.headers["content-type"] == "audio/mpeg" and r.headers["cache-control"] == "no-store"
     assert tts.llamadas == [("Hola, tenés 660 hectáreas.", "es-UY")]
+
+
+async def test_sintetizar_suma_los_caracteres_al_uso_del_mes(construir_app, sesiones):
+    from asistente.core.voz.falso import TtsFalso
+
+    mes = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    async with sesiones.begin() as s:
+        await s.execute(delete(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))
+    async with construir_app(tts=TtsFalso(b"MP3")) as c:
+        assert (await sintetizar(c, texto="Hola")).status_code == 200
+        assert (await sintetizar(c, texto="Tenés 660 hectáreas.")).status_code == 200
+        assert (await sintetizar(c, texto="")).status_code == 422   # lo rechazado no cuenta
+    async with sesiones() as s:
+        fila = (await s.execute(select(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))).scalar_one()
+    assert (fila.proveedor, fila.modelo, fila.llamadas, fila.caracteres) == ("falso", "falso", 2, 4 + 20)
+
+
+async def test_sintetizar_que_falla_no_cuenta(construir_app, sesiones):
+    from asistente.core.voz.falso import TtsFalso
+
+    mes = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    async with sesiones.begin() as s:
+        await s.execute(delete(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))
+    async with construir_app(tts=TtsFalso(falla=True)) as c:
+        assert (await sintetizar(c)).status_code == 502
+    async with sesiones() as s:
+        assert (await s.execute(select(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))).first() is None
+
+
+async def test_sintetizar_devuelve_el_audio_aunque_falle_la_contabilidad(construir_app, monkeypatch):
+    from asistente.api import voz
+    from asistente.core.voz.falso import TtsFalso
+
+    async def roto(*a, **kw):
+        raise RuntimeError("bd caída")
+
+    monkeypatch.setattr(voz, "sumar_uso_voz", roto)
+    async with construir_app(tts=TtsFalso(b"MP3")) as c:
+        r = await sintetizar(c)
+    assert r.status_code == 200 and r.content == b"MP3"
 
 
 async def test_sintetizar_exige_token_y_origen(construir_app):

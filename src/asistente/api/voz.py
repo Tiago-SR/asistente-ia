@@ -14,6 +14,7 @@ from asistente.api.errores import ErrorApi
 from asistente.core.ports import LimiteExcedido
 from asistente.core.voz.base import AudioInvalido, VozError
 from asistente.servicios import Servicios
+from asistente.store.uso import sumar_uso_voz
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -125,6 +126,12 @@ async def sintetizar(
     except VozError as e:
         log.warning("TTS falló para %s: %s", u.sistema_id, e)
         raise ErrorApi(502, "voz_error") from e
+
+    if svc.sesiones is not None:
+        try:   # el costo es contabilidad: si falla no se pierde el audio que el usuario ya pagó
+            await sumar_uso_voz(svc.sesiones, u.sistema_id, svc.tts.proveedor, svc.tts.modelo, len(texto))
+        except Exception:
+            log.warning("no se pudo registrar el uso de voz de %s", u.sistema_id, exc_info=True)
 
     # Solo metadatos: ni el texto ni el audio.
     log.info("síntesis sistema=%s usuario=%s caracteres=%d bytes=%d", u.sistema_id, u.usuario_ref, len(texto), len(audio))

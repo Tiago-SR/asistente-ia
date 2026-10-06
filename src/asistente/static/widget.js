@@ -39,6 +39,9 @@
  *
  *   acuse        "auto" (por defecto) | "no": en el modo voz, si el resumen tarda más de ~0,9 s se dice una frase corta («Un
  *               momento, lo consulto») para que no haya silencio; "no" la quita.
+ *   ajustes      "auto" (por defecto) | "no": engranaje con el panel de ajustes del usuario (motor de voz, volumen, lectura
+ *               automática, acuse). Se guardan en el navegador (localStorage, por servidor). Lo que el usuario elige manda
+ *               sobre `voz-respuesta` y `acuse`; con "no" no hay panel y mandan los atributos.
  *   orbe-volumen "auto" (por defecto) | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
  *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre.
  *
@@ -134,6 +137,18 @@
     memoriaIntro: "Esto es lo que me pediste que recuerde. Lo uso solo en tus conversaciones y, si pasa un tiempo sin usarlo, se olvida solo.",
     memoriaVacio: "Todavía no guardé nada. Podés pedirme, por ejemplo: «recordá que quiero las hectáreas sin decimales».",
     memoriaCerrar: "Cerrar",
+    ajustes: "Ajustes",
+    ajustesTitulo: "Ajustes de voz",
+    ajMotor: "Voz del asistente",
+    ajMotorNavegador: "Del navegador",
+    ajMotorServidor: "Del servidor (más natural)",
+    ajVolumen: "Volumen",
+    ajLeerAuto: "Leer las respuestas en voz alta",
+    ajAcuse: "Decir «un momento» mientras consulta (modo voz)",
+    ajProbar: "Probar voz",
+    ajPrueba: "Hola, así suena mi voz.",
+    ajRestablecer: "Restablecer",
+    ajCerrar: "Cerrar",
     memoriaOlvidar: "Olvidar",
     memoriaOlvidarTodo: "Olvidar todo",
     memoriaOlvidarEsto: "Olvidar: {d}",
@@ -227,6 +242,9 @@
   const TTS_CACHE_MAX = 12;          // frases fijas (acuses) cuyo audio se guarda en memoria; el texto de las respuestas nunca
   const TTS_CACHE_CHARS = 60;
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
+  const CLAVE_AJUSTES = "asistente:ajustes:";   // + servidor; JSON en localStorage (nunca el token ni texto del usuario)
+  const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true };
+  const MOTORES = ["auto", "navegador", "servidor"];
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (_) { return undefined; }
@@ -672,7 +690,19 @@
     .accion-error:empty { display: none; }
 
     /* Panel «Lo que recuerdo»: cubre la columna principal; todo con las variables del tema. */
-    .barra .memoria[aria-expanded="true"] { color: var(--c); }
+    .barra .memoria[aria-expanded="true"], .barra .ajustes[aria-expanded="true"] { color: var(--c); }
+    .barra .ajustes[hidden] { display: none; }
+    .ajustes-panel { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--f); }
+    .ajustes-panel[hidden] { display: none; }
+    .aj-fila { margin: 0 0 18px; padding: 0; border: 0; min-width: 0; }
+    .aj-fila[hidden] { display: none; }
+    .aj-fila legend, .aj-fila > label.aj-tit { display: block; padding: 0; margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+    .aj-op { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+    .aj-fila input[type="range"] { width: 100%; accent-color: var(--c); }
+    .aj-fila input:focus-visible, .aj-fila button:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+    .aj-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+    .aj-acciones button { padding: 5px 14px; border-radius: 999px; border: 1px solid var(--c); background: var(--f); color: var(--c); cursor: pointer; }
+    .aj-acciones button:hover:not(:disabled) { background: var(--c); color: var(--ct); }
     .memoria-panel { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--f); }
     .memoria-panel[hidden] { display: none; }
     .mem-cab { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--b); }
@@ -747,6 +777,7 @@
     manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
     altavoz: "M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
     memoria: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z",
+    ajustes: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
   };
   // Glifos del centro del orbe: cada estado tiene el suyo (se distinguen sin depender del color ni del movimiento).
   const GLIFO = {
@@ -896,7 +927,12 @@
       // memoria por usuario: oculto hasta que /v1/estado diga `memoria: true`
       this._memBtn = el("button", { class: "accion memoria", type: "button", hidden: true, title: TEXTOS.memoria, "aria-label": TEXTOS.memoria, "aria-expanded": "false" }, icono("memoria"));
       this._memBtn.addEventListener("click", () => (this._memPanel.hidden ? this._memoriaAbrir() : this._memoriaCerrar()));
-      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._memBtn, this._altavoz, otra]));
+      // ajustes del usuario: engranaje (se oculta con ajustes="no")
+      this._ajBtn = el("button", { class: "accion ajustes", type: "button", title: TEXTOS.ajustes, "aria-label": TEXTOS.ajustes, "aria-expanded": "false" }, icono("ajustes"));
+      this._ajBtn.addEventListener("click", () => (this._ajPanel.hidden ? this._ajustesAbrir() : this._ajustesCerrar()));
+      this._ajBtn.hidden = !this._ajustesActivos();
+      this._aj = this._ajustesLeer();
+      const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._memBtn, this._altavoz, this._ajBtn, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
       this._scroll = el("div", { class: "scroll" }, this._mensajes);
@@ -944,7 +980,8 @@
       this._form = form;
       this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
       this._construirMemoria();
-      const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada, this._memPanel);
+      this._construirAjustes();
+      const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada, this._memPanel, this._ajPanel);
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
       r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
@@ -1505,7 +1542,7 @@
     // el turno ya terminó o el modo se apagó. `acuse="no"` lo quita.
     _acuseProgramar() {
       clearTimeout(this._tAcuse);
-      if ((this.getAttribute("acuse") || "auto").toLowerCase() === "no" || !this._hablaPosible()) return;
+      if (!this._acuseActivo() || !this._hablaPosible()) return;
       const t = this._t;
       this._tAcuse = setTimeout(() => {
         this._tAcuse = 0;
@@ -1552,7 +1589,16 @@
     }
 
     // — voz del asistente: servidor (ElevenLabs u otro) con respaldo en el navegador —
-    _prefRespuesta() { return (this.getAttribute("voz-respuesta") || "auto").toLowerCase(); }
+    // Lo que el usuario eligió en el panel manda sobre el atributo del anfitrión (salvo ajustes="no").
+    _prefRespuesta() {
+      if (this._ajustesActivos() && this._aj && this._aj.motor !== "auto") return this._aj.motor;
+      return (this.getAttribute("voz-respuesta") || "auto").toLowerCase();
+    }
+    _volumen() { return this._ajustesActivos() && this._aj ? this._aj.volumen : 1; }
+    _acuseActivo() {
+      if (this._ajustesActivos() && this._aj && !this._aj.acuse) return false;
+      return (this.getAttribute("acuse") || "auto").toLowerCase() !== "no";
+    }
     _navegadorOk() { return puedeHablar() && this._prefRespuesta() !== "servidor"; }
     _hablaPosible() { return (this._ttsServidor && this._prefRespuesta() !== "navegador") || this._navegadorOk(); }
     // ¿se pide la próxima pieza al servidor? Tras un fallo reciente, no.
@@ -1606,6 +1652,7 @@
       const idioma = this.getAttribute("idioma") || "es-UY";
       const v = elegirVoz(window.speechSynthesis.getVoices(), idioma, this.getAttribute("voz"));
       if (v) { u.voice = v; u.lang = v.lang; } else u.lang = idioma;
+      u.volume = this._volumen();
       u.onend = alFin; u.onerror = alFin;
       if (alIniciar) u.onstart = alIniciar;
       u.onboundary = () => { if (this._mhActivo()) this._nivelPulso(0.5 + Math.random() * 0.4); };
@@ -1715,6 +1762,7 @@
         a.onended = () => { this._tl(`ended t=${a.currentTime.toFixed(2)}s`); fin(true); };
         a.onerror = () => fin(empezo, "el navegador no pudo decodificar el audio");
         a.src = url;
+        a.volume = this._volumen();
         const p = a.play();
         if (p && p.catch) p.catch((e) => {
           const nombre = e && e.name;
@@ -1981,6 +2029,97 @@
 
     _mostrarDicho(texto) {
       this._mhDicho.replaceChildren(el("small", { textContent: TEXTOS.mhDicho }), document.createTextNode(texto));
+    }
+
+    // — ajustes del usuario: engranaje y panel (se guardan en localStorage, por servidor) —
+    _ajustesActivos() { return (this.getAttribute("ajustes") || "auto").toLowerCase() !== "no"; }
+
+    _ajustesLeer() {
+      const aj = { ...AJUSTES_BASE };
+      try {
+        const g = JSON.parse(localStorage.getItem(CLAVE_AJUSTES + this._servidor) || "{}");
+        if (MOTORES.includes(g.motor)) aj.motor = g.motor;
+        if (typeof g.volumen === "number" && g.volumen >= 0 && g.volumen <= 1) aj.volumen = g.volumen;
+        if (typeof g.acuse === "boolean") aj.acuse = g.acuse;
+      } catch { /* sin storage o JSON roto: valores por defecto */ }
+      return aj;
+    }
+
+    _ajustesGuardar() {
+      try {
+        const igual = Object.keys(AJUSTES_BASE).every((k) => this._aj[k] === AJUSTES_BASE[k]);
+        if (igual) localStorage.removeItem(CLAVE_AJUSTES + this._servidor);
+        else localStorage.setItem(CLAVE_AJUSTES + this._servidor, JSON.stringify(this._aj));
+      } catch { /* sin storage: vale para esta sesión */ }
+    }
+
+    _construirAjustes() {
+      const radio = (valor, texto) => {
+        const i = el("input", { type: "radio", name: "aj-motor", value: valor });
+        i.addEventListener("change", () => { if (i.checked) this._ajustesCambiar({ motor: valor }); });
+        return { i, fila: el("label", { class: "aj-op" }, i, el("span", { textContent: texto })) };
+      };
+      this._ajRadios = { navegador: radio("navegador", TEXTOS.ajMotorNavegador), servidor: radio("servidor", TEXTOS.ajMotorServidor) };
+      this._ajFilaMotor = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajMotor }),
+        this._ajRadios.navegador.fila, this._ajRadios.servidor.fila);
+      this._ajVol = el("input", { type: "range", id: "aj-vol", min: "0", max: "100", step: "5" });
+      this._ajVol.addEventListener("input", () => this._ajustesCambiar({ volumen: Number(this._ajVol.value) / 100 }));
+      this._ajFilaVol = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-vol", textContent: TEXTOS.ajVolumen }), this._ajVol);
+      this._ajLeer = el("input", { type: "checkbox", id: "aj-leer" });
+      this._ajLeer.addEventListener("change", () => { if (this._ajLeer.checked !== this._leerAuto) this._conmutarLeerAuto(); });
+      this._ajFilaLeer = el("div", { class: "aj-fila" }, el("label", { class: "aj-op" }, this._ajLeer, el("span", { textContent: TEXTOS.ajLeerAuto })));
+      this._ajAcuse = el("input", { type: "checkbox", id: "aj-acuse" });
+      this._ajAcuse.addEventListener("change", () => this._ajustesCambiar({ acuse: this._ajAcuse.checked }));
+      this._ajFilaAcuse = el("div", { class: "aj-fila" }, el("label", { class: "aj-op" }, this._ajAcuse, el("span", { textContent: TEXTOS.ajAcuse })));
+      this._ajProbar = el("button", { type: "button", textContent: TEXTOS.ajProbar });
+      this._ajProbar.addEventListener("click", () => { this._pararVoz(); this._decir(TEXTOS.ajPrueba); });
+      const restablecer = el("button", { type: "button", textContent: TEXTOS.ajRestablecer });
+      restablecer.addEventListener("click", () => { this._pararVoz(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._ajustesPintar(); this._actualizarVoz(); });
+      this._ajFilaAcc = el("div", { class: "aj-fila aj-acciones" }, this._ajProbar, restablecer);
+      this._ajCerrar = el("button", { type: "button", textContent: TEXTOS.ajCerrar });
+      this._ajCerrar.addEventListener("click", () => this._ajustesCerrar());
+      this._ajPanel = el("section", { class: "ajustes-panel", hidden: true, role: "dialog", "aria-labelledby": "aj-titulo" },
+        el("div", { class: "mem-cab" }, el("h2", { id: "aj-titulo", textContent: TEXTOS.ajustesTitulo }), this._ajCerrar),
+        el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
+          this._ajFilaMotor, this._ajFilaVol, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaAcc)));
+      this._ajPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ajustesCerrar(); } });
+    }
+
+    _ajustesCambiar(cambio) {
+      Object.assign(this._aj, cambio);
+      this._ajustesGuardar();
+      if (this._audio) this._audio.volume = this._volumen();   // el volumen se oye ya en lo que está sonando
+      if ("motor" in cambio) { this._pararVoz(); this._actualizarVoz(); }
+      this._ajustesPintar();
+    }
+
+    // Muestra solo lo que tiene sentido ahora: el selector de motor necesita las dos voces; el resto, alguna voz.
+    _ajustesPintar() {
+      const nav = puedeHablar(), srv = this._ttsServidor;
+      this._ajFilaMotor.hidden = !(nav && srv);
+      const motor = this._prefRespuesta();   // lo que de verdad se usa (atributo del anfitrión incluido)
+      this._ajRadios.navegador.i.checked = motor === "navegador" || (motor !== "servidor" && !srv);
+      this._ajRadios.servidor.i.checked = !this._ajRadios.navegador.i.checked;
+      const habla = this._hablaPosible();
+      this._ajFilaVol.hidden = this._ajFilaLeer.hidden = this._ajFilaAcc.hidden = !habla;
+      this._ajFilaAcuse.hidden = !habla || this._manos.hidden;
+      this._ajVol.value = String(Math.round(this._aj.volumen * 100));
+      this._ajVol.setAttribute("aria-valuetext", Math.round(this._aj.volumen * 100) + " %");
+      this._ajLeer.checked = this._leerAuto;
+      this._ajAcuse.checked = this._aj.acuse;
+    }
+
+    _ajustesAbrir() {
+      if (!this._ajustesActivos()) return;
+      if (this._memPanel && !this._memPanel.hidden) this._memoriaCerrar();
+      this._ajustesPintar();
+      this._ajPanel.hidden = false; this._ajBtn.setAttribute("aria-expanded", "true");
+      this._ajCerrar.focus();
+    }
+
+    _ajustesCerrar() {
+      this._ajPanel.hidden = true; this._ajBtn.setAttribute("aria-expanded", "false");
+      this._ajBtn.focus();
     }
 
     // — memoria por usuario: panel «Lo que recuerdo» (contrato 6.8) —

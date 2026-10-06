@@ -146,6 +146,8 @@ class TTS(Protocol):
     """Texto a voz. Devuelve el audio completo de una pieza corta (el widget pide frase por frase)."""
 
     tipo_mime: str
+    proveedor: str  # con `modelo`, identifica la tarifa en el informe de costo
+    modelo: str
 
     async def sintetizar(self, texto: str, *, idioma: str | None = None) -> bytes: ...
 

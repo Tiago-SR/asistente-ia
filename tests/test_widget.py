@@ -18,9 +18,11 @@ def test_widget_no_usa_innerhtml_ni_storage():
     from pathlib import Path
 
     js = (Path(__file__).resolve().parent.parent / "src/asistente/static/widget.js").read_text()
-    for prohibido in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
-                      "localStorage", "eval("):
+    for prohibido in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
         assert prohibido not in js.replace("sin innerHTML", ""), prohibido
+    # localStorage solo para los ajustes del panel (volumen, motor de voz, acuse): nunca el token ni el chat
+    usos = [ln for ln in js.splitlines() if "localStorage." in ln]
+    assert usos and all("CLAVE_AJUSTES" in ln for ln in usos), usos
 
 
 def _js():
@@ -541,8 +543,10 @@ def test_widget_acuse_solo_cuando_hace_falta_y_nunca_con_acciones():
     js = _js()
     assert "const MH_ACUSE_MS = 900;" in js
     acuse = js.split("_acuseProgramar() {", 1)[1].split("\n    }\n", 1)[0]
-    # solo con el modo voz, voz disponible y sin «acuse=no»; texto fijo (sin datos ni LLM)
-    assert 'getAttribute("acuse")' in acuse and "_hablaPosible()" in acuse
+    # solo con el modo voz, voz disponible y sin «acuse=no» ni acuse apagado por el usuario; texto fijo (sin datos ni LLM)
+    assert "_acuseActivo()" in acuse and "_hablaPosible()" in acuse
+    activo = js.split("_acuseActivo() {", 1)[1].split("\n    }\n", 1)[0]
+    assert 'getAttribute("acuse")' in activo
     assert "fetch(" not in acuse and "textoParaVoz" not in acuse
     # no se dice si el resumen ya llegó, si el turno propuso una acción, si se interrumpió, si terminó o si se apagó
     for guarda in ("!this._mhActivo()", "this._t !== t", "!this._ocupado", "this._dichoTurno", "this._propuestaTurno", "this._leerCortado"):
@@ -640,3 +644,16 @@ def test_widget_textos_de_memoria_en_espanol_rioplatense():
     js = _js()
     for frase in ("Lo que recuerdo", "Olvidar todo", "Podés pedirme", "Listo, lo olvidé."):
         assert frase in js, frase
+
+
+def test_widget_ajustes_del_usuario_solo_guardan_preferencias_y_llegan_a_las_dos_voces():
+    js = _js()
+    # lo único que se persiste es `this._aj`: motor, volumen y acuse (sin token ni texto)
+    assert 'const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true };' in js
+    assert "JSON.stringify(this._aj)" in js
+    # el volumen del panel llega a la voz del navegador y al audio del servidor; el motor se resuelve en un método
+    assert "u.volume = this._volumen();" in js and "a.volume = this._volumen();" in js
+    prefs = js.split("_prefRespuesta() {", 1)[1].split("\n    }\n", 1)[0]
+    assert "this._aj.motor" in prefs and 'getAttribute("voz-respuesta")' in prefs
+    # ajustes="no" quita el panel y deja mandar a los atributos del anfitrión
+    assert 'getAttribute("ajustes")' in js.split("_ajustesActivos() {", 1)[1].split("\n", 1)[0]
