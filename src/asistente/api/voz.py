@@ -1,9 +1,13 @@
-"""POST /v1/voz/transcribir: dictado (sección 7.4 del contrato). Cuerpo = audio crudo; devuelve el texto
-para que el widget lo ponga en el campo (sin envío automático). El audio no se guarda."""
+"""Voz (sección 7.4 del contrato).
+
+`POST /v1/voz/transcribir`: dictado. Cuerpo = audio crudo; devuelve el texto para que el widget lo ponga en
+el campo (sin envío automático). El audio no se guarda.
+`POST /v1/voz/sintetizar`: respuesta hablada con la voz del servidor (texto -> audio)."""
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
+from pydantic import BaseModel, ValidationError
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
@@ -82,3 +86,46 @@ async def transcribir(
     log.info("dictado sistema=%s usuario=%s bytes=%d duracion_s=%s",
              u.sistema_id, u.usuario_ref, len(audio), segundos)
     return {"texto": texto}
+
+
+class _Sintesis(BaseModel):
+    texto: str
+    idioma: str | None = None
+
+
+@router.post("/v1/voz/sintetizar")
+async def sintetizar(
+    request: Request,
+    sesion: Sesion = Depends(sesion_actual),
+    svc: Servicios = Depends(servicios),
+) -> Response:
+    """Respuesta hablada con la voz del servidor: `{ "texto", "idioma"? }` -> `audio/mpeg` de una pieza corta
+    (el widget pide frase por frase). El texto no se guarda ni se registra."""
+    cfg, u = svc.settings, sesion.usuario
+    if svc.tts is None:
+        raise ErrorApi(503, "voz_no_disponible")
+
+    try:
+        cuerpo = _Sintesis.model_validate_json(await _leer_acotado(request, cfg.voz_max_tts_chars * 8 + 1024))
+    except (ValidationError, ValueError):
+        raise ErrorApi(422, "texto_invalido") from None
+    texto = cuerpo.texto.strip()
+    if not texto:
+        raise ErrorApi(422, "texto_invalido")
+    if len(texto) > cfg.voz_max_tts_chars:
+        raise ErrorApi(413, "texto_demasiado_largo")
+
+    try:
+        await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_tts_max_por_min, clave="tts")
+    except LimiteExcedido as e:
+        raise ErrorApi(429, "limite_excedido") from e
+
+    try:
+        audio = await svc.tts.sintetizar(texto, idioma=cuerpo.idioma or u.locale)
+    except VozError as e:
+        log.warning("TTS falló para %s: %s", u.sistema_id, e)
+        raise ErrorApi(502, "voz_error") from e
+
+    # Solo metadatos: ni el texto ni el audio.
+    log.info("síntesis sistema=%s usuario=%s caracteres=%d bytes=%d", u.sistema_id, u.usuario_ref, len(texto), len(audio))
+    return Response(audio, media_type=svc.tts.tipo_mime, headers={"Cache-Control": "no-store"})

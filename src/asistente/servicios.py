@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from asistente.config import Settings
 from asistente.core.llm.openai_compat import OpenAICompat
-from asistente.core.ports import LLM, STT, Auditoria, Limites
+from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites
 from asistente.core.prompts import Prompts
+from asistente.core.voz.elevenlabs import TtsElevenLabs
 from asistente.core.voz.openai_compat import SttOpenAICompat
 from asistente.limits import LimitesPostgres
 from asistente.sistemas.auth import Autenticador
@@ -43,6 +44,7 @@ class Servicios:
     sesiones: async_sessionmaker[AsyncSession] | None = None
     cierre: Callable[[], object] | None = None
     stt: STT | None = None  # None = dictado deshabilitado
+    tts: TTS | None = None  # None = respuesta hablada solo con la voz del navegador
     acciones: AccionesSql | None = None  # None = sin acciones con confirmación
     recientes: RecientesSql | None = None  # None = sin la tool `consultas_recientes`
     memoria: MemoriaSql | None = None  # None = sin memoria por usuario
@@ -80,6 +82,16 @@ def _fabrica_stt(settings: Settings) -> STT | None:
     return SttOpenAICompat(settings.stt_base_url, settings.stt_modelo, settings.stt_api_key)
 
 
+def _fabrica_tts(settings: Settings) -> TTS | None:
+    if not settings.tts_proveedor:
+        return None
+    if settings.tts_proveedor != "elevenlabs":
+        raise ValueError(f"TTS_PROVEEDOR no soportado: {settings.tts_proveedor}")
+    if not settings.tts_api_key or not settings.tts_voz_id or not settings.tts_modelo:
+        raise ValueError("TTS_PROVEEDOR=elevenlabs requiere TTS_API_KEY, TTS_VOZ_ID y TTS_MODELO")
+    return TtsElevenLabs(settings.tts_api_key, settings.tts_voz_id, settings.tts_modelo)
+
+
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
@@ -99,6 +111,7 @@ def construir(settings: Settings) -> Servicios:
         sesiones=sesiones,
         cierre=motor.dispose,
         stt=_fabrica_stt(settings),
+        tts=_fabrica_tts(settings),
         acciones=AccionesSql(sesiones, settings.acciones_max_por_hora),
         recientes=RecientesSql(sesiones),
         memoria=MemoriaSql(sesiones, settings.memoria_dias_sin_uso),

@@ -274,7 +274,7 @@ def test_widget_manos_libres_pide_confirmacion_y_es_opcional():
     assert 'const cmd = final ? comandoDe(texto) : null;' in js
     # oculto por defecto; se muestra solo con el reconocimiento del navegador, síntesis y contexto seguro
     assert 'class: "manos", type: "button", hidden: true' in js
-    assert '_motorDictado() === "navegador" && puedeHablar() && window.isSecureContext !== false' in js
+    assert '_motorDictado() === "navegador" && this._hablaPosible() && window.isSecureContext !== false' in js
     # el indicador de micrófono abierto y la forma de apagar existen
     assert "mh-apagar" in js and 'e.key === "Escape"' in js and "mhPrivacidad" in js
     # atributos documentados
@@ -436,7 +436,7 @@ def test_widget_modo_voz_pide_el_canal_voz_y_dice_el_resumen_una_sola_vez():
     assert 'canal: canalVoz ? "voz" : "texto"' in js
     assert 'case "voz": this._marca("voz"); if (hablarVoz) this._resumenHablado(datos.texto, "resumen"); break;' in js
     # la lectura automática de la respuesta completa no corre en el modo voz; el resumen sí, con el altavoz apagado
-    assert "const leer = this._leerAuto && !canalVoz && puedeHablar();" in js
+    assert "const leer = this._leerAuto && !canalVoz && this._hablaPosible();" in js
     res = js.split("_resumenHablado(texto, fuente = \"resumen\") {", 1)[1].split("_mostrarDicho", 1)[0]
     assert "this._dichoTurno ||" in res and "this._propuestaTurno ||" in res and "this._leerCortado" in res
     # respaldo si el modelo no manda el bloque
@@ -542,7 +542,7 @@ def test_widget_acuse_solo_cuando_hace_falta_y_nunca_con_acciones():
     assert "const MH_ACUSE_MS = 900;" in js
     acuse = js.split("_acuseProgramar() {", 1)[1].split("\n    }\n", 1)[0]
     # solo con el modo voz, voz disponible y sin «acuse=no»; texto fijo (sin datos ni LLM)
-    assert 'getAttribute("acuse")' in acuse and "puedeHablar()" in acuse
+    assert 'getAttribute("acuse")' in acuse and "_hablaPosible()" in acuse
     assert "fetch(" not in acuse and "textoParaVoz" not in acuse
     # no se dice si el resumen ya llegó, si el turno propuso una acción, si se interrumpió, si terminó o si se apagó
     for guarda in ("!this._mhActivo()", "this._t !== t", "!this._ocupado", "this._dichoTurno", "this._propuestaTurno", "this._leerCortado"):

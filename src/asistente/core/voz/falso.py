@@ -27,3 +27,22 @@ class SttFalso:
 
     async def disponible(self) -> bool:
         return self.esta_disponible
+
+
+class TtsFalso:
+    tipo_mime = "audio/mpeg"
+
+    def __init__(self, audio: bytes = b"AUDIO", *, disponible: bool = True, falla: bool = False) -> None:
+        self.audio = audio
+        self.esta_disponible = disponible
+        self.falla = falla
+        self.llamadas: list[tuple[str, str | None]] = []
+
+    async def sintetizar(self, texto: str, *, idioma: str | None = None) -> bytes:
+        self.llamadas.append((texto, idioma))
+        if self.falla:
+            raise VozError("falla simulada")
+        return self.audio
+
+    async def disponible(self) -> bool:
+        return self.esta_disponible

@@ -82,7 +82,7 @@ def llm():
 
 @pytest.fixture
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
-    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None,
+    def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None, tts=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
                    consultas_recientes=True, memoria_habilitada=False, memoria_dias=30):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
@@ -109,7 +109,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
-            prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt,
+            prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt, tts=tts,
             acciones=AccionesSql(sesiones, max_acciones_hora), recientes=RecientesSql(sesiones),
             memoria=MemoriaSql(sesiones, memoria_dias),
         )
@@ -579,3 +579,86 @@ async def test_done_informa_tiempos_en_ms_sin_exponer_datos_internos(api, llm):
     tiempos = ev[-1][1]["tiempos_ms"]
     assert {"voz", "primer_delta", "total"} <= tiempos.keys() and all(isinstance(v, int) and v >= 0 for v in tiempos.values())
     assert not [k for k in tiempos if k.startswith("_")]
+
+
+# --- respuesta hablada: POST /v1/voz/sintetizar ------------------------------------------------
+
+
+async def sintetizar(c, texto="Hola, tenés 660 hectáreas.", headers=None, usuario=None, **kw):
+    h = auth(usuario=usuario) if usuario else auth()
+    return await c.post("/v1/voz/sintetizar", json={"texto": texto, **kw}, headers={**h, **(headers or {})})
+
+
+async def test_sintetizar_ok_devuelve_audio_sin_cache(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    tts = TtsFalso(b"MP3")
+    async with construir_app(tts=tts) as c:
+        r = await sintetizar(c, idioma="es-UY")
+    assert r.status_code == 200 and r.content == b"MP3"
+    assert r.headers["content-type"] == "audio/mpeg" and r.headers["cache-control"] == "no-store"
+    assert tts.llamadas == [("Hola, tenés 660 hectáreas.", "es-UY")]
+
+
+async def test_sintetizar_exige_token_y_origen(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    tts = TtsFalso()
+    async with construir_app(tts=tts) as c:
+        assert (await c.post("/v1/voz/sintetizar", json={"texto": "x"})).status_code == 401
+        r = await sintetizar(c, headers={"Origin": "https://malo.example"})
+        assert r.status_code == 403
+    assert not tts.llamadas
+
+
+async def test_sintetizar_sin_tts_es_503(api):
+    r = await sintetizar(api)
+    assert r.status_code == 503 and r.json() == {"error": "voz_no_disponible"}
+
+
+async def test_sintetizar_valida_el_texto(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    tts = TtsFalso()
+    async with construir_app(tts=tts) as c:
+        for malo in ("", "   "):
+            assert (await sintetizar(c, malo)).status_code == 422
+        r = await c.post("/v1/voz/sintetizar", content=b"no es json", headers=auth())
+        assert r.status_code == 422 and r.json() == {"error": "texto_invalido"}
+        r = await c.post("/v1/voz/sintetizar", json={"otro": 1}, headers=auth())
+        assert r.status_code == 422
+        r = await sintetizar(c, "x" * 1001)
+        assert r.status_code == 413 and r.json() == {"error": "texto_demasiado_largo"}
+        assert (await sintetizar(c, "x" * 1000)).status_code == 200
+    assert len(tts.llamadas) == 1
+
+
+async def test_sintetizar_error_del_proveedor_es_502(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    async with construir_app(tts=TtsFalso(falla=True)) as c:
+        r = await sintetizar(c)
+    assert r.status_code == 502 and r.json() == {"error": "voz_error"}
+
+
+async def test_sintetizar_tiene_limite_propio_y_no_toca_el_del_dictado(construir_app, monkeypatch):
+    from asistente.core.voz.falso import SttFalso, TtsFalso
+
+    monkeypatch.setenv("ASISTENTE_VOZ_TTS_MAX_POR_MIN", "2")
+    u1, u2 = sub(), sub()
+    async with construir_app(tts=TtsFalso(), stt=SttFalso()) as c:
+        assert (await sintetizar(c, usuario=u1)).status_code == 200
+        assert (await sintetizar(c, usuario=u1)).status_code == 200
+        r = await sintetizar(c, usuario=u1)
+        assert r.status_code == 429 and r.json() == {"error": "limite_excedido"}
+        assert (await sintetizar(c, usuario=u2)).status_code == 200  # otro usuario, otro contador
+        assert (await dictar(c, usuario=u1)).status_code == 200
+
+
+async def test_estado_informa_respuesta_segun_el_tts(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    for tts, esperado in [(TtsFalso(), True), (TtsFalso(disponible=False), False), (None, False)]:
+        async with construir_app(tts=tts) as c:
+            r = await c.get("/v1/estado", headers=auth())
+            assert r.json()["voz"]["respuesta"] is esperado

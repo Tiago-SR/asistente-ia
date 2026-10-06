@@ -21,7 +21,11 @@
  *   voz-motor   "auto" (por defecto), "navegador" o "servidor". El dictado usa el reconocimiento de voz del
  *               navegador (Web Speech; en Chrome el audio lo procesa el servicio de Google) y, si no existe,
  *               el STT del asistente (POST /v1/voz/transcribir). "servidor" evita enviar el audio a Google.
- *               La respuesta hablada usa siempre las voces del navegador (speechSynthesis).
+ *               No afecta a la respuesta hablada (ver voz-respuesta).
+ *   voz-respuesta  "auto" (por defecto), "servidor" o "navegador": con qué voz habla el asistente. "auto" usa la
+ *               voz del servidor (POST /v1/voz/sintetizar, p. ej. ElevenLabs) si el sistema la tiene configurada
+ *               (/v1/estado: voz.respuesta) y, si falla o no existe, la del navegador (speechSynthesis).
+ *               "navegador" no envía el texto de las respuestas a ningún tercero; "servidor" no cae al navegador.
  *   palabra-activacion        palabra que despierta el «modo voz» (por defecto "asistente").
  *   manos-libres-inactividad  minutos sin interacción tras los que el modo voz se apaga solo
  *               (por defecto 5; 0 = no se apaga; el nombre del atributo se conserva por compatibilidad).
@@ -204,6 +208,24 @@
   function puedeHablar() {
     return "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance === "function";
   }
+  // Trozos de hasta `max` caracteres para pedirle al servidor: cortan en fin de oración (o de línea, o en un espacio).
+  function partirParaVoz(texto, max = 900) {
+    const trozos = [];
+    let resto = String(texto || "").trim();
+    while (resto.length > max) {
+      const ventana = resto.slice(0, max);
+      let corte = Math.max(ventana.lastIndexOf("\n"), ...[". ", "! ", "? ", "… ", "; "].map((x) => ventana.lastIndexOf(x) + 1));
+      if (corte < max / 3) corte = ventana.lastIndexOf(" ");
+      if (corte < max / 3) corte = max;
+      trozos.push(resto.slice(0, corte).trim());
+      resto = resto.slice(corte).trim();
+    }
+    if (resto) trozos.push(resto);
+    return trozos.filter(Boolean);
+  }
+  const TTS_PAUSA_MS = 30000;        // tras un fallo de la voz del servidor, ese tiempo habla el navegador
+  const TTS_CACHE_MAX = 12;          // frases fijas (acuses) cuyo audio se guarda en memoria; el texto de las respuestas nunca
+  const TTS_CACHE_CHARS = 60;
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
@@ -218,6 +240,7 @@
   const MH_INACTIVIDAD_MIN = 5;             // se apaga solo tras tantos minutos sin interacción; atributo manos-libres-inactividad (0 = nunca)
   const MH_CIERRE_MS = 1800;                // silencio tras el que una frase dictada pasa a confirmación
   const MH_ESPERA_MS = 8000;                // tras la palabra de activación, tiempo para empezar a hablar
+  const MH_ACUSE_PAUSA_MS = 500;            // silencio entre el acuse y lo que se diga después, para que no se pisen
   const MH_ACUSE_MS = 900;                  // si pasado este tiempo tras «enviar» no hay nada que decir, se dice un acuse corto
   const MH_MAX_FALLOS = 5;                  // reinicios seguidos del reconocedor con error antes de apagar
 
@@ -776,7 +799,7 @@
 
   class AsistenteChat extends HTMLElement {
     static get observedAttributes() { return ["token-url", "servidor", "tema"]; }
-    static get _utiles() { return { textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, retrasoReinicio }; }  // para los tests
+    static get _utiles() { return { partirParaVoz, textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, retrasoReinicio }; }  // para los tests
 
     constructor() {
       super();
@@ -787,6 +810,15 @@
       this._iniciado = false;
       this._nombreSistema = "";
       this._dictadoServidor = false;
+      this._ttsServidor = false;  // el sistema tiene voz de servidor (/v1/estado: voz.respuesta)
+      this._ttsPausaHasta = 0;    // tras un fallo, hasta cuándo se usa solo la voz del navegador
+      this._cola = [];            // piezas por decir con voz de servidor: { texto, audio, alIniciar, alTerminar, gen }
+      this._sonando = false;      // hay una pieza de la cola sonando
+      this._audio = null;         // <audio> reutilizado
+      this._abortTts = new AbortController();
+      this._cacheTts = new Map(); // texto corto -> URL del audio
+      this._vozAn = null; this._vozBuf = null; this._anIntentado = false; this._motivoRespaldo = "";
+      this._finAudio = null; this._tPulso = 0;
       this._reco = null;
       this._leerAuto = false;
       this._leidoHasta = 0;
@@ -807,6 +839,7 @@
     }
 
     connectedCallback() {
+      console.info("[asistente] widget con voz del servidor: cola, pausa tras el acuse y diagnóstico");   // temporal: confirma qué versión tiene el navegador
       this._construir();
       this._vigilarTema();
       this._arrancar();
@@ -980,6 +1013,7 @@
           const voz = e.voz || {};
           this._maxAudioS = Number(voz.max_audio_s) > 0 ? Number(voz.max_audio_s) : 60;
           this._dictadoServidor = voz.dictado === true && puedeGrabar();
+          this._ttsServidor = voz.respuesta === true;
           if (!this.getAttribute("titulo") && this._nombreSistema) this._titulo.textContent = "Asistente · " + this._nombreSistema;
         }
       } catch { /* sin acceso: se muestra el aviso */ }
@@ -1117,9 +1151,9 @@
 
     _actualizarVoz() {
       this._mic.hidden = !this._motorDictado();
-      this._altavoz.hidden = !puedeHablar();
+      this._altavoz.hidden = !this._hablaPosible();
       // manos libres: solo con el reconocimiento del navegador (la palabra de activación no existe en el STT del servidor)
-      this._manos.hidden = !(this._motorDictado() === "navegador" && puedeHablar() && window.isSecureContext !== false);
+      this._manos.hidden = !(this._motorDictado() === "navegador" && this._hablaPosible() && window.isSecureContext !== false);
       if (this._manos.hidden) this._mhApagar("", true);
     }
 
@@ -1441,7 +1475,10 @@
           objetivo = nivelDe(n.buf);
         }
         n.pulso = Math.max(0, n.pulso - dt * 2.2);
-        if (e === "hablando") objetivo = Math.max(objetivo, n.pulso);
+        if (e === "hablando") {
+          objetivo = Math.max(objetivo, n.pulso);
+          if (this._vozAn) { this._vozAn.getByteTimeDomainData(this._vozBuf); objetivo = Math.max(objetivo, nivelDe(this._vozBuf)); }   // voz del servidor: volumen real
+        }
         n.valor = suavizar(n.valor, objetivo, dt);
         const v = Math.round(n.valor * 100) / 100;
         if (v !== n.escrito) { n.escrito = v; this._mhCaja.style.setProperty("--nivel", String(v)); }
@@ -1468,14 +1505,14 @@
     // el turno ya terminó o el modo se apagó. `acuse="no"` lo quita.
     _acuseProgramar() {
       clearTimeout(this._tAcuse);
-      if ((this.getAttribute("acuse") || "auto").toLowerCase() === "no" || !puedeHablar()) return;
+      if ((this.getAttribute("acuse") || "auto").toLowerCase() === "no" || !this._hablaPosible()) return;
       const t = this._t;
       this._tAcuse = setTimeout(() => {
         this._tAcuse = 0;
         if (!this._mhActivo() || this._t !== t || !this._ocupado || this._dichoTurno || this._propuestaTurno || this._leerCortado) return;
         const frases = TEXTOS.mhAcuse;
         t.acuse = performance.now();
-        this._decir(frases[this._nAcuse++ % frases.length]);
+        this._decir(frases[this._nAcuse++ % frases.length], undefined, undefined, { sinRespaldo: true, pausaMs: MH_ACUSE_PAUSA_MS });
       }, MH_ACUSE_MS);
     }
 
@@ -1514,30 +1551,216 @@
       this._altavoz.classList.toggle("activa", this._leerAuto);
     }
 
-    // Encola `texto` (ya sin Markdown); varias llamadas se leen en orden. `alTerminar` al acabar esta pieza.
-    _decir(texto, alTerminar, alIniciar) {
-      if (!puedeHablar() || !texto.trim()) { if (alTerminar) alTerminar(); return; }
+    // — voz del asistente: servidor (ElevenLabs u otro) con respaldo en el navegador —
+    _prefRespuesta() { return (this.getAttribute("voz-respuesta") || "auto").toLowerCase(); }
+    _navegadorOk() { return puedeHablar() && this._prefRespuesta() !== "servidor"; }
+    _hablaPosible() { return (this._ttsServidor && this._prefRespuesta() !== "navegador") || this._navegadorOk(); }
+    // ¿se pide la próxima pieza al servidor? Tras un fallo reciente, no.
+    _ttsActivo() { return this._ttsServidor && this._prefRespuesta() !== "navegador" && Date.now() >= this._ttsPausaHasta; }
+
+    // Línea de tiempo de la voz en la consola (temporal, para diagnosticar). Solo largos y tiempos: nunca el texto.
+    _tl(msg) { console.info("[asistente] voz " + Math.round(performance.now()) + "ms " + msg); }
+
+    // Encola `texto` (ya sin Markdown); varias llamadas se dicen en orden. `alTerminar` al acabar esta pieza.
+    // `opciones.sinRespaldo`: si la voz del servidor no llega o falla, esta pieza no se dice con la del navegador
+    // (el acuse es relleno: mejor en silencio que con otra voz). `opciones.pausaMs`: silencio tras esta pieza
+    // antes de decir la siguiente (la cola espera ese tiempo; si nada la sigue, no cambia nada).
+    _decir(texto, alTerminar, alIniciar, opciones = {}) {
+      if (!this._hablaPosible() || !texto.trim()) { if (alTerminar) alTerminar(); return; }
+      // Sin voz de servidor y sin nada en cola: directo al navegador (cola propia de speechSynthesis).
+      if (!this._ttsActivo() && !this._sonando && !this._cola.length) {
+        if (!this._navegadorOk()) { if (alTerminar) alTerminar(); return; }
+        const gen = this._genVoz;
+        this._pendientesVoz++;
+        const fin = () => {
+          if (gen === this._genVoz) this._pendientesVoz = Math.max(0, this._pendientesVoz - 1);
+          if (alTerminar) alTerminar();
+          this._mhFase();
+          this._mhRevisarFin();
+        };
+        this._hablarNavegador(texto, alIniciar, fin);
+        this._mhFase();
+        return;
+      }
+      // Cola: cada pieza pide su audio de inmediato (en paralelo) y suenan en orden.
+      const gen = this._genVoz, usarServidor = this._ttsActivo();
+      const trozos = usarServidor ? partirParaVoz(texto) : [texto];
+      trozos.forEach((trozo, i) => {
+        this._pendientesVoz++;
+        this._tl(`encola ${trozo.length} car${opciones.sinRespaldo ? " (acuse)" : ""}${usarServidor ? "" : " [navegador]"}; cola=${this._cola.length} sonando=${this._sonando}`);
+        this._cola.push({
+          texto: trozo, gen,
+          audio: usarServidor ? this._pedirAudio(trozo, gen, opciones.sinRespaldo === true) : null,
+          alIniciar: i === 0 ? alIniciar : undefined,
+          alTerminar: i === trozos.length - 1 ? alTerminar : undefined,
+          sinRespaldo: opciones.sinRespaldo === true,
+          pausaMs: i === trozos.length - 1 ? opciones.pausaMs || 0 : 0,
+        });
+      });
+      this._mhFase();
+      this._siguienteVoz();
+    }
+
+    _hablarNavegador(texto, alIniciar, alFin) {
       const u = new window.SpeechSynthesisUtterance(texto);
       const idioma = this.getAttribute("idioma") || "es-UY";
       const v = elegirVoz(window.speechSynthesis.getVoices(), idioma, this.getAttribute("voz"));
       if (v) { u.voice = v; u.lang = v.lang; } else u.lang = idioma;
-      const gen = this._genVoz;
-      this._pendientesVoz++;
-      const fin = () => {
-        if (gen === this._genVoz) this._pendientesVoz = Math.max(0, this._pendientesVoz - 1);
-        if (alTerminar) alTerminar();
-        this._mhFase();
-        this._mhRevisarFin();
-      };
-      u.onend = fin; u.onerror = fin;
+      u.onend = alFin; u.onerror = alFin;
       if (alIniciar) u.onstart = alIniciar;
       u.onboundary = () => { if (this._mhActivo()) this._nivelPulso(0.5 + Math.random() * 0.4); };
       window.speechSynthesis.speak(u);
-      this._mhFase();
+    }
+
+    // Pide el audio de una pieza; devuelve una promesa de URL (blob) o null si falló (nunca rechaza).
+    async _pedirAudio(texto, gen, fija = false) {
+      const corto = fija && texto.length <= TTS_CACHE_CHARS;
+      if (corto && this._cacheTts.has(texto)) return this._cacheTts.get(texto);
+      const senal = this._abortTts.signal;
+      try {
+        const r = await this._conToken((h) => fetch(`${this._servidor}/v1/voz/sintetizar`, {
+          method: "POST", headers: { ...h, "Content-Type": "application/json" }, signal: senal,
+          body: JSON.stringify({ texto, idioma: this.getAttribute("idioma") || undefined }),
+        }));
+        if (!r.ok) {
+          // 413/422: esa pieza no sirve, pero el servidor está bien. Cualquier otro fallo lo pausa un rato.
+          console.warn("[asistente] /v1/voz/sintetizar respondió", r.status);
+          if (r.status === 503) this._ttsServidor = false;
+          else if (r.status !== 413 && r.status !== 422) this._ttsPausaHasta = Date.now() + TTS_PAUSA_MS;
+          return null;
+        }
+        const blob = await r.blob();
+        this._tl(`audio listo ${texto.length} car, ${blob.size} bytes, ${blob.type}`);
+        const url = URL.createObjectURL(blob);
+        if (gen !== this._genVoz) { URL.revokeObjectURL(url); return null; }
+        if (corto) {
+          this._cacheTts.set(texto, url);
+          if (this._cacheTts.size > TTS_CACHE_MAX) {
+            const [viejo, u] = this._cacheTts.entries().next().value;
+            this._cacheTts.delete(viejo); URL.revokeObjectURL(u);
+          }
+        }
+        return url;
+      } catch (e) {
+        if (!(e && e.name === "AbortError")) { console.warn("[asistente] /v1/voz/sintetizar falló:", e && e.name); this._ttsPausaHasta = Date.now() + TTS_PAUSA_MS; }
+        return null;
+      }
+    }
+
+    async _siguienteVoz() {
+      if (this._sonando) return;
+      const pieza = this._cola.shift();
+      if (!pieza) return;
+      this._sonando = true;
+      this._tl(`toma ${pieza.texto.length} car; quedan ${this._cola.length}`);
+      const gen = pieza.gen;
+      const terminar = () => {
+        if (gen !== this._genVoz) return;   // se cortó la voz: _pararVoz ya limpió todo
+        this._tl(`termina ${pieza.texto.length} car${pieza.pausaMs ? "; pausa " + pieza.pausaMs + "ms" : ""}`);
+        if (!pieza.pausaMs) this._sonando = false;   // con pausa, la cola sigue «ocupada» hasta que pase
+        this._pendientesVoz = Math.max(0, this._pendientesVoz - 1);
+        if (pieza.alTerminar) pieza.alTerminar();
+        this._mhFase();
+        this._mhRevisarFin();
+        if (!pieza.pausaMs) { this._siguienteVoz(); return; }
+        setTimeout(() => { if (gen === this._genVoz) { this._sonando = false; this._siguienteVoz(); } }, pieza.pausaMs);
+      };
+      let url = null;
+      if (pieza.audio) url = await pieza.audio;
+      if (gen !== this._genVoz) return;
+      this._motivoRespaldo = pieza.audio ? "el servidor no devolvió audio" : "voz del servidor en pausa o desactivada";
+      if (url && await this._sonarAudio(url, pieza, gen)) { if (!this._cacheTts.has(pieza.texto)) URL.revokeObjectURL(url); return terminar(); }
+      if (gen !== this._genVoz) return;
+      if (this._navegadorOk() && !pieza.sinRespaldo) {   // respaldo
+        console.warn("[asistente] voz del navegador en lugar de la del servidor:", this._motivoRespaldo);
+        this._hablarNavegador(pieza.texto, pieza.alIniciar, terminar);
+      } else terminar();
+    }
+
+    // Reproduce `url`; resuelve true al terminar (o si falla ya empezado) y false si no llegó a sonar.
+    // Si el primer `play()` falla antes de sonar (se ha visto en la primera reproducción de la página), se reintenta una vez.
+    async _sonarAudio(url, pieza, gen) {
+      await this._prepararAnalizador();
+      if (gen !== this._genVoz) return true;
+      if (await this._intentarAudio(url, pieza)) return true;
+      if (gen !== this._genVoz) return true;
+      console.warn("[asistente] el audio del servidor no arrancó (" + this._motivoRespaldo + "); se reintenta");
+      try { this._audio.pause(); } catch { /* sin audio */ }
+      await new Promise((r) => setTimeout(r, 150));
+      if (gen !== this._genVoz) return true;
+      const ok = await this._intentarAudio(url, pieza);
+      if (!ok) console.warn("[asistente] el audio del servidor no arrancó tras reintentar:", this._motivoRespaldo);
+      return ok;
+    }
+
+    _intentarAudio(url, pieza) {
+      return new Promise((resolve) => {
+        const a = this._audio;
+        let empezo = false;
+        const fin = (ok, motivo) => {
+          if (!ok) this._motivoRespaldo = motivo || "error al reproducir el audio";
+          a.onplaying = a.onended = a.onerror = null; this._finAudio = null;
+          clearInterval(this._tPulso); this._tPulso = 0;
+          resolve(ok);
+        };
+        this._finAudio = () => fin(true);
+        const arrancar = () => {
+          if (empezo) return;
+          empezo = true;
+          this._tl(`suena ${pieza.texto.length} car, dura ${isFinite(a.duration) ? a.duration.toFixed(2) : "?"}s`);
+          if (pieza.alIniciar) pieza.alIniciar();
+          if (!this._vozAn && !this._tPulso) this._tPulso = setInterval(() => { if (this._mhActivo()) this._nivelPulso(0.5 + Math.random() * 0.4); }, 140);
+        };
+        a.onplaying = arrancar;
+        a.onended = () => { this._tl(`ended t=${a.currentTime.toFixed(2)}s`); fin(true); };
+        a.onerror = () => fin(empezo, "el navegador no pudo decodificar el audio");
+        a.src = url;
+        const p = a.play();
+        if (p && p.catch) p.catch((e) => {
+          const nombre = e && e.name;
+          // AbortError: Chrome a veces rechaza el `play()` de la primera reproducción aunque el audio ya esté sonando.
+          // Si a los 150 ms sigue sonando, no es un fallo (y reiniciarlo se oiría como un tartamudeo).
+          if (nombre === "AbortError") {
+            setTimeout(() => {
+              if (!a.paused && !a.ended && a.currentTime > 0) arrancar();
+              else fin(false, "play() rechazado: AbortError");
+            }, 150);
+            return;
+          }
+          fin(false, "play() rechazado: " + nombre);   // p. ej. NotAllowedError (autoplay): cae a la voz del navegador
+        });
+      });
+    }
+
+    // El <audio> y, solo si el orbe está activo, un analizador para que siga el volumen real de la voz del servidor.
+    // Una vez conectado a Web Audio el sonido pasa por el contexto: solo se conecta si el contexto arranca.
+    async _prepararAnalizador() {
+      if (!this._audio) this._audio = new Audio();
+      if (this._anIntentado || !this._niv.activo) return;
+      this._anIntentado = true;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      let ctx = null;
+      try {
+        ctx = new AC();
+        if (ctx.state !== "running") await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 400))]);   // sin gesto previo puede no resolverse
+        if (ctx.state !== "running") { ctx.close(); return; }
+        const fuente = ctx.createMediaElementSource(this._audio), an = ctx.createAnalyser();
+        an.fftSize = 512; fuente.connect(an); an.connect(ctx.destination);
+        this._vozAn = an; this._vozBuf = new Uint8Array(an.fftSize); this._vozCtx = ctx;
+      } catch { try { if (ctx) ctx.close(); } catch { /* ya cerrado */ } }
     }
 
     _pararVoz() {
+      if (this._sonando || this._cola.length) console.info("[asistente] voz cortada por:", (new Error().stack.split("\n")[2] || "").trim());
       this._genVoz++; this._pendientesVoz = 0;
+      const pendientes = this._cola.splice(0);
+      this._abortTts.abort(); this._abortTts = new AbortController();
+      this._sonando = false;
+      clearInterval(this._tPulso); this._tPulso = 0;
+      if (this._audio) { try { this._audio.pause(); } catch { /* sin audio */ } }
+      if (this._finAudio) this._finAudio();
+      for (const p of pendientes) { if (p.alTerminar) { try { p.alTerminar(); } catch { /* callback ajeno */ } } }
       if (this._mhCaja) this._mhFase();
       if (puedeHablar()) window.speechSynthesis.cancel();
       if (this._raiz) for (const b of this._raiz.querySelectorAll(".escuchar.hablando")) b.classList.remove("hablando");
@@ -1552,7 +1775,7 @@
 
     // Botón "escuchar" al pie de una respuesta (solo texto: no altera el texto de la burbuja).
     _botonEscuchar(burbuja, md) {
-      if (!puedeHablar() || !md.trim()) return;
+      if (!this._hablaPosible() || !md.trim()) return;
       const boton = el("button", { type: "button", class: "escuchar", title: TEXTOS.escuchar, "aria-label": TEXTOS.escuchar }, icono("altavoz"));
       boton.addEventListener("click", () => {
         const hablando = boton.classList.contains("hablando");
@@ -1698,8 +1921,8 @@
       }
       let acumulado = "", resultado = "ok";
       this._leidoHasta = 0; this._leerCortado = false;
-      const leer = this._leerAuto && !canalVoz && puedeHablar();   // lectura automática de la respuesta completa (no en el modo voz)
-      const hablarVoz = canalVoz && puedeHablar();                 // modo voz: se dice el resumen, aunque la lectura automática esté apagada
+      const leer = this._leerAuto && !canalVoz && this._hablaPosible();   // lectura automática de la respuesta completa (no en el modo voz)
+      const hablarVoz = canalVoz && this._hablaPosible();                 // modo voz: se dice el resumen, aunque la lectura automática esté apagada
       const pintar = () => {
         const acciones = burbuja.querySelector(".acciones");
         burbuja.replaceChildren(); markdown(acumulado, burbuja);
@@ -1878,7 +2101,7 @@
         // La tarjeta tiene que estar a la vista: si se está en la vista de voz, se pasa al chat. Se confirma siempre con un clic.
         const frase = TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen);
         this._mostrarDicho(frase);
-        if (puedeHablar()) this._decir(frase);
+        if (this._hablaPosible()) this._decir(frase);
         if (this._vista === "voz") { this._vista = "chat"; this._aplicarVista(); this._avisarVoz(TEXTOS.mhConfirmaEnChat); }
       }
       this._bajar();

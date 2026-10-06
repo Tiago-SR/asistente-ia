@@ -103,10 +103,11 @@ class LimitesPostgres:
             await _sumar(s, ctx.sistema_id, ctx.usuario_ref, "dia", v["dia"], 0, uso.total)
             await _sumar_uso_modelo(s, ctx, v["mes"], uso)
 
-    async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int) -> None:
-        # Contador propio (`voz:<ref>`): dictar no consume la cuota de mensajes.
+    async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int, clave: str = "voz") -> None:
+        # Contador propio (`<clave>:<ref>`): dictar o sintetizar no consume la cuota de mensajes
+        # ni la una de la otra (`clave="tts"` para la respuesta hablada).
         inicio = _ventanas(self._reloj())["min"]
         async with self._sesiones.begin() as s:
-            c = await _sumar(s, sistema_id, f"voz:{usuario_ref}", "min", inicio, 1, 0)
+            c = await _sumar(s, sistema_id, f"{clave}:{usuario_ref}", "min", inicio, 1, 0)
         if c.mensajes > tope_por_min:  # un rechazo también cuenta
             raise LimiteExcedido("voz_min")
