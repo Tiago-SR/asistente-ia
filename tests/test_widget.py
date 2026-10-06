@@ -445,6 +445,13 @@ def test_widget_modo_voz_pide_el_canal_voz_y_dice_el_resumen_una_sola_vez():
     assert "this._botonEscuchar(burbuja, acumulado)" in js
 
 
+def test_widget_envia_la_zona_horaria_del_navegador():
+    js = _js()
+    assert 'zona_horaria: zonaHoraria() });' in js
+    fn = js.split("function zonaHoraria() {", 1)[1].split("\n  }\n", 1)[0]
+    assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in fn and "catch" in fn  # nunca rompe el envío
+
+
 def test_widget_orbe_sin_dependencias_ni_mascaras_y_respeta_movimiento_reducido():
     js = _js()
     css = js.split("const CSS = `", 1)[1].split("`;", 1)[0]

@@ -17,6 +17,18 @@ class RepoFalso:
         return 2
 
 
+class AuditoriaFalsa:
+    def __init__(self, falla: str | None = None) -> None:
+        self.llamadas: list[tuple[str, int]] = []
+        self.falla = falla
+
+    async def purgar(self, sistema_id: str, retencion_dias: int) -> int:
+        if sistema_id == self.falla:
+            raise RuntimeError("BD caída")
+        self.llamadas.append((sistema_id, retencion_dias))
+        return 5
+
+
 def registro(tmp_path) -> RegistroSistemas:
     ruta = escribir_registro(
         tmp_path / "s.yaml",
@@ -48,3 +60,19 @@ async def test_el_bucle_purga_al_arrancar_y_se_repite_hasta_cancelarse(tmp_path)
     except asyncio.CancelledError:
         pass
     assert len(repo.llamadas) > 3  # más de una pasada (3 sistemas por pasada)
+
+
+async def test_la_auditoria_de_tools_se_purga_con_la_retencion_de_cada_sistema(tmp_path):
+    repo, auditoria = RepoFalso(), AuditoriaFalsa()
+    await purgar_todos(registro(tmp_path), repo, auditoria=auditoria)
+    assert auditoria.llamadas == [("ret-a", 7), ("ret-b", 30), ("ret-c", 90)]
+
+
+async def test_sin_auditoria_no_se_purga_y_el_bucle_la_recibe(tmp_path):
+    repo = RepoFalso()
+    await purgar_todos(registro(tmp_path), repo)  # compatible con quien no la pasa
+    auditoria = AuditoriaFalsa()
+    tarea = asyncio.create_task(bucle_purga(registro(tmp_path), repo, 0.01, auditoria=auditoria))
+    await asyncio.sleep(0.05)
+    tarea.cancel()
+    assert auditoria.llamadas

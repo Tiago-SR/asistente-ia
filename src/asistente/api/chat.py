@@ -5,8 +5,9 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
-from asistente.core import events
+from asistente.core import events, zona
 from asistente.core.agent import ConfigTurno, run_turn
 from asistente.core.ports import Contexto, LimitesUso
 from asistente.servicios import LLMNoConfigurado, Servicios
@@ -28,6 +29,8 @@ class ChatIn(BaseModel):
     mensaje: str
     # «voz»: el modelo agrega un resumen hablado (evento `voz`); la respuesta completa no cambia.
     canal: Literal["texto", "voz"] = "texto"
+    # Zona del navegador (IANA). Opcional y nunca bloquea: una inválida se ignora y rige la del sistema, luego UTC.
+    zona_horaria: str | None = None
 
 
 def _frame(evento: str, datos) -> bytes:
@@ -68,15 +71,18 @@ async def chat(
         conv_id, nueva = uuid.uuid4(), True
 
     request_id = uuid.uuid4().hex
+    zona_usuario = zona.resolver(body.zona_horaria, sistema.zona_horaria)
     prompt, version = svc.prompts.componer(
         sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
-        usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(UTC).date(), canal=body.canal,
+        usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
+        canal=body.canal,
     )
     lim = sistema.limites
     ctx = Contexto(
         sistema_id=u.sistema_id, sistema_nombre=sistema.nombre, usuario_ref=u.usuario_ref,
         jti=u.jti, request_id=request_id, modelo=modelo, prompt_system=prompt, prompt_version=version,
         limites=LimitesUso(lim.mensajes_por_usuario_min, lim.mensajes_por_usuario_dia, lim.tokens_por_mes),
+        zona_horaria=zona_usuario, retencion_dias=sistema.retencion_dias,
     )
     historial = [] if nueva else await svc.repo.historial(
         u.sistema_id, u.usuario_ref, conv_id, cfg.max_turnos_historial
@@ -97,7 +103,8 @@ async def chat(
                     await emit(evento, datos)
 
             res = await run_turn(ctx, llm, conector, svc.auditoria, svc.limites, historial,
-                                 texto, filtrado, conv_id, config, acciones=svc.acciones)
+                                 texto, filtrado, conv_id, config, acciones=svc.acciones,
+                                 recientes=svc.recientes if sistema.consultas_recientes else None)
             if res.completo:
                 try:
                     await asyncio.shield(svc.repo.guardar_turno(

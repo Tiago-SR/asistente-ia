@@ -69,7 +69,7 @@ Firma recomendada: `RS256` o `EdDSA` (el sistema guarda la privada, el asistente
 
 Reglas (si no se cumplen, la tool o el manifiesto se rechazan y se loguea):
 
-- `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único.
+- `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único. `consultas_recientes` está **reservado**: es una tool local del asistente ([6.7](#67-lo-mismo-que-ayer-consultas_recientes)) y una tool del sistema con ese nombre se descarta.
 - `descripcion`: ≤ 1 000 caracteres. `parametros`: JSON Schema válido, tipo `object`.
 - `efecto` ∈ {`lectura`, `escritura`}. Al modelo solo se exponen las de `lectura`, salvo las escrituras que declaran `confirmacion` y que el operador del asistente habilitó explícitamente ([sección 8](#8-acciones-con-confirmación-opcional)); ni siquiera esas se ejecutan sin la confirmación del usuario.
 - Máximo 40 tools por sistema y 256 KB por manifiesto.
@@ -220,6 +220,8 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **`base_url`:** el **backend** que sirve `/asistente/*`; el asistente lo llama de servidor a servidor. Si el asistente corre en Docker y el sistema en el host, usar `host.docker.internal:<puerto>` y que el sistema escuche en `0.0.0.0` (no solo `127.0.0.1`).
 - **`origenes_permitidos`:** orígenes exactos (esquema + host + puerto) de las **páginas** donde se inserta el widget. Se usan para CORS y se verifican contra el `Origin` de cada request. `http://localhost:8002` y `http://127.0.0.1:8002` son orígenes distintos.
 - **`locale_defecto` (opcional):** idioma (`es-UY`) de los usuarios cuyo token no trae el claim `locale`; si el token lo trae, manda el del token. Lo usan el prompt («idioma preferido del usuario») y el dictado del servidor.
+- **`zona_horaria` (opcional):** zona IANA (`America/Montevideo`) de los usuarios cuyo navegador no la informa. El widget envía la del navegador en cada mensaje y esa manda; sin ninguna de las dos se usa UTC. Define qué día es «hoy» para el asistente (la fecha de la sesión) y se guarda con cada consulta. Una zona desconocida en el registro deshabilita ese sistema; una inválida enviada por el navegador se ignora.
+- **`consultas_recientes` (opcional, `true` por defecto):** `false` desactiva para este sistema la tool local de «lo mismo que ayer» ([6.7](#67-lo-mismo-que-ayer-consultas_recientes)).
 - **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
 - **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 
@@ -240,6 +242,8 @@ sistemas:
     prompt_dominio: prompts/dominio/sgagro.md   # vocabulario y reglas del negocio
     locale_defecto: es-UY                       # idioma si el token no trae `locale`
     acciones_habilitadas: [agregar_nota, modificar_nota]   # escrituras que el modelo puede proponer (vacío = solo lectura)
+    zona_horaria: America/Montevideo            # «hoy» para usuarios cuyo navegador no informa la suya
+    consultas_recientes: true                   # tool local «lo mismo que ayer» (false = apagada)
     limites:
       mensajes_por_usuario_min: 10
       mensajes_por_usuario_dia: 200
@@ -307,6 +311,15 @@ preguntas:
 
 `docker compose run --rm asistente python evals/correr.py --preguntas evals/preguntas.yaml` mide aciertos, cifras no respaldadas, latencia, tokens y costo por pregunta (usa el LLM real: cuesta tokens).
 
+### 6.7 «Lo mismo que ayer» (`consultas_recientes`)
+
+El asistente ofrece al modelo una tool **propia** (no del sistema) que lista las consultas de lectura que el usuario ya hizo: la tool y sus parámetros, de la más reciente a la más antigua, agrupadas cuando se repiten. **Nunca devuelve resultados**: para repetir una consulta («lo mismo que ayer», «la del lunes»), el modelo vuelve a llamar a la tool original, así que las cifras son siempre las de ahora y se mantiene la regla de que toda cifra sale de una tool consultada en la conversación.
+
+- **De dónde sale:** de la auditoría de tools (`llamadas_tool`), que ya existía. No guarda nada nuevo salvo la zona horaria del usuario en cada llamada. Solo se listan las consultas exitosas de tools de lectura que el manifiesto ofrece **hoy** (una tool retirada, una escritura o una propuesta no aparecen) y solo las de ese `(sistema, usuario)`.
+- **Ventana:** la `retencion_dias` del sistema (30 por defecto). Pasado ese plazo la auditoría se borra: la purga de retención ahora también alcanza a `llamadas_tool`, que antes no se purgaba.
+- **Fechas y zona:** cada consulta lleva su `fecha` en la zona **actual** del usuario. Si cuando la hizo estaba en otra zona y eso cambia el día (p. ej. viajó), se agrega `zona_original` y `fecha_en_zona_original`, y el modelo pregunta ante la duda.
+- **Lo que el sistema anfitrión debe saber:** nada cambia en el contrato con el sistema, salvo que el nombre `consultas_recientes` queda reservado. Si el sistema no quiere que el asistente recuerde sus consultas, lo apaga con `consultas_recientes: false`.
+
 ## 7. Widget de chat (interfaz para el usuario)
 
 El asistente sirve un Web Component, `<asistente-chat>`, que el sistema inserta en una de sus páginas. No requiere framework ni build, y es independiente del stack del sistema. Es una **vista de chat a pantalla completa** (mensajes y entrada fija abajo; muestra solo la conversación actual, con un botón "Nueva conversación" en la barra superior y sin lista de chats por ahora), no una burbuja flotante.
@@ -331,6 +344,8 @@ El asistente sirve un Web Component, `<asistente-chat>`, que el sistema inserta 
 1. **Registrar el origen de la página** en `origenes_permitidos` (sección [6.3](#63-reglas-del-registro)). Sin eso, el asistente rechaza los requests del widget con `origen_no_permitido`.
 2. **La ruta de emisión del token** accesible desde esa página (sección 1). Debe estar protegida por la sesión del sistema, no ser pública.
 3. Opcional: Content Security Policy que permita `script-src` y `connect-src` hacia el asistente.
+
+En cada mensaje el widget envía la zona horaria del navegador (`zona_horaria` en `POST /v1/chat`, p. ej. `America/Montevideo`) para que «hoy» y «ayer» sean los del usuario; no la guarda.
 
 El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessionStorage`, únicamente el id de la conversación actual para retomarla al recargar la página (se descarta al cerrar la pestaña). Renueva el token antes de que venza y, ante `token_expirado`, renueva y reintenta el mensaje una vez.
 
@@ -500,7 +515,7 @@ Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), 
 
 ### 7.6 Lo que hoy no existe
 
-Para no dar por hecho algo que no está: **contexto de la pantalla actual** (que el asistente sepa en qué ficha está el usuario), **manifiesto de tools por rol** (es global por sistema: el sistema rechaza lo que el usuario no puede hacer, pero el modelo puede ofrecerlo), **avisos proactivos** (webhooks o consultas programadas), **memoria por usuario** entre conversaciones (hoy cada conversación empieza de cero), **síntesis de voz de servidor** (las respuestas se leen con las voces del navegador) y **borrar o deshacer** desde el asistente. Son decisiones de producto: conviene acordar el caso de uso antes de pedirlas.
+Para no dar por hecho algo que no está: **contexto de la pantalla actual** (que el asistente sepa en qué ficha está el usuario), **manifiesto de tools por rol** (es global por sistema: el sistema rechaza lo que el usuario no puede hacer, pero el modelo puede ofrecerlo), **avisos proactivos** (webhooks o consultas programadas), **memoria por usuario** entre conversaciones (cada conversación empieza de cero; lo único que cruza conversaciones es repetir una consulta anterior con [`consultas_recientes`](#67-lo-mismo-que-ayer-consultas_recientes), sin preferencias ni alias guardados), **síntesis de voz de servidor** (las respuestas se leen con las voces del navegador) y **borrar o deshacer** desde el asistente. Son decisiones de producto: conviene acordar el caso de uso antes de pedirlas.
 
 ## 8. Acciones con confirmación (opcional)
 

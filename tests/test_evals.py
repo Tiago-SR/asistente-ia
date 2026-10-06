@@ -142,6 +142,50 @@ def test_el_set_de_acciones_es_valido():
     assert {"propuesta", "ambigua", "inyeccion", "fuera_de_alcance"} <= categorias
 
 
+def test_el_set_de_memoria_es_valido():
+    conjunto = yaml.safe_load((EVALS / "preguntas_memoria.yaml").read_text(encoding="utf-8"))
+    ids = [q["id"] for q in conjunto["preguntas"]]
+    assert len(ids) == len(set(ids)) >= 6
+    permitidos = {"turnos", "id", "categoria", "usuario", "previas", "tools_requeridas", "tools_prohibidas",
+                  "numeros", "sin_numeros", "contiene", "no_contiene", "permitidos"}
+    for q in conjunto["preguntas"]:
+        assert set(q) <= permitidos, q["id"]
+        assert q["turnos"] and q["usuario"] in ("ana", "beto"), q["id"]
+        assert all(isinstance(x, str) and x for x in q.get("previas", [])), q["id"]
+    assert {"repetir", "ambigua", "sin_registro", "aislamiento"} <= {q["categoria"] for q in conjunto["preguntas"]}
+    assert all("consultas_recientes" in q["tools_requeridas"] for q in conjunto["preguntas"]
+               if q["categoria"] in ("repetir", "ambigua"))
+
+
+def test_las_previas_van_cada_una_en_su_conversacion_y_no_cuentan_como_tools():
+    class Falso:
+        canal = "texto"
+
+        def __init__(self):
+            self.turnos = []
+
+        def token(self, usuario):
+            return "t"
+
+        def turno(self, token, mensaje, conversacion):
+            self.turnos.append((mensaje, conversacion))
+            n = len(self.turnos)
+            return {"texto": "Son 660,5 ha", "voz": None, "voz_s": None, "tiempos_ms": {}, "propuestas": [],
+                    "tools": ["resumen_por_cultivo"], "iteraciones": 2, "error": None, "conversacion": f"c{n}",
+                    "uso": {"tokens_in": 10, "tokens_out": 1, "tokens_in_cache": 0}, "latencia_s": 1.0,
+                    "primer_token_s": 0.5}
+
+    cli = Falso()
+    q = {"id": "m", "categoria": "repetir", "usuario": "ana", "previas": ["uno", "dos"], "turnos": ["tres", "cuatro"],
+         "tools_requeridas": ["consultas_recientes"], "numeros": [660.5]}
+    r = correr.correr_pregunta(cli, q, BASE, None)
+    # las previas abren conversación nueva cada una; los turnos de la pregunta comparten la suya
+    assert cli.turnos == [("uno", None), ("dos", None), ("tres", None), ("cuatro", "c3")]
+    assert r["tools"] == ["resumen_por_cultivo"] * 2 and r["iteraciones"] == 4  # solo las de los turnos
+    assert r["uso"]["tokens_in"] == 40  # el costo de las previas sí cuenta
+    assert not r["ok"] and any("consultas_recientes" in f for f in r["fallos"])  # las tools de las previas no valen
+
+
 # ───────────────────────── canal de voz ─────────────────────────
 
 

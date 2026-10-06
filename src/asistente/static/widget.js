@@ -182,6 +182,10 @@
     return "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance === "function";
   }
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
+  // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
+  function zonaHoraria() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (_) { return undefined; }
+  }
 
   // ── Modo voz (antes «manos libres»; ver contrato 7.4) ──
   // Decisión de producto: nada se envía solo al terminar de hablar; el usuario confirma («enviar» o botón).
@@ -1625,7 +1629,7 @@
     // Devuelve "ok" | "token_expirado" | "error".
     async _turno(texto, burbuja, estado) {
       const canalVoz = this._mhActivo();   // en el modo voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual)
-      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto" });
+      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria() });
       const r = await this._conToken((h) => fetch(this._servidor + "/v1/chat", {
         method: "POST", signal: this._abort.signal, body: cuerpo,
         headers: { ...h, "Content-Type": "application/json", Accept: "text/event-stream" },

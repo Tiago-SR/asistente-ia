@@ -18,6 +18,7 @@ from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas, Sistema
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
+from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo
 
 
@@ -42,6 +43,7 @@ class Servicios:
     cierre: Callable[[], object] | None = None
     stt: STT | None = None  # None = dictado deshabilitado
     acciones: AccionesSql | None = None  # None = sin acciones con confirmación
+    recientes: RecientesSql | None = None  # None = sin la tool `consultas_recientes`
 
 
 def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
@@ -96,4 +98,5 @@ def construir(settings: Settings) -> Servicios:
         cierre=motor.dispose,
         stt=_fabrica_stt(settings),
         acciones=AccionesSql(sesiones, settings.acciones_max_por_hora),
+        recientes=RecientesSql(sesiones),
     )

@@ -10,6 +10,7 @@ import httpx
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from asistente.core.recientes import NOMBRE as TOOL_LOCAL_RECIENTES
 from asistente.sistemas.registro import RegistroSistemas, Sistema
 
 log = logging.getLogger(__name__)
@@ -111,6 +112,8 @@ def _parsear_tool(t: object) -> Tool:
     nombre = t.get("nombre")
     if not isinstance(nombre, str) or not NOMBRE_RE.match(nombre):
         raise ManifiestoInvalido(f"nombre inválido: {nombre!r}")
+    if nombre == TOOL_LOCAL_RECIENTES:
+        raise ManifiestoInvalido(f"{nombre}: nombre reservado para una tool local del asistente")
     desc = t.get("descripcion")
     if not isinstance(desc, str) or not desc.strip() or len(desc) > MAX_DESCRIPCION:
         raise ManifiestoInvalido(f"{nombre}: descripcion ausente o > {MAX_DESCRIPCION} caracteres")

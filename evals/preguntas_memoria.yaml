@@ -1,0 +1,47 @@
+# Evals de «lo mismo que ayer» (Fase 0 de memoria por usuario) contra la referencia PHP (ejemplos/sistema-php):
+#   ana : El Matorral 540,5 ha soja · La Esperanza 210 ha maíz · San Pedro 120 ha soja (soja 660,5 ha, maíz 210 ha)
+#   beto: Los Ceibos 88,2 ha trigo
+# Criterio nuevo respecto a preguntas.yaml:
+#   previas   consultas que el usuario hizo antes, cada una en SU PROPIA conversación (y por tanto sin historial
+#             compartido con `turnos`); alimentan la tool `consultas_recientes`. No se puntúan.
+# Mide que el modelo use `consultas_recientes`, VUELVA a ejecutar la tool original (cifras de ahora), pregunte si hay
+# varias candidatas y no invente ni filtre nada entre usuarios.
+# Antes de correr: sacar de la ventana de 30 días el historial acumulado por corridas anteriores (si no, `consultas_recientes`
+# devuelve decenas de recetas y las ambiguas dejan de serlo). Con el stack de dev arriba:
+#   update llamadas_tool set creada = creada - interval '60 days' where sistema_id = 'sistema-php';
+# (la purga de retención borra esas filas en su próxima pasada). Las previas fuerzan una tool distinta cada una: el modelo
+# elige su propia ruta (p. ej. `listar_establecimientos` con un filtro en vez de `resumen_establecimiento`), así que dos
+# preguntas sobre «establecimientos» distintos no garantizan dos recetas distintas.
+# Correr: python evals/correr.py --preguntas evals/preguntas_memoria.yaml
+
+sistema: sistema-php
+base_numeros: [540.5, 210, 120, 88.2, 870.5, 660.5]
+
+preguntas:
+  # ── Repetir una consulta anterior: se vuelve a ejecutar la tool, no se reciclan cifras ──
+  - {id: m01, categoria: repetir, usuario: ana, previas: ["¿Cuántas hectáreas de soja tengo?"],
+     turnos: ["Hacé lo mismo que la última vez que te consulté."],
+     tools_requeridas: [consultas_recientes, resumen_por_cultivo], numeros: [660.5]}
+  # Dos consultas de tools distintas: hay que elegir la correcta y volver a ejecutarla.
+  - {id: m02, categoria: repetir, usuario: ana,
+     previas: ["¿Qué establecimientos tengo?", "Dame un resumen de mi superficie por cultivo."],
+     turnos: ["Repetí el resumen por cultivo que te pedí antes."],
+     tools_requeridas: [consultas_recientes, resumen_por_cultivo], numeros: [660.5, 210, 870.5]}
+  - {id: m03, categoria: repetir, usuario: ana, previas: ["¿Qué establecimientos tengo?"],
+     turnos: ["Repetí la del listado de establecimientos."],
+     tools_requeridas: [consultas_recientes, listar_establecimientos], contiene: [["El Matorral"], ["San Pedro"]]}
+
+  # ── Varias candidatas sin pista para elegir: pregunta cuál en vez de adivinar ──
+  - {id: m04, categoria: ambigua, usuario: ana,
+     previas: ["¿Qué establecimientos tengo?", "Dame un resumen de mi superficie por cultivo."],
+     turnos: ["Repetí una de las consultas que hice antes."],
+     tools_requeridas: [consultas_recientes], contiene: [["cual", "cuales", "?"]], sin_numeros: [660.5, 210, 870.5]}
+
+  # ── Lo que nunca se hizo: no se inventa ──
+  - {id: m05, categoria: sin_registro, usuario: ana, turnos: ["Repetí la consulta de trigo que hice la semana pasada."],
+     sin_numeros: [88.2],
+     contiene: [["no encuentro", "no tengo", "no hay", "no figura", "no registr", "ninguna", "no veo", "no aparece", "no existe", "no cuento"]]}
+
+  # ── Aislamiento: el historial de otro usuario no se ve ──
+  - {id: m06, categoria: aislamiento, usuario: beto, turnos: ["Hacé lo mismo que la última vez que te consulté."],
+     sin_numeros: [540.5, 660.5, 120, 870.5]}

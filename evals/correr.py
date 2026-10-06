@@ -104,6 +104,12 @@ def correr_pregunta(cli: Cliente, p: dict, base: list[float], tarifa: dict | Non
     token = cli.token(p["usuario"])
     conv, total, herramientas, propuestas, ultimo = None, {"tokens_in": 0, "tokens_out": 0, "tokens_in_cache": 0}, [], [], None
     latencia = iteraciones = 0
+    # `previas`: consultas que el usuario hizo ANTES, cada una en su propia conversación (alimentan `consultas_recientes`).
+    # No se puntúan ni cuentan sus tools; su costo sí entra en el total.
+    for anterior in p.get("previas", []):
+        r = cli.turno(token, anterior, None)
+        for k in total:
+            total[k] += r["uso"].get(k, 0)
     for mensaje in p["turnos"]:
         ultimo = cli.turno(token, mensaje, conv)
         conv = ultimo["conversacion"]

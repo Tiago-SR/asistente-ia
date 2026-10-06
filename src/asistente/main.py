@@ -33,7 +33,8 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
         if propio and app.state.servicios.settings.purga_intervalo_s > 0:
             svc = app.state.servicios
             purga = asyncio.create_task(
-                bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s, svc.acciones))
+                bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s, svc.acciones,
+                            svc.auditoria))
         try:
             yield
         finally:

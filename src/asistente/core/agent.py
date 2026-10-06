@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from asistente.core import events
+from asistente.core import recientes as consultas
 from asistente.core.llm.base import LlamadaTool, LLMError, Mensaje, Uso
 from asistente.core.ports import (
     LLM,
@@ -21,6 +22,7 @@ from asistente.core.ports import (
     Contexto,
     LimiteExcedido,
     Limites,
+    Recientes,
     ResultadoTool,
 )
 from asistente.core.voz_resumen import FiltroVoz, limpiar
@@ -77,6 +79,7 @@ async def run_turn(
     conversacion_id: Any = None,
     config: ConfigTurno | None = None,
     acciones: Acciones | None = None,
+    recientes: Recientes | None = None,
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
@@ -89,7 +92,7 @@ async def run_turn(
     try:
         async with asyncio.timeout(config.timeout_turno_s):
             await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                        conversacion_id, config, estado, acciones)
+                        conversacion_id, config, estado, acciones, recientes)
     except TimeoutError:
         estado.motivo, estado.nuevos = "error", []
         await emit(events.ERROR, "timeout_turno")
@@ -97,9 +100,12 @@ async def run_turn(
 
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                conversacion_id, config, estado, acciones=None) -> None:
+                conversacion_id, config, estado, acciones=None, recientes=None) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
+    lectura = {t.nombre for t in tools if not t.escritura}
+    if recientes is not None:
+        tools = [*tools, consultas.TOOL]  # tool local del asistente: no existe en el sistema
     propuesta_hecha = False  # una sola propuesta por turno
     nuevos = [Mensaje("user", texto)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
@@ -172,6 +178,8 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 propuesta_hecha = True
                 atenciones.append(_proponer(ctx, conector, acciones, auditoria, conversacion_id,
                                             c, config, emit))
+            elif recientes is not None and c.nombre == consultas.NOMBRE:
+                atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
                 atenciones.append(_ejecutar(ctx, conector, auditoria, conversacion_id, c, sem, config))
         resultados = await asyncio.gather(*atenciones)
@@ -205,6 +213,25 @@ async def _ejecutar(ctx, conector, auditoria, conversacion_id, c: LlamadaTool, s
             except Exception:  # el contrato dice que no lanza; si lo hace, no se cae el turno
                 log.exception("[%s] el conector lanzó en %s", ctx.request_id, c.nombre)
                 r = ResultadoTool(False, error="error_sistema", detalle="falla interna del conector")
+    ms = int((time.monotonic() - inicio) * 1000)
+    try:
+        await auditoria.registrar_tool(ctx, conversacion_id, c.nombre, c.parametros, r, ms)
+    except Exception:
+        log.exception("[%s] no se pudo auditar %s", ctx.request_id, c.nombre)
+    return r
+
+
+async def _consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c: LlamadaTool) -> ResultadoTool:
+    """Tool local: lee el historial de consultas del propio usuario. No toca al sistema ni el conector."""
+    inicio = time.monotonic()
+    if c.argumentos_invalidos:
+        r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
+    else:
+        try:
+            r = await consultas.ejecutar(ctx, recientes, lectura, c.parametros)
+        except Exception:
+            log.exception("[%s] falló %s", ctx.request_id, c.nombre)
+            r = ResultadoTool(False, error="error_sistema", detalle="no se pudo leer el historial de consultas")
     ms = int((time.monotonic() - inicio) * 1000)
     try:
         await auditoria.registrar_tool(ctx, conversacion_id, c.nombre, c.parametros, r, ms)

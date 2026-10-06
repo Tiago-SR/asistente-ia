@@ -26,6 +26,7 @@ from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.models import Base, UsoModelo
 from asistente.store.models import LlamadaTool as FilaLlamada
+from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo, recortar
 from conftest import entorno, entrada_sistema, escribir_registro, firmar
 
@@ -81,13 +82,15 @@ def llm():
 @pytest.fixture
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None,
-                   acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml"):
+                   acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
+                   consultas_recientes=True):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
             entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes,
-                            acciones_habilitadas=list(acciones_habilitadas)),
+                            acciones_habilitadas=list(acciones_habilitadas),
+                            consultas_recientes=consultas_recientes),
             entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes),
         ])
         registro = RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
@@ -105,7 +108,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
             prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt,
-            acciones=AccionesSql(sesiones, max_acciones_hora),
+            acciones=AccionesSql(sesiones, max_acciones_hora), recientes=RecientesSql(sesiones),
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")

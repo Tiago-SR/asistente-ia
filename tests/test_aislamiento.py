@@ -285,7 +285,7 @@ async def test_instrucciones_en_un_resultado_no_cambian_tools_ni_sistema(api, ll
     # tools y system idénticos en todas las iteraciones
     nombres = [[t.nombre for t in ll.tools] for ll in guion.llamadas]
     assert nombres[0] == nombres[1] == nombres[2] == [
-        "listar_establecimientos", "resumen_establecimiento", "listar_notas",
+        "listar_establecimientos", "resumen_establecimiento", "listar_notas", "consultas_recientes",
     ]
     assert len({ll.system for ll in guion.llamadas}) == 1
 
@@ -365,7 +365,7 @@ async def test_tools_de_escritura_no_se_exponen_ni_se_ejecutan(api, llm, trafico
     assert ev[-1][0] == "done"
     assert "eliminar_establecimiento" not in {t.nombre for ll in guion.llamadas for t in ll.tools}
     assert [t.nombre for t in guion.llamadas[0].tools] == [
-        "listar_establecimientos", "resumen_establecimiento", "listar_notas",
+        "listar_establecimientos", "resumen_establecimiento", "listar_notas", "consultas_recientes",
     ]
     res = resultado_de_tool(guion)
     assert (res["ok"], res["error"]) == (False, "no_disponible")

@@ -318,6 +318,7 @@ class Verificador:
         self._chk(len(nombres) == len(set(nombres)), "nombres de tools únicos")
         self._chk(all(NOMBRE_RE.match(n) for n in nombres), "nombres de tools válidos",
                   ", ".join(n for n in nombres if not NOMBRE_RE.match(n)))
+        self._chk("consultas_recientes" not in nombres, "ninguna tool usa el nombre reservado `consultas_recientes`")
         self._chk(len(tools) <= 40, "≤ 40 tools", f"{len(tools)}")
         self._chk(r.bytes <= 256 * 1024, "manifiesto ≤ 256 KB", f"{r.bytes} bytes")
         for t in tools:

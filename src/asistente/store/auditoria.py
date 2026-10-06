@@ -1,7 +1,9 @@
 """Auditoría de tools en `llamadas_tool`: metadatos, nunca el resultado."""
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.ports import Contexto, ResultadoTool
@@ -30,5 +32,16 @@ class AuditoriaSql:
                     status_http=resultado.status_http,
                     duracion_ms=duracion_ms,
                     bytes_respuesta=resultado.bytes_respuesta,
+                    zona_horaria=ctx.zona_horaria[:64],
                 )
             )
+
+    async def purgar(self, sistema_id: str, retencion_dias: int, ahora: datetime | None = None) -> int:
+        """Borra las llamadas más antiguas que la retención del sistema (los parámetros pueden traer
+        datos de negocio)."""
+        limite = (ahora or datetime.now(UTC)) - timedelta(days=retencion_dias)
+        async with self._sesiones.begin() as s:
+            r = await s.execute(
+                delete(LlamadaTool).where(LlamadaTool.sistema_id == sistema_id, LlamadaTool.creada < limite)
+            )
+            return r.rowcount

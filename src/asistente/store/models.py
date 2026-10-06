@@ -71,7 +71,8 @@ class Mensaje(Base):
 
 
 class LlamadaTool(Base):
-    """Auditoría de cada tool ejecutada. Sin resultados completos, solo metadatos."""
+    """Auditoría de cada tool ejecutada. Sin resultados completos, solo metadatos. Se purga con la
+    retención del sistema; `parametros` alimenta `consultas_recientes`."""
 
     __tablename__ = "llamadas_tool"
     __table_args__ = (Index("ix_llamada_sistema_usuario", "sistema_id", "usuario_ref", "creada"),)
@@ -89,6 +90,8 @@ class LlamadaTool(Base):
     status_http: Mapped[int | None] = mapped_column(Integer)
     duracion_ms: Mapped[int | None] = mapped_column(Integer)
     bytes_respuesta: Mapped[int | None] = mapped_column(Integer)
+    # Zona del usuario cuando hizo la consulta (IANA): permite decir «ayer» aunque cambie de zona.
+    zona_horaria: Mapped[str | None] = mapped_column(String(64))
     creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
 
 

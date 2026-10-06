@@ -1,13 +1,26 @@
 """Puertos del core. Sin dependencias de api/, sistemas/ ni store/."""
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Protocol
 
 from asistente.core.llm.base import Capacidades, Mensaje, OnDelta, Respuesta, ToolDef, Uso
 
 __all__ = [
-    "LLM", "STT", "AccionCreada", "Acciones", "Auditoria", "Capacidades", "Conector", "Contexto",
-    "LimiteExcedido", "Limites", "ResultadoPropuesta",
+    "LLM",
+    "STT",
+    "AccionCreada",
+    "Acciones",
+    "Auditoria",
+    "Capacidades",
+    "Conector",
+    "ConsultaPrevia",
+    "Contexto",
+    "LimiteExcedido",
+    "Limites",
+    "Recientes",
+    "ResultadoPropuesta",
 ]
 
 
@@ -32,6 +45,10 @@ class Contexto:
     prompt_system: str
     prompt_version: str
     limites: LimitesUso
+    # Zona del usuario (IANA): resuelve «hoy» y «ayer»; se guarda con cada tool auditada.
+    zona_horaria: str = "UTC"
+    # Cuánto se conservan sus consultas (la ventana máxima de `consultas_recientes`).
+    retencion_dias: int = 30
 
 
 @dataclass(frozen=True)
@@ -80,6 +97,18 @@ class ResultadoPropuesta:
 class AccionCreada:
     id: str
     expira: str  # ISO 8601
+
+
+@dataclass(frozen=True)
+class ConsultaPrevia:
+    """Una consulta de lectura que el usuario ya hizo (tool y parámetros, nunca el resultado),
+    agrupada: `veces` cuenta las repeticiones idénticas y `ultima_vez` es la más reciente (UTC)."""
+
+    tool: str
+    parametros: dict
+    ultima_vez: datetime
+    veces: int
+    zona_horaria: str | None  # la del usuario cuando la hizo; None si no se guardó
 
 
 class LLM(Protocol):
@@ -144,6 +173,17 @@ class LimiteExcedido(Exception):
     def __init__(self, cual: str) -> None:
         super().__init__(cual)
         self.cual = cual  # mensajes_min | mensajes_dia | tokens_mes
+
+
+class Recientes(Protocol):
+    """Historial de consultas del usuario, para repetirlas con datos actuales."""
+
+    async def consultas(
+        self, ctx: Contexto, tools: Collection[str], desde: datetime, limite: int
+    ) -> list[ConsultaPrevia]:
+        """Consultas exitosas de `tools` desde `desde`, de la más reciente a la más antigua.
+        Solo las del `(sistema_id, usuario_ref)` de `ctx`."""
+        ...
 
 
 class Limites(Protocol):

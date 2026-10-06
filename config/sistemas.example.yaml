@@ -22,3 +22,10 @@ sistemas:
     # Fase 5 (opcional): escrituras que el modelo puede PROPONER; el usuario confirma cada una en pantalla.
     # Vacío (por defecto) = solo lectura. La tool debe declarar `confirmacion` en su manifiesto (contrato, sección 8).
     # acciones_habilitadas: [agregar_nota, modificar_nota]
+    # Zona horaria (IANA) de los usuarios cuyo navegador no la informa; el widget envía la suya y esa manda.
+    # Define qué día es «hoy» para el asistente. Sin ella ni la del navegador se usa UTC.
+    # zona_horaria: America/Montevideo
+    # «Lo mismo que ayer» (tool local `consultas_recientes`): el asistente puede listar las consultas que el usuario ya hizo
+    # (tool y parámetros, nunca resultados) y volver a ejecutarlas con datos actuales. Activa por defecto; `false` la apaga
+    # para este sistema. Solo ve los últimos `retencion_dias` días.
+    # consultas_recientes: true

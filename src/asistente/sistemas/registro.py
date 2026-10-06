@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from asistente.core import zona
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +98,17 @@ class Sistema(_Modelo):
     locale_defecto: str | None = Field(default=None, pattern=r"^[a-z]{2}(-[A-Z]{2})?$")
     # Fase 5: escrituras que el modelo puede proponer (con confirmación del usuario). Vacío = solo lectura.
     acciones_habilitadas: tuple[str, ...] = ()
+    # Zona (IANA, p. ej. `America/Montevideo`) de los usuarios cuyo navegador no la informa: fija qué día es «hoy».
+    zona_horaria: str | None = None
+    # Tool local `consultas_recientes` («lo mismo que ayer»): lee las consultas que ya se auditan, sin guardar nada nuevo.
+    consultas_recientes: bool = True
+
+    @field_validator("zona_horaria")
+    @classmethod
+    def _zona(cls, valor: str | None) -> str | None:
+        if valor is not None and zona.valida(valor) is None:
+            raise ValueError(f"zona horaria desconocida: {valor!r}")
+        return valor
 
     @model_validator(mode="after")
     def _base_url(self) -> Self:
