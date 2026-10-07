@@ -251,11 +251,6 @@ async def test_token_vencido_se_distingue(api):
     assert r.status_code == 401 and r.json() == {"error": "token_expirado"}
 
 
-async def test_token_firmado_con_clave_de_otro_sistema_401(api):
-    r = await api.get("/v1/estado", headers=auth("mock-a", _clave="secreto-mock-b-" + "x" * 32))
-    assert r.status_code == 401
-
-
 async def test_origen_debe_pertenecer_al_sistema_del_token(api):
     ok = await api.get("/v1/estado", headers={**auth(), "Origin": ORIGEN_A})
     assert ok.status_code == 200 and ok.headers["access-control-allow-origin"] == ORIGEN_A

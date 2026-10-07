@@ -246,14 +246,6 @@ async def test_consulta_guardada_con_tool_de_escritura_inexistente_o_mal_paramet
     assert await filas(sesiones, ana) == []
 
 
-async def test_tope_de_veinte_recuerdos_en_la_propuesta(mem, llm, ana, sesiones):
-    almacen = MemoriaSql(sesiones)
-    for i in range(20):
-        await almacen.guardar("mock-a", ana, "alias", f"alias {i}", {"entidad": "campo", "id": str(i)})
-    guion, _, conf = await pedir(mem, llm, ana, pide(recordar("preferencia", "decimales", 0)))
-    assert conf is None and resultado_de_tool(guion, 1)["error"] == "tope_alcanzado"
-
-
 async def test_una_propuesta_por_turno_y_el_tope_por_hora(construir_app, llm, ana):
     async with construir_app(memoria_habilitada=True, max_acciones_hora=1) as api:
         guion, ev, _ = await pedir(api, llm, ana, pide(

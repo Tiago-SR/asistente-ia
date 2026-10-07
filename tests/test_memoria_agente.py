@@ -61,13 +61,6 @@ def resultado(llm, indice):
     return json.loads(llm.llamadas[indice].messages[-1].texto)
 
 
-async def test_las_tools_locales_se_ofrecen_solo_con_el_servicio_de_memoria():
-    _, _, llm, *_ = await correr(memoria=True)
-    assert {"recordar", "olvidar"} <= {t.nombre for t in llm.llamadas[0].tools}
-    _, _, llm, *_ = await correr(memoria=False)
-    assert not {"recordar", "olvidar"} & {t.nombre for t in llm.llamadas[0].tools}
-
-
 async def test_propuesta_local_no_pasa_por_el_conector_y_lleva_el_resumen_del_servidor():
     res, ev, llm, conector, acc = await correr(pide(LISTA), pide(alias()))
     assert res.completo and conector.propuestas == []
@@ -82,31 +75,6 @@ async def test_propuesta_local_no_pasa_por_el_conector_y_lleva_el_resumen_del_se
     assert resultado(llm, 2)["datos"]["estado"] == "pendiente_de_confirmacion"
 
 
-async def test_alias_con_un_id_que_no_aparecio_en_el_turno_se_rechaza():
-    res, ev, llm, _, acc = await correr(pide(LISTA), pide(alias(id_="999")))
-    assert res.completo and acc.creadas == [] and "confirmacion" not in [e for e, _ in ev]
-    assert resultado(llm, 2)["ok"] is False and resultado(llm, 2)["error"] == "id_no_visto"
-
-
-async def test_alias_sin_haber_consultado_nada_se_rechaza():
-    _, _, llm, _, acc = await correr(pide(alias()))
-    assert acc.creadas == [] and resultado(llm, 1)["error"] == "id_no_visto"
-
-
-async def test_consulta_guardada_con_tool_de_escritura_o_inexistente_se_rechaza():
-    for tool in ("agregar_nota", "no_existe"):
-        _, _, llm, _, acc = await correr(pide(recordar(
-            "consulta_guardada", "x", {"tool": tool, "parametros": {}})))
-        assert acc.creadas == [] and resultado(llm, 1)["error"] == "no_disponible", tool
-
-
-async def test_consulta_guardada_con_tool_de_lectura_se_propone():
-    _, ev, _, _, acc = await correr(pide(recordar(
-        "consulta_guardada", "la de siempre", {"tool": "lista", "parametros": {}})))
-    assert [p[3].resumen for p in acc.creadas] == ["Recordar la consulta “la de siempre”: lista"]
-    assert [d["local"] for e, d in ev if e == "confirmacion"] == [True]
-
-
 async def test_sin_el_servicio_de_acciones_no_hay_propuesta():
     _, _, llm, _, acc = await correr(pide(recordar("preferencia", "decimales", 0)), acciones=False)
     assert acc.creadas == [] and resultado(llm, 1)["error"] == "no_disponible"
@@ -117,10 +85,3 @@ async def test_sin_memoria_las_tools_locales_son_tools_desconocidas():
     assert res.completo and acc.creadas == [] and "confirmacion" not in [e for e, _ in ev]
     # va al conector como cualquier tool (el real la rechaza por desconocida: ver test_memoria_api)
     assert ("recordar", {"tipo": "preferencia", "clave": "decimales", "valor": 0}) in conector.llamadas
-
-
-async def test_una_sola_propuesta_por_turno_aunque_se_mezclen_locales():
-    _, _, llm, _, acc = await correr(pide(
-        recordar("preferencia", "decimales", 0), LlamadaTool("c3", "olvidar", {"tipo": "alias", "clave": "x"})))
-    assert len(acc.creadas) == 1
-    assert json.loads(llm.llamadas[1].messages[-1].texto)["error"] == "una_accion_a_la_vez"

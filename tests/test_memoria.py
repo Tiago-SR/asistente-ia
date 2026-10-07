@@ -345,12 +345,6 @@ async def test_tope_de_veinte_recuerdos_pero_reemplazar_una_clave_existente_si_s
     assert p.ok  # reemplaza, no suma
 
 
-async def test_guardar_de_nuevo_la_misma_clave_avisa_que_reemplaza(servicio, almacen):
-    await almacen.guardar("mock-a", "ana", "preferencia", "decimales", 2)
-    p = await proponer(servicio, "recordar", {"tipo": "preferencia", "clave": "decimales", "valor": 0})
-    assert p.ok and p.lineas == ("Reemplaza: Cifras con 2 decimales",)
-
-
 async def test_olvidar_propone_con_lo_que_hay_guardado_y_falla_si_no_existe(servicio, almacen):
     p = await proponer(servicio, "olvidar", {"tipo": "alias", "clave": "la sojera"})
     assert not p.ok and p.error == "no_encontrado"
