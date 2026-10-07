@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     modelo_default: str | None = _env("ASISTENTE_MODELO_DEFAULT", None)
 
     max_iter: int = _env("ASISTENTE_MAX_ITER", 8)
-    max_output_tokens: int = _env("ASISTENTE_MAX_OUTPUT_TOKENS", 1500)
+    max_output_tokens: int = _env("ASISTENTE_MAX_OUTPUT_TOKENS", 4096)
     timeout_turno_s: float = _env("ASISTENTE_TIMEOUT_TURNO_S", 120.0)
     max_turnos_historial: int = _env("ASISTENTE_MAX_TURNOS_HISTORIAL", 10)
     max_mensaje_chars: int = _env("ASISTENTE_MAX_MENSAJE_CHARS", 4000)

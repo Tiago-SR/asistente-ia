@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 # Descripción legible para el evento `tool`; sin parámetros, que pueden ser datos de negocio.
 _LEGIBLE = "Consultando {nombre}"
 _LEGIBLE_ACCION = "Preparando {nombre}"
+_AVISO_CORTADA = "\n\n_(La respuesta se cortó por ser demasiado larga. Pedime que siga o que sea más breve.)_"
 
 # Lo que ve el modelo tras proponer una acción: no se ejecutó y no debe decir que sí.
 _PENDIENTE = (
@@ -46,7 +47,7 @@ _PENDIENTE = (
 @dataclass(frozen=True)
 class ConfigTurno:
     max_iter: int = 8
-    max_output_tokens: int = 1500
+    max_output_tokens: int = 4096
     # Debe ser menor que la vida del token del usuario.
     timeout_turno_s: float = 120.0
     timeout_tool_s: float = 30.0
@@ -113,6 +114,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
     if memoria is not None:
         tools = [*tools, *memorias.TOOLS]  # `recordar` y `olvidar`: locales, siempre con botón
     propuesta_hecha = False  # una sola propuesta por turno
+    reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
     nuevos = [Mensaje("user", texto)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
     sem = asyncio.Semaphore(config.max_tools_concurrentes if usar_paralelas else 1)
@@ -161,6 +163,22 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
             resp = replace(resp, texto=limpiar(resp.texto))  # el bloque `<voz>` no se guarda ni se reenvía al modelo
 
         if resp.motivo_fin != "tool":
+            if resp.motivo_fin == "limite":
+                log.warning("[%s] respuesta cortada por max_output_tokens=%d (salida=%d tokens, %d caracteres)",
+                            ctx.request_id, config.max_output_tokens, resp.uso.tokens_out, len(resp.texto))
+            if not resp.texto.strip():
+                # Sin texto ni tools: el usuario no vería nada. Con `limite` el razonamiento se comió el tope
+                # (repetir daría lo mismo); en otro caso suele ser transitorio y se repite una vez.
+                log.warning("[%s] el modelo no devolvió texto (motivo=%s, salida=%d tokens)",
+                            ctx.request_id, resp.motivo_fin, resp.uso.tokens_out)
+                if resp.motivo_fin != "limite" and not reintento_vacio:
+                    reintento_vacio = True
+                    continue
+                estado.motivo = "error"
+                await emit(events.ERROR, "respuesta_cortada" if resp.motivo_fin == "limite" else "respuesta_vacia")
+                return
+            if resp.motivo_fin == "limite":
+                await emit(events.DELTA, _AVISO_CORTADA)  # se ve en pantalla; no se guarda en el historial
             nuevos.append(resp.como_mensaje())
             estado.motivo, estado.nuevos, estado.texto = "fin", nuevos, resp.texto
             marca("total")

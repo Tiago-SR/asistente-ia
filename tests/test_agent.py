@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from asistente.core.agent import ConfigTurno, run_turn
-from asistente.core.llm.base import LlamadaTool, LLMError, ToolDef
+from asistente.core.llm.base import LlamadaTool, LLMError, Respuesta, ToolDef
 from asistente.core.llm.falso import LLMFalso, pide, texto
 from asistente.core.ports import Contexto, LimiteExcedido, LimitesUso, ResultadoTool
 
@@ -142,6 +142,28 @@ async def test_fallo_del_llm():
 
     res, ev, *_ = await correr(LLMFalso([falla]))
     assert res.motivo == "error" and ev[-1] == ("error", "llm_no_disponible")
+
+
+async def test_respuesta_vacia_se_reintenta_una_vez():
+    res, ev, *_ = await correr(LLMFalso([texto(""), texto("ahora sí")]))
+    assert res.completo and res.texto == "ahora sí" and ("error", "respuesta_vacia") not in ev
+
+
+async def test_respuesta_vacia_dos_veces_es_error_visible():
+    res, ev, *_ = await correr(LLMFalso([texto(""), texto("  ")]))
+    assert res.motivo == "error" and ev[-1] == ("error", "respuesta_vacia")
+
+
+async def test_limite_sin_texto_es_error_y_no_se_reintenta():
+    llm = LLMFalso([Respuesta("", (), "limite")])
+    res, ev, *_ = await correr(llm)
+    assert res.motivo == "error" and ev[-1] == ("error", "respuesta_cortada") and len(llm.llamadas) == 1
+
+
+async def test_limite_con_texto_avisa_y_no_guarda_el_aviso():
+    res, ev, *_ = await correr(LLMFalso([Respuesta("La respuesta es larga", (), "limite")]))
+    assert res.completo and res.texto == "La respuesta es larga"
+    assert any(e == "delta" and "se cortó" in d for e, d in ev if isinstance(d, str))
 
 
 async def test_timeout_de_turno():

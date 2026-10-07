@@ -177,6 +177,8 @@
     demasiadas_iteraciones: "No pude completar la consulta. Probá reformularla.",
     llm_no_disponible: "El asistente no está disponible por ahora.",
     llm_no_configurado: "El asistente no está disponible por ahora.",
+    respuesta_vacia: "No llegó respuesta del asistente. Probá de nuevo.",
+    respuesta_cortada: "La respuesta era demasiado larga y se cortó. Probá pedirla más corta.",
     origen_no_permitido: "Esta página no está autorizada para usar el asistente.",
     mensaje_invalido: "El mensaje está vacío o es demasiado largo.",
     no_se_pudo_guardar: "No se pudo guardar la conversación.",
@@ -1716,7 +1718,9 @@
     _hablarNavegador(texto, alIniciar, alFin) {
       const u = new window.SpeechSynthesisUtterance(texto);
       const idioma = this.getAttribute("idioma") || "es-UY";
-      const v = elegirVoz(window.speechSynthesis.getVoices(), idioma, this.getAttribute("voz"));
+      // La voz elegida se recuerda: sin esto, si la lista de voces aún no cargó, una frase sale con otra voz.
+      let v = elegirVoz(window.speechSynthesis.getVoices(), idioma, this.getAttribute("voz"));
+      if (v) this._vozNav = v; else v = this._vozNav || null;
       if (v) { u.voice = v; u.lang = v.lang; } else u.lang = idioma;
       u.volume = this._volumen();
       u.onend = alFin; u.onerror = alFin;
@@ -1731,10 +1735,16 @@
       if (corto && this._cacheTts.has(texto)) return this._cacheTts.get(texto);
       const senal = this._abortTts.signal;
       try {
-        const r = await this._conToken((h) => fetch(`${this._servidor}/v1/voz/sintetizar`, {
+        const pedir = () => this._conToken((h) => fetch(`${this._servidor}/v1/voz/sintetizar`, {
           method: "POST", headers: { ...h, "Content-Type": "application/json" }, signal: senal,
           body: JSON.stringify({ texto, idioma: this.getAttribute("idioma") || undefined }),
         }));
+        let r = await pedir();
+        // Un fallo pasajero (429/5xx) se reintenta una vez: caer a la voz del navegador a mitad de una respuesta cambia la voz.
+        if (!r.ok && (r.status === 429 || r.status >= 500) && r.status !== 503) {
+          await new Promise((res) => setTimeout(res, 700));
+          if (gen === this._genVoz) r = await pedir();
+        }
         if (!r.ok) {
           // 413/422: esa pieza no sirve, pero el servidor está bien. Cualquier otro fallo lo pausa un rato.
           console.warn("[asistente] /v1/voz/sintetizar respondió", r.status);
@@ -2068,6 +2078,7 @@
         }
       });
       estado.remove();
+      if (resultado === "ok" && !acumulado.trim() && !this._propuestaTurno) { burbuja.remove(); this._error("respuesta_vacia"); resultado = "error"; }
       if (resultado === "ok" && acumulado.trim()) {
         if (leer && !this._leerCortado) this._leerIncremental(acumulado, true);
         if (hablarVoz && !this._leerCortado) this._resumenHablado(resumenBreve(acumulado), "respaldo");   // respaldo: el modelo no mandó su resumen
