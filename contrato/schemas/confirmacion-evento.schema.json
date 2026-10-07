@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asistente.local/contrato/v1/confirmacion-evento.schema.json",
+  "title": "Evento SSE `confirmacion` (lo emite el asistente al widget; el sistema anfitrión NO lo implementa)",
+  "type": "object",
+  "required": ["id", "tool", "resumen", "lineas", "huella", "expira"],
+  "properties": {
+    "id": { "type": "string", "description": "Id de la confirmación (uuid). Es el `cid` del token de escritura y la `Idempotency-Key`." },
+    "tool": { "type": "string" },
+    "resumen": { "type": "string", "maxLength": 300, "description": "Texto del campo `resumen` de la propuesta del sistema." },
+    "lineas": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 200 }, "description": "Campo `detalle` de la propuesta." },
+    "huella": { "type": "string", "description": "La huella que devolvió el sistema en la propuesta." },
+    "expira": { "type": "string", "format": "date-time" },
+    "local": { "type": "boolean", "description": "`true` solo en acciones locales del asistente (`recordar`, `olvidar`): no involucran al sistema anfitrión." }
+  },
+  "additionalProperties": true
+}

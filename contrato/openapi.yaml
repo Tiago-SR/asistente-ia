@@ -10,16 +10,32 @@ servers:
 paths:
   /asistente/token:
     get:
-      summary: Emite un JWT corto para el usuario logueado
-      description: Usa la sesión normal del sistema. 403 si el usuario no tiene permitido el asistente.
+      summary: Emite un JWT corto para el usuario logueado (lectura, o escritura para una confirmación)
+      description: |
+        Usa la sesión normal del sistema. 403 si el usuario no tiene permitido el asistente.
+
+        **Sin query** → token de lectura (`scope: asistente:lectura`, vida 5–15 min).
+
+        **Con `confirmacion` y `huella`** (siempre juntas; si falta una, 400) → token de escritura
+        (`scope: asistente:escritura`, `exp - iat` ≤ 60 s, `jti` único de un solo uso, claims `act` = tool de la propuesta,
+        `ph` = huella, `cid` = confirmacion). Solo se emite si la huella corresponde a una propuesta que ESTE sistema
+        produjo, que sigue vigente y que es del mismo usuario de la sesión; si no (o si el usuario no puede escribir), 403.
+        Ver CONTRATO.md §8.3.
+      parameters:
+        - { name: confirmacion, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9._-]{1,128}$" }, description: "Id de la confirmación que fija el asistente. Va en el claim `cid`." }
+        - { name: huella, in: query, required: false, schema: { type: string, minLength: 8, maxLength: 128 }, description: "Huella devuelta por la propuesta. Va en el claim `ph`." }
       responses:
         "200":
           description: Token emitido
           content:
             application/json:
               schema: { $ref: "schemas/token-respuesta.schema.json" }
+        "400":
+          description: Solo vino uno de `confirmacion` / `huella`, o tienen formato inválido
+        "401":
+          description: Sin sesión en el sistema
         "403":
-          description: El usuario no tiene permitido el asistente
+          description: El usuario no tiene permitido el asistente; o, con `confirmacion`/`huella`, no hay propuesta vigente suya con esa huella, o no puede escribir
   /asistente/tools:
     get:
       summary: Manifiesto de tools
@@ -55,13 +71,18 @@ paths:
         "401":
           description: Token inválido o vencido
         "403":
-          description: Scope insuficiente, o se usó el token de manifiesto
+          description: |
+            Scope insuficiente, o se usó el token de manifiesto. En escrituras (CONTRATO.md §8.4) también:
+            token de lectura en una escritura, token de escritura en una lectura, `act` distinto de la tool pedida,
+            `jti` ya usado, parámetros distintos a los de la propuesta cuya huella es `ph`, o falta `cid`.
         "5XX":
           description: Error del sistema
   /asistente/tools/{nombre}/propuesta:
     post:
       summary: "Valida y resume una acción de escritura, sin efectos (sección 8)"
-      description: Token de lectura. El sistema recuerda la huella devuelta hasta `expira_s`.
+      description: |
+        Token de LECTURA (un token de escritura aquí es 403). NO debe escribir nada. Valida parámetros y permisos,
+        redacta el resumen, calcula la huella y la recuerda (con el usuario y la tool) hasta `expira_s`.
       security: [{ tokenUsuario: [] }]
       parameters:
         - { name: nombre, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" } }

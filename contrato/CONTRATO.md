@@ -4,8 +4,9 @@ Lo que **cada sistema** debe implementar para que el asistente responda pregunta
 
 Archivos de referencia:
 
-- `schemas/*.schema.json`: JSON Schemas de cada mensaje.
+- `schemas/*.schema.json`: JSON Schemas de cada mensaje (incluidos `confirmacion-evento` y `confirmar-respuesta`, que son del asistente y no se implementan en el sistema).
 - `openapi.yaml`: descripción OpenAPI de los endpoints.
+- [`IMPLEMENTAR.md`](IMPLEMENTAR.md): **empezar aquí si vas a implementar el contrato** (mapa paso a paso, orden de validaciones y códigos HTTP; pensado también para que lo lea un LLM).
 - [`GUIA_TOOLS.md`](GUIA_TOOLS.md): cómo diseñar las tools (qué exponer, cómo describirlas, qué devolver).
 - `../herramientas/verificar_sistema.py`: verificador de conformidad (ver [6.5](#65-verificar-la-integración)).
 
@@ -627,7 +628,7 @@ Rechazar con `403` una escritura con token de lectura, una de lectura con token 
 - El modelo propone con la tool de escritura; el asistente pide la propuesta, la guarda como **pendiente** (`/v1/confirmaciones/{id}`), avisa al widget con el evento SSE `confirmacion` (`{ id, tool, resumen, lineas, huella, expira }`) y el modelo recibe «pendiente: no se ejecutó». Una propuesta por turno, una pendiente por conversación (la nueva reemplaza a la anterior) y un tope de propuestas por usuario y hora (`ASISTENTE_ACCIONES_MAX_POR_HORA`, 20).
 - **El widget muestra una tarjeta** con el resumen del sistema, los botones Confirmar y Cancelar y la cuenta regresiva hasta el vencimiento. Solo un clic real confirma; el texto va como texto, nunca como HTML.
 - **Recargar la página:** `GET /v1/conversaciones/{id}` devuelve además `pendiente`: la propuesta vigente de esa conversación (`{ id, tool, estado, resumen, lineas, huella, expira }`) o `null`. El widget, al restaurar la conversación, vuelve a dibujar la tarjeta con su cuenta regresiva; una propuesta cancelada, confirmada, vencida o reemplazada no se restaura.
-- `POST /v1/confirmaciones/{id}/confirmar` (token de escritura) y `POST /v1/confirmaciones/{id}/cancelar` (token de lectura). Cada transición es atómica: dos clics o dos pestañas no ejecutan dos veces (`409 accion_no_pendiente` con el `estado` actual). Una acción ajena o inexistente da `404`.
+- **Endpoints del asistente (el sistema anfitrión NO los implementa):** `GET /v1/confirmaciones/{id}` (estado), `POST /v1/confirmaciones/{id}/confirmar` (token de escritura; responde según `schemas/confirmar-respuesta.schema.json`), `POST /v1/confirmaciones/{id}/cancelar` (token de lectura) y `POST /v1/confirmaciones/{id}/confirmar-local` (solo acciones locales de memoria, [6.8](#68-memoria-por-usuario-recordar-y-olvidar)). El evento SSE `confirmacion` sigue `schemas/confirmacion-evento.schema.json` y lleva `local: true` en las acciones locales. Cada transición es atómica: dos clics o dos pestañas no ejecutan dos veces (`409 accion_no_pendiente` con el `estado` actual). Una acción ajena o inexistente da `404`.
 - **Nunca se confirma por voz**, tampoco en el modo voz: allí el asistente dice la propuesta en voz alta («Te pido confirmar en pantalla: …»), el widget muestra la tarjeta en la vista de voz y espera el clic.
 - Auditoría: la propuesta (`{tool}#propuesta`) y la ejecución quedan en `llamadas_tool`, y el ciclo de vida completo en la tabla `acciones`, con la misma retención que las conversaciones (30 días por defecto). El resultado se agrega al historial de la conversación. La acción queda a nombre del usuario que confirma (`sub`), con el asistente como origen.
 
