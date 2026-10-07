@@ -39,8 +39,10 @@
  *
  *   acuse        "auto" (por defecto) | "no": en el modo voz, si el resumen tarda más de ~0,9 s se dice una frase corta («Un
  *               momento, lo consulto») para que no haya silencio; "no" la quita.
+ *   modo-inicial "auto" (por defecto) | "chat": con "auto" el widget abre en modo voz cuando está disponible (el usuario pasa
+ *               al chat con el botón «Chat»); "chat" abre en el chat. El ajuste «Abrir en modo voz» del usuario también lo apaga.
  *   ajustes      "auto" (por defecto) | "no": engranaje con el panel de ajustes del usuario (motor de voz, volumen, lectura
- *               automática, acuse). Se guardan en el navegador (localStorage, por servidor). Lo que el usuario elige manda
+ *               automática, acuse, confirmar con «enviar»). Se guardan en el navegador (localStorage, por servidor). Lo que el usuario elige manda
  *               sobre `voz-respuesta` y `acuse`; con "no" no hay panel y mandan los atributos.
  *   orbe-volumen "auto" (por defecto) | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
  *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre.
@@ -109,6 +111,7 @@
     leerAuto: "Leer las respuestas en voz alta",
     noLeerAuto: "Dejar de leer en voz alta",
     manosLibres: "Voz",
+    chatBoton: "Chat",
     volverVoz: "Volver al modo voz",
     apagarManosLibres: "Salir del modo voz",
     verChat: "Ver el chat",
@@ -144,6 +147,8 @@
     ajMotorServidor: "Del servidor (más natural)",
     ajVolumen: "Volumen",
     ajLeerAuto: "Leer las respuestas en voz alta",
+    ajConfirmar: "Pedir «enviar» o «cancelar» antes de enviar (modo voz)",
+    ajInicioVoz: "Abrir en modo voz",
     ajAcuse: "Decir «un momento» mientras consulta (modo voz)",
     ajProbar: "Probar voz",
     ajPrueba: "Hola, así suena mi voz.",
@@ -243,7 +248,7 @@
   const TTS_CACHE_CHARS = 60;
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
   const CLAVE_AJUSTES = "asistente:ajustes:";   // + servidor; JSON en localStorage (nunca el token ni texto del usuario)
-  const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true };
+  const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };
   const MOTORES = ["auto", "navegador", "servidor"];
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
@@ -622,15 +627,17 @@
     .escena::before { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
     .escena::after { bottom: 14px; right: 14px; border-left: 0; border-top: 0; }
     .vista-voz .escena { display: flex; }
-    .raiz.vista-voz .scroll, .vista-voz .entrada form, .vista-voz .entrada .pie, .vista-voz .barra .manos, .vista-voz .barra .altavoz, .vista-voz .barra .memoria { display: none; }
+    .raiz.vista-voz .scroll, .vista-voz .entrada form, .vista-voz .entrada .pie, .vista-voz .barra .altavoz { display: none; }
     .escena .mh { --s: clamp(112px, 26vh, 176px); grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 4px; border: 0; background: none; margin: 0; padding: 0; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }
     .escena .mh-estado { font-size: 15px; letter-spacing: .02em; }
     .escena .mh-campo { display: block; font-size: 17px; max-width: 100%; overflow-wrap: anywhere; min-height: 1.5em; }
     .escena .mh-parcial { font-size: 15px; white-space: normal; max-width: 100%; }
     .escena .mh-botones { grid-column: auto; justify-content: center; margin-top: 8px; }
-    .escena .mh-priv { margin-top: 6px; font-size: 11px; }
+    .escena .mh-apagar { display: none; }   /* en la vista de voz se vuelve al chat con «Chat» o «Ver el chat»; apagar queda en el panel compacto y con Esc */
+    .escena .mh-priv { position: absolute; left: 40px; right: 40px; bottom: 12px; margin: 0; font-size: 11px; text-align: center; }   /* aviso fijo al fondo de la escena */
     .escena .o-marcas { display: block; opacity: .55; }
     .escena .o-aro { --g: 4px; }
+    .escena .msg.confirmacion { align-self: center; box-sizing: border-box; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }
     .dicho { max-width: var(--asistente-ancho-columna, 760px); text-align: center; font-size: 15px; min-height: 1.5em; }
     .dicho:empty { display: none; }
     .dicho small { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--apagado); margin-bottom: 2px; }
@@ -692,7 +699,13 @@
     /* Panel «Lo que recuerdo»: cubre la columna principal; todo con las variables del tema. */
     .barra .memoria[aria-expanded="true"], .barra .ajustes[aria-expanded="true"] { color: var(--c); }
     .barra .ajustes[hidden] { display: none; }
-    .ajustes-panel { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--f); }
+    /* Menú desplegable bajo el engranaje (no cubre el chat). */
+    .ajustes-panel {
+      position: absolute; top: 52px; right: 12px; z-index: 6; display: flex; flex-direction: column;
+      width: min(320px, calc(100% - 24px)); max-height: calc(100% - 64px);
+      background: var(--f); border: 1px solid var(--b); border-radius: calc(var(--r) * 1.5);
+      overflow: hidden;
+    }
     .ajustes-panel[hidden] { display: none; }
     .aj-fila { margin: 0 0 18px; padding: 0; border: 0; min-width: 0; }
     .aj-fila[hidden] { display: none; }
@@ -774,6 +787,7 @@
     enviar: "M12 19V5M5 12l7-7 7 7",
     mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
     parar: "M7 7h10v10H7z",
+    chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
     manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
     altavoz: "M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
     memoria: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z",
@@ -878,6 +892,7 @@
 
     disconnectedCallback() {
       this._vigilarTema(false);
+      if (this._ajFuera) document.removeEventListener("pointerdown", this._ajFuera, true);
       if (this._abort) this._abort.abort();
       this._detenerGrabacion(true);
       this._detenerReco(true);
@@ -1055,6 +1070,7 @@
         }
       } catch { /* sin acceso: se muestra el aviso */ }
       this._actualizarVoz();
+      this._arrancarEnVoz();
       this._memBtn.hidden = !(habilitado && this._memoria);
       this._raiz.classList.toggle("sin-acceso", !habilitado);
       this._raiz.hidden = false;
@@ -1194,6 +1210,16 @@
       if (this._manos.hidden) this._mhApagar("", true);
     }
 
+    // Por defecto el widget abre en modo voz (si hay) y el usuario pasa al chat cuando quiera. Una sola vez, al cargar.
+    // Atributo modo-inicial="chat" o el ajuste «Abrir en modo voz» lo desactivan. El micrófono lo gobierna el navegador (permiso).
+    _arrancarEnVoz() {
+      if (this._inicioVozHecho) return;
+      this._inicioVozHecho = true;
+      if ((this.getAttribute("modo-inicial") || "auto").toLowerCase() === "chat") return;
+      if (this._ajustesActivos() && this._aj && !this._aj.iniciarVoz) return;
+      if (!this._manos.hidden && !this._mhActivo()) this._conmutarManosLibres();
+    }
+
     _marcarMic(grabando) {
       this._mic.classList.toggle("grabando", grabando);
       const t = grabando ? TEXTOS.detener : TEXTOS.dictar;
@@ -1261,8 +1287,8 @@
     _palabra() { return (this.getAttribute("palabra-activacion") || PALABRA_ACTIVACION).trim() || PALABRA_ACTIVACION; }
 
     _conmutarManosLibres() {
-      if (this._mhActivo()) {                                  // ya encendido: el botón de la barra vuelve a la vista de voz
-        if (this._vista === "chat") { this._vista = "voz"; this._mhActividad(); this._aplicarVista(true); } else this._mhApagar("");
+      if (this._mhActivo()) {                                  // ya encendido: el botón de la barra alterna entre «Voz» y «Chat»
+        this._vista = this._vista === "chat" ? "voz" : "chat"; this._mhActividad(); this._aplicarVista(true);
         return;
       }
       if (!reconocimiento() || this._ocupado) return;
@@ -1321,7 +1347,7 @@
         armado: TEXTOS.mhArmado, capturando: TEXTOS.mhCapturando, confirmando: TEXTOS.mhConfirmando, respondiendo: TEXTOS.mhRespondiendo,
       }[e] || "").replace("{p}", p);
       this._mhParcial.textContent = "";
-      this._mhEnviar.hidden = this._mhCancelar.hidden = !(e === "capturando" || e === "confirmando");
+      this._mhEnviar.hidden = this._mhCancelar.hidden = !this._confirmarActivo() || !(e === "capturando" || e === "confirmando");
       this._manos.setAttribute("aria-pressed", String(activo));
       const t = activo ? TEXTOS.volverVoz : TEXTOS.manosLibres;
       this._manos.title = t; this._manos.setAttribute("aria-label", t);
@@ -1346,6 +1372,11 @@
       if (voz) { if (this._mhCaja.parentNode !== this._escena) this._escena.insertBefore(this._mhCaja, this._mhDicho); }
       else if (this._mhCaja.parentNode !== this._cajaEntrada) this._cajaEntrada.insertBefore(this._mhCaja, this._form);
       if (foco) (voz ? this._verChat : this._entrada).focus();
+      // el botón de la barra lleva a la otra vista: «Chat» desde la voz, «Voz» desde el chat
+      const t = voz ? TEXTOS.chatBoton : this._mhActivo() ? TEXTOS.volverVoz : TEXTOS.manosLibres;
+      this._manos.replaceChildren(icono(voz ? "chat" : "manos"), el("span", { textContent: voz ? TEXTOS.chatBoton : TEXTOS.manosLibres }));
+      this._manos.title = t; this._manos.setAttribute("aria-label", t);
+      this._tarjetaPosicionar();
       if (!voz) this._bajar();
     }
 
@@ -1450,7 +1481,7 @@
 
     _mhCerrarFrase() {
       this._mhEstado("confirmando");
-      if (!MANOS_LIBRES_CONFIRMAR) this._mhEnviarTexto();
+      if (!this._confirmarActivo()) this._mhEnviarTexto();
     }
 
     // Envía lo que hay en el campo (la confirmación: «enviar», el botón o, si se desactiva MANOS_LIBRES_CONFIRMAR, el cierre de la frase).
@@ -1593,6 +1624,11 @@
     _prefRespuesta() {
       if (this._ajustesActivos() && this._aj && this._aj.motor !== "auto") return this._aj.motor;
       return (this.getAttribute("voz-respuesta") || "auto").toLowerCase();
+    }
+    // ¿hay que decir «enviar» (o pulsar el botón) antes de mandar lo dictado? Sin ajustes, manda la constante del producto.
+    _confirmarActivo() {
+      if (!MANOS_LIBRES_CONFIRMAR) return false;
+      return !(this._ajustesActivos() && this._aj && !this._aj.confirmar);
     }
     _volumen() { return this._ajustesActivos() && this._aj ? this._aj.volumen : 1; }
     _acuseActivo() {
@@ -2041,6 +2077,8 @@
         if (MOTORES.includes(g.motor)) aj.motor = g.motor;
         if (typeof g.volumen === "number" && g.volumen >= 0 && g.volumen <= 1) aj.volumen = g.volumen;
         if (typeof g.acuse === "boolean") aj.acuse = g.acuse;
+        if (typeof g.confirmar === "boolean") aj.confirmar = g.confirmar;
+        if (typeof g.iniciarVoz === "boolean") aj.iniciarVoz = g.iniciarVoz;
       } catch { /* sin storage o JSON roto: valores por defecto */ }
       return aj;
     }
@@ -2071,6 +2109,12 @@
       this._ajAcuse = el("input", { type: "checkbox", id: "aj-acuse" });
       this._ajAcuse.addEventListener("change", () => this._ajustesCambiar({ acuse: this._ajAcuse.checked }));
       this._ajFilaAcuse = el("div", { class: "aj-fila" }, el("label", { class: "aj-op" }, this._ajAcuse, el("span", { textContent: TEXTOS.ajAcuse })));
+      this._ajConfirmar = el("input", { type: "checkbox", id: "aj-confirmar" });
+      this._ajConfirmar.addEventListener("change", () => this._ajustesCambiar({ confirmar: this._ajConfirmar.checked }));
+      this._ajFilaConfirmar = el("div", { class: "aj-fila" }, el("label", { class: "aj-op" }, this._ajConfirmar, el("span", { textContent: TEXTOS.ajConfirmar })));
+      this._ajInicio = el("input", { type: "checkbox", id: "aj-inicio" });
+      this._ajInicio.addEventListener("change", () => this._ajustesCambiar({ iniciarVoz: this._ajInicio.checked }));
+      this._ajFilaInicio = el("div", { class: "aj-fila" }, el("label", { class: "aj-op" }, this._ajInicio, el("span", { textContent: TEXTOS.ajInicioVoz })));
       this._ajProbar = el("button", { type: "button", textContent: TEXTOS.ajProbar });
       this._ajProbar.addEventListener("click", () => { this._pararVoz(); this._decir(TEXTOS.ajPrueba); });
       const restablecer = el("button", { type: "button", textContent: TEXTOS.ajRestablecer });
@@ -2081,8 +2125,15 @@
       this._ajPanel = el("section", { class: "ajustes-panel", hidden: true, role: "dialog", "aria-labelledby": "aj-titulo" },
         el("div", { class: "mem-cab" }, el("h2", { id: "aj-titulo", textContent: TEXTOS.ajustesTitulo }), this._ajCerrar),
         el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
-          this._ajFilaMotor, this._ajFilaVol, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaAcc)));
+          this._ajFilaMotor, this._ajFilaVol, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaAcc)));
       this._ajPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ajustesCerrar(); } });
+      // un clic fuera del menú (y del engranaje) lo cierra; composedPath atraviesa el Shadow DOM
+      this._ajFuera = (e) => {
+        if (this._ajPanel.hidden) return;
+        const ruta = e.composedPath();
+        if (!ruta.includes(this._ajPanel) && !ruta.includes(this._ajBtn)) this._ajustesCerrar(false);
+      };
+      document.addEventListener("pointerdown", this._ajFuera, true);
     }
 
     _ajustesCambiar(cambio) {
@@ -2090,6 +2141,7 @@
       this._ajustesGuardar();
       if (this._audio) this._audio.volume = this._volumen();   // el volumen se oye ya en lo que está sonando
       if ("motor" in cambio) { this._pararVoz(); this._actualizarVoz(); }
+      if ("confirmar" in cambio && this._mhActivo()) this._mhPintar();
       this._ajustesPintar();
     }
 
@@ -2107,6 +2159,9 @@
       this._ajVol.setAttribute("aria-valuetext", Math.round(this._aj.volumen * 100) + " %");
       this._ajLeer.checked = this._leerAuto;
       this._ajAcuse.checked = this._aj.acuse;
+      this._ajFilaConfirmar.hidden = this._ajFilaInicio.hidden = this._manos.hidden;
+      this._ajInicio.checked = this._aj.iniciarVoz;
+      this._ajConfirmar.checked = this._aj.confirmar;
     }
 
     _ajustesAbrir() {
@@ -2117,9 +2172,9 @@
       this._ajCerrar.focus();
     }
 
-    _ajustesCerrar() {
+    _ajustesCerrar(foco = true) {
       this._ajPanel.hidden = true; this._ajBtn.setAttribute("aria-expanded", "false");
-      this._ajBtn.focus();
+      if (foco) this._ajBtn.focus();
     }
 
     // — memoria por usuario: panel «Lo que recuerdo» (contrato 6.8) —
@@ -2237,23 +2292,38 @@
       // En manos libres la propuesta se lee en voz alta, pero se confirma siempre con un clic.
       this._propuestaTurno = true;
       if (this._mhActivo()) {
-        // La tarjeta tiene que estar a la vista: si se está en la vista de voz, se pasa al chat. Se confirma siempre con un clic.
+        // La tarjeta se muestra donde esté el usuario: en la vista de voz sale en la escena, sin pasar al chat. Se confirma siempre con un clic.
         const frase = TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen);
         this._mostrarDicho(frase);
         if (this._hablaPosible()) this._decir(frase);
-        if (this._vista === "voz") { this._vista = "chat"; this._aplicarVista(); this._avisarVoz(TEXTOS.mhConfirmaEnChat); }
+        this._tarjetaPosicionar();
       }
       this._bajar();
+    }
+
+    // La tarjeta vive en el chat; en la vista de voz se lleva a la escena (el mismo nodo, con sus botones) y se devuelve a su sitio.
+    _tarjetaPosicionar() {
+      const t = this._tarjetaActiva;
+      if (!t || t.cerrada || !t.tarjeta.isConnected) return;
+      if (this._mhActivo() && this._vista === "voz") {
+        if (!t.marca) { t.marca = document.createComment(""); t.tarjeta.before(t.marca); }
+        this._escena.insertBefore(t.tarjeta, this._verChat);
+      } else this._tarjetaDevolver(t);
+    }
+    _tarjetaDevolver(t) {
+      if (t.marca) { t.marca.replaceWith(t.tarjeta); t.marca = null; }
     }
 
     _cerrarTarjeta(t, estado, texto) {
       if (t.cerrada) return;
       t.cerrada = true; clearInterval(t.timer);
+      this._tarjetaDevolver(t);
       t.botones.hidden = true; t.err.textContent = "";
       t.tarjeta.classList.add("cerrada", estado);
       t.estado.textContent = texto || ESTADOS_ACCION[estado] || "";
       t.estado.classList.toggle("ok", estado === "ejecutada");
       if (this._tarjetaActiva === t) this._tarjetaActiva = null;
+      if (estado !== "reemplazada" && this._mhActivo() && this._vista === "voz" && t.estado.textContent) this._mostrarDicho(t.estado.textContent);
       this.dispatchEvent(new CustomEvent("asistente:confirmacion", {
         detail: { id: t.d.id, tool: t.d.tool || "", estado }, bubbles: true, composed: true,
       }));

@@ -271,7 +271,10 @@ def test_widget_manos_libres_pide_confirmacion_y_es_opcional():
     assert "const MANOS_LIBRES_CONFIRMAR = true;" in js
     # un único camino de envío: el cierre de frase solo envía si la constante lo pide
     cierre = js.split("_mhCerrarFrase() {", 1)[1].split("// Envía lo que hay", 1)[0]
-    assert "if (!MANOS_LIBRES_CONFIRMAR) this._mhEnviarTexto();" in cierre
+    assert "if (!this._confirmarActivo()) this._mhEnviarTexto();" in cierre
+    # el ajuste del usuario solo puede quitar la confirmación si el producto la tiene activada, y oculta los botones
+    assert "if (!MANOS_LIBRES_CONFIRMAR) return false;" in js
+    assert "!this._confirmarActivo() ||" in js
     # los comandos de voz solo se interpretan con frases finales
     assert 'const cmd = final ? comandoDe(texto) : null;' in js
     # oculto por defecto; se muestra solo con el reconocimiento del navegador, síntesis y contexto seguro
@@ -426,7 +429,9 @@ def test_widget_modo_voz_tiene_vista_propia_y_se_alterna_con_el_chat():
 def test_widget_la_tarjeta_de_confirmacion_siempre_queda_a_la_vista_y_no_se_confirma_por_voz():
     js = _js()
     conf = js.split("_confirmacion(d) {", 1)[1].split("\n    }\n", 1)[0]
-    assert 'if (this._vista === "voz") { this._vista = "chat"; this._aplicarVista();' in conf
+    # en la vista de voz la tarjeta (el mismo nodo, con sus botones) se muestra en la escena, sin pasar al chat
+    assert "this._tarjetaPosicionar()" in conf and '_vista = "chat"' not in conf
+    assert "this._escena.insertBefore(t.tarjeta, this._verChat)" in js
     assert "this._propuestaTurno = true" in conf
     assert "ev.isTrusted" in js  # solo un clic real confirma
     # ninguna orden de voz confirma una acción: los comandos de voz son enviar, cancelar y apagar
@@ -612,8 +617,8 @@ def test_widget_panel_de_memoria_solo_con_el_estado_del_servicio_y_sin_innerhtml
     assert "_conToken" in panel
     # Escape lo cierra y no apaga el modo voz que pudiera estar debajo
     assert 'e.key === "Escape") { e.stopPropagation(); this._memoriaCerrar(); }' in panel
-    # en la vista de voz el botón no está
-    assert ".vista-voz .barra .memoria" in js
+    # en la vista de voz el botón sigue a la vista (el panel cubre la columna principal, escena incluida)
+    assert ".vista-voz .barra .memoria" not in js
 
 
 def test_widget_panel_de_memoria_borra_sin_confirmacion_pero_nunca_guarda():
@@ -649,7 +654,7 @@ def test_widget_textos_de_memoria_en_espanol_rioplatense():
 def test_widget_ajustes_del_usuario_solo_guardan_preferencias_y_llegan_a_las_dos_voces():
     js = _js()
     # lo único que se persiste es `this._aj`: motor, volumen y acuse (sin token ni texto)
-    assert 'const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true };' in js
+    assert 'const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };' in js
     assert "JSON.stringify(this._aj)" in js
     # el volumen del panel llega a la voz del navegador y al audio del servidor; el motor se resuelve en un método
     assert "u.volume = this._volumen();" in js and "a.volume = this._volumen();" in js
