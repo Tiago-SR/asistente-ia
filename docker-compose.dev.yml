@@ -62,21 +62,6 @@ services:
     ports:
       - "127.0.0.1:8201:8000"
 
-  mock-b:
-    build:
-      context: .
-      target: dev
-    command: uvicorn app:app --app-dir /mock --host 0.0.0.0 --port 8000 --reload
-    environment:
-      MOCK_ID: mock-b
-      MOCK_NOMBRE: Mock B
-      MOCK_SECRETO: secreto-mock-b-9876543210-9876543210
-      MOCK_TOKEN_MANIFIESTO: manifiesto-mock-b
-    volumes:
-      - ./ejemplos/sistema-mock:/mock:ro
-    ports:
-      - "127.0.0.1:8202:8000"
-
   # Referencia PHP del contrato (ejemplos/sistema-php). HS256 con secretos ficticios de desarrollo.
   # Página: http://localhost:8203/?usuario=ana. Para RS256 ver ejemplos/sistema-php/README.md.
   sistema-php:

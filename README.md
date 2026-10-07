@@ -11,7 +11,7 @@ Principios del MVP:
 - Cifras siempre trazables a una tool (nada inventado).
 - Proveedor de LLM intercambiable (formato neutro + adaptadores).
 
-> Estado: Fases 0, 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools, referencia PHP, kit de despliegue y CI) y la voz del navegador con el modo voz del widget (antes «manos libres»: ventana propia con resumen hablado). La Fase 5 (acciones con confirmación: agregar y modificar, nunca borrar) está implementada en el servicio, el mock, el widget y la referencia PHP. Falta el despliegue en el VPS (en espera) y los sistemas reales; ver [Estado y pendientes](#estado-y-pendientes).
+> Estado: Fases 0, 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools, referencia PHP, kit de despliegue) y la voz del navegador con el modo voz del widget (antes «manos libres»: ventana propia con resumen hablado). La Fase 5 (acciones con confirmación: agregar y modificar, nunca borrar) está implementada en el servicio, el mock, el widget y la referencia PHP. Falta el despliegue en el VPS (en espera) y los sistemas reales; ver [Estado y pendientes](#estado-y-pendientes).
 
 ## Stack
 
@@ -156,12 +156,12 @@ evals/                   preguntas (lectura y acciones), corredor y línea base 
 herramientas/            verificador de conformidad y banco de pruebas de audio
 PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
 PRUEBA_MANUAL_VOZ.md     checklist de la prueba manual de voz en navegadores reales
-DISENO_FASE5.md          diseño en papel de las acciones con confirmación (Fase 5)
+DISENO_FASE5.md          pendientes de la Fase 5 (acciones con confirmación, ya implementada)
 ```
 
 ## Estado y pendientes
 
-**Hecho:** servicio de solo lectura (registro de sistemas, JWT por sistema, conector HTTP, loop del agente, límites, auditoría, API `/v1/*` con SSE, purga de retención), widget con voz del navegador y modo manos libres, verificador de conformidad, guía de tools, referencias mock y PHP, kit de despliegue y CI, y `evals/` con línea base de `deepseek-flash` (32/32, ≈0,0002 USD por pregunta en valle; modelo vía `api.deepseek.com/v1`, clave en `.env`).
+**Hecho:** servicio de solo lectura (registro de sistemas, JWT por sistema, conector HTTP, loop del agente, límites, auditoría, API `/v1/*` con SSE, purga de retención), widget con voz del navegador y modo manos libres, verificador de conformidad, guía de tools, referencias mock y PHP, kit de despliegue, y `evals/` con línea base de `deepseek-flash` (32/32, ≈0,0002 USD por pregunta en valle; modelo vía `api.deepseek.com/v1`, clave en `.env`).
 
 **Pendiente:**
 

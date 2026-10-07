@@ -89,4 +89,4 @@ Copiar `backups/` fuera de la VPS (rsync, rclone, snapshot del proveedor): un ba
 | Postgres | `127.0.0.1:5433`, credenciales fijas | sin puertos, `POSTGRES_PASSWORD` |
 | `/docs` | sí (`ASISTENTE_DOCS=1`) | no |
 | Whisper | `--profile voz` | `COMPOSE_PROFILES=voz` |
-| Sistemas de ejemplo | mock-a, mock-b, sistema-php | ninguno |
+| Sistemas de ejemplo | mock-a, sistema-php | ninguno |
