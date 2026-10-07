@@ -84,14 +84,15 @@ def llm():
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None, tts=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
-                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30):
+                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
         ruta = escribir_registro(tmp_path / "s.yaml", [
             entrada_sistema("mock-a", origenes_permitidos=[ORIGEN_A], limites=topes,
                             acciones_habilitadas=list(acciones_habilitadas),
-                            consultas_recientes=consultas_recientes, memoria_habilitada=memoria_habilitada),
+                            consultas_recientes=consultas_recientes, memoria_habilitada=memoria_habilitada,
+                            **({"nombre_asistente": nombre_asistente} if nombre_asistente else {})),
             entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes,
                             memoria_habilitada=memoria_habilitada),
         ])
@@ -192,9 +193,15 @@ async def test_estado(api):
     assert r.json() == {
         "habilitado": True,
         "nombre_sistema": "MOCK-A",
+        "nombre_asistente": None,
         "memoria": False,
         "voz": {"dictado": False, "respuesta": False, "max_audio_s": 60},
     }
+
+
+async def test_estado_informa_el_nombre_del_asistente_del_yaml(construir_app):
+    async with construir_app(nombre_asistente="Sofía") as c:
+        assert (await c.get("/v1/estado", headers=auth())).json()["nombre_asistente"] == "Sofía"
 
 
 async def test_estado_informa_dictado_segun_el_stt(construir_app):

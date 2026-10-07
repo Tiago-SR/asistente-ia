@@ -14,6 +14,9 @@
  *               las cookies de sesión del anfitrión. Responde {token, expira}.
  *   servidor    URL base del asistente. Por defecto, el origen desde el que se cargó este script.
  *   titulo      título de la barra superior. Por defecto, el nombre del sistema.
+ *   nombre      cómo se llama el asistente en el widget (título, avisos, ajustes). Orden: el que el usuario puso en su panel
+ *               de ajustes > este atributo > `nombre_asistente` del sistema (sistemas.yaml, vía /v1/estado) > "Asistente".
+ *               Es también la palabra que despierta el modo voz («Lucas, ¿cuánto…?»), salvo que se fije palabra-activacion.
  *   placeholder texto del campo de entrada.
  *   idioma      idioma de la voz (BCP 47). Por defecto "es-UY"; sin voces de ese idioma se usa es-ES o la
  *               primera en español que tenga el sistema.
@@ -26,7 +29,7 @@
  *               voz del servidor (POST /v1/voz/sintetizar, p. ej. ElevenLabs) si el sistema la tiene configurada
  *               (/v1/estado: voz.respuesta) y, si falla o no existe, la del navegador (speechSynthesis).
  *               "navegador" no envía el texto de las respuestas a ningún tercero; "servidor" no cae al navegador.
- *   palabra-activacion        palabra que despierta el «modo voz» (por defecto "asistente").
+ *   palabra-activacion        palabra que despierta el «modo voz» (por defecto, el nombre del asistente; si es "Asistente", "asistente").
  *   manos-libres-inactividad  minutos sin interacción tras los que el modo voz se apaga solo
  *               (por defecto 5; 0 = no se apaga; el nombre del atributo se conserva por compatibilidad).
  *               El botón «Voz» solo aparece si el navegador tiene reconocimiento y síntesis de voz, la página
@@ -97,7 +100,7 @@
     historial: "Historial",
     borrar: "Borrar conversación",
     confirmarBorrar: "¿Borrar esta conversación? No se puede deshacer.",
-    noDisponible: "El asistente no está disponible para tu usuario.",
+    noDisponible: "{n} no está disponible para tu usuario.",
     sinHistorial: "Todavía no hay conversaciones.",
     bienvenida: "Hola, ¿en qué te puedo ayudar?",
     pensando: "Pensando…",
@@ -141,8 +144,9 @@
     memoriaVacio: "Todavía no guardé nada. Podés pedirme, por ejemplo: «recordá que quiero las hectáreas sin decimales».",
     memoriaCerrar: "Cerrar",
     ajustes: "Ajustes",
-    ajustesTitulo: "Ajustes de voz",
-    ajMotor: "Voz del asistente",
+    ajustesTitulo: "Ajustes",
+    ajNombre: "Nombre del asistente",
+    ajMotor: "Voz de {n}",
     ajMotorNavegador: "Del navegador",
     ajMotorServidor: "Del servidor (más natural)",
     ajVolumen: "Volumen",
@@ -248,7 +252,12 @@
   const TTS_CACHE_CHARS = 60;
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
   const CLAVE_AJUSTES = "asistente:ajustes:";   // + servidor; JSON en localStorage (nunca el token ni texto del usuario)
-  const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };
+  const NOMBRE_BASE = "Asistente", NOMBRE_MAX = 40;
+  // Nombre limpio (sin espacios en los extremos ni caracteres de control, tope NOMBRE_MAX) o "" si no sirve.
+  function nombreLimpio(v) {
+    return typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, NOMBRE_MAX).trim() : "";
+  }
+  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };
   const MOTORES = ["auto", "navegador", "servidor"];
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
@@ -711,6 +720,7 @@
     .aj-fila[hidden] { display: none; }
     .aj-fila legend, .aj-fila > label.aj-tit { display: block; padding: 0; margin: 0 0 6px; font-size: 13px; font-weight: 600; }
     .aj-op { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+    .aj-fila input[type="text"] { box-sizing: border-box; width: 100%; padding: 6px 10px; font: inherit; color: var(--t); background: var(--f); border: 1px solid var(--b); border-radius: var(--r); }
     .aj-fila input[type="range"] { width: 100%; accent-color: var(--c); }
     .aj-fila input:focus-visible, .aj-fila button:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
     .aj-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -854,6 +864,7 @@
       this._abort = null;
       this._iniciado = false;
       this._nombreSistema = "";
+      this._nombreServidor = "";
       this._dictadoServidor = false;
       this._ttsServidor = false;  // el sistema tiene voz de servidor (/v1/estado: voz.respuesta)
       this._ttsPausaHasta = 0;    // tras un fallo, hasta cuándo se usa solo la voz del navegador
@@ -925,7 +936,7 @@
       velo.addEventListener("click", () => this._menu(false));
 
       // columna principal: barra, mensajes, entrada
-      this._titulo = el("h1", { textContent: this.getAttribute("titulo") || "Asistente" });
+      this._titulo = el("h1", { textContent: this.getAttribute("titulo") || NOMBRE_BASE });
       const menu = el("button", { class: "menu", type: "button", title: TEXTOS.historial, "aria-label": TEXTOS.historial }, icono("menu"));
       menu.addEventListener("click", () => this._menu());
       const otra = el("button", { class: "accion", type: "button", title: TEXTOS.nueva, "aria-label": TEXTOS.nueva }, icono("nuevo"));
@@ -1001,6 +1012,7 @@
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
       r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
       this._mostrarBienvenida();
+      this._aplicarNombre();
     }
 
     // — tema (atributo `tema`: claro | oscuro | auto, por defecto auto = el del sistema) —
@@ -1066,7 +1078,8 @@
           this._maxAudioS = Number(voz.max_audio_s) > 0 ? Number(voz.max_audio_s) : 60;
           this._dictadoServidor = voz.dictado === true && puedeGrabar();
           this._ttsServidor = voz.respuesta === true;
-          if (!this.getAttribute("titulo") && this._nombreSistema) this._titulo.textContent = "Asistente · " + this._nombreSistema;
+          this._nombreServidor = nombreLimpio(e.nombre_asistente);
+          this._aplicarNombre();
         }
       } catch { /* sin acceso: se muestra el aviso */ }
       this._actualizarVoz();
@@ -1283,8 +1296,25 @@
     // Un solo SpeechRecognition continuo atiende todos los estados (así no compite por el micrófono):
     //   apagado → armado (solo espera la palabra de activación) → capturando (dicta al campo) →
     //   confirmando («enviar» / «cancelar» o botones) → respondiendo → armado.
+    // Cómo se llama el asistente: lo que el usuario eligió (si hay panel de ajustes) > atributo > sistema > «Asistente».
+    _nombrePorDefecto() { return nombreLimpio(this.getAttribute("nombre")) || this._nombreServidor || NOMBRE_BASE; }
+    _nombre() { return (this._ajustesActivos() && this._aj && this._aj.nombre) || this._nombrePorDefecto(); }
+
+    _aplicarNombre() {
+      const n = this._nombre();
+      if (!this.getAttribute("titulo")) this._titulo.textContent = this._nombreSistema ? n + " · " + this._nombreSistema : n;
+      this._aviso.textContent = TEXTOS.noDisponible.replace("{n}", n);
+      if (this._ajMotorLeyenda) this._ajMotorLeyenda.textContent = TEXTOS.ajMotor.replace("{n}", n);
+      if (this._mh && this._mhActivo()) this._mhPintar();   // la etiqueta «Decí {p}» sigue al nombre
+      if (this._ajNombre) this._ajNombre.placeholder = this._nombrePorDefecto();
+    }
+
     _mhActivo() { return this._mh.estado !== "apagado"; }
-    _palabra() { return (this.getAttribute("palabra-activacion") || PALABRA_ACTIVACION).trim() || PALABRA_ACTIVACION; }
+    // Despierta el modo voz: `palabra-activacion` si el anfitrión la fijó; si no, el nombre del asistente (decir «Lucas»
+    // basta si se llama Lucas). Sin nombre propio, «asistente».
+    _palabra() {
+      return this.getAttribute("palabra-activacion")?.trim() || (this._nombre() !== NOMBRE_BASE ? this._nombre() : PALABRA_ACTIVACION);
+    }
 
     _conmutarManosLibres() {
       if (this._mhActivo()) {                                  // ya encendido: el botón de la barra alterna entre «Voz» y «Chat»
@@ -2074,6 +2104,7 @@
       const aj = { ...AJUSTES_BASE };
       try {
         const g = JSON.parse(localStorage.getItem(CLAVE_AJUSTES + this._servidor) || "{}");
+        aj.nombre = nombreLimpio(g.nombre);
         if (MOTORES.includes(g.motor)) aj.motor = g.motor;
         if (typeof g.volumen === "number" && g.volumen >= 0 && g.volumen <= 1) aj.volumen = g.volumen;
         if (typeof g.acuse === "boolean") aj.acuse = g.acuse;
@@ -2097,8 +2128,11 @@
         i.addEventListener("change", () => { if (i.checked) this._ajustesCambiar({ motor: valor }); });
         return { i, fila: el("label", { class: "aj-op" }, i, el("span", { textContent: texto })) };
       };
+      this._ajNombre = el("input", { type: "text", id: "aj-nombre", maxlength: String(NOMBRE_MAX), autocomplete: "off" });
+      this._ajNombre.addEventListener("input", () => this._ajustesCambiar({ nombre: nombreLimpio(this._ajNombre.value) }));
+      this._ajFilaNombre = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-nombre", textContent: TEXTOS.ajNombre }), this._ajNombre);
       this._ajRadios = { navegador: radio("navegador", TEXTOS.ajMotorNavegador), servidor: radio("servidor", TEXTOS.ajMotorServidor) };
-      this._ajFilaMotor = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajMotor }),
+      this._ajFilaMotor = el("fieldset", { class: "aj-fila" }, (this._ajMotorLeyenda = el("legend", { textContent: TEXTOS.ajMotor.replace("{n}", this._nombre()) })),
         this._ajRadios.navegador.fila, this._ajRadios.servidor.fila);
       this._ajVol = el("input", { type: "range", id: "aj-vol", min: "0", max: "100", step: "5" });
       this._ajVol.addEventListener("input", () => this._ajustesCambiar({ volumen: Number(this._ajVol.value) / 100 }));
@@ -2118,14 +2152,14 @@
       this._ajProbar = el("button", { type: "button", textContent: TEXTOS.ajProbar });
       this._ajProbar.addEventListener("click", () => { this._pararVoz(); this._decir(TEXTOS.ajPrueba); });
       const restablecer = el("button", { type: "button", textContent: TEXTOS.ajRestablecer });
-      restablecer.addEventListener("click", () => { this._pararVoz(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._ajustesPintar(); this._actualizarVoz(); });
+      restablecer.addEventListener("click", () => { this._pararVoz(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._ajustesPintar(); this._actualizarVoz(); this._aplicarNombre(); this._ajNombre.value = ""; });
       this._ajFilaAcc = el("div", { class: "aj-fila aj-acciones" }, this._ajProbar, restablecer);
       this._ajCerrar = el("button", { type: "button", textContent: TEXTOS.ajCerrar });
       this._ajCerrar.addEventListener("click", () => this._ajustesCerrar());
       this._ajPanel = el("section", { class: "ajustes-panel", hidden: true, role: "dialog", "aria-labelledby": "aj-titulo" },
         el("div", { class: "mem-cab" }, el("h2", { id: "aj-titulo", textContent: TEXTOS.ajustesTitulo }), this._ajCerrar),
         el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
-          this._ajFilaMotor, this._ajFilaVol, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaAcc)));
+          this._ajFilaNombre, this._ajFilaMotor, this._ajFilaVol, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaAcc)));
       this._ajPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ajustesCerrar(); } });
       // un clic fuera del menú (y del engranaje) lo cierra; composedPath atraviesa el Shadow DOM
       this._ajFuera = (e) => {
@@ -2140,6 +2174,7 @@
       Object.assign(this._aj, cambio);
       this._ajustesGuardar();
       if (this._audio) this._audio.volume = this._volumen();   // el volumen se oye ya en lo que está sonando
+      if ("nombre" in cambio) this._aplicarNombre();
       if ("motor" in cambio) { this._pararVoz(); this._actualizarVoz(); }
       if ("confirmar" in cambio && this._mhActivo()) this._mhPintar();
       this._ajustesPintar();
@@ -2167,6 +2202,7 @@
     _ajustesAbrir() {
       if (!this._ajustesActivos()) return;
       if (this._memPanel && !this._memPanel.hidden) this._memoriaCerrar();
+      this._ajNombre.value = this._aj.nombre;   // solo al abrir: mientras se escribe, el campo no se reescribe
       this._ajustesPintar();
       this._ajPanel.hidden = false; this._ajBtn.setAttribute("aria-expanded", "true");
       this._ajCerrar.focus();

@@ -62,7 +62,7 @@ async (page) => {
       } });
     }, { sinReco, lento });
     await p.goto(`${BASE}/?usuario=ana`);
-    await p.locator("asistente-chat textarea").waitFor();
+    await p.locator("asistente-chat .barra").waitFor();
     return p;
   };
   const W = (p, sel) => p.locator(`asistente-chat ${sel}`);

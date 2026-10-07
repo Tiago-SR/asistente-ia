@@ -637,7 +637,7 @@ def test_widget_panel_de_memoria_usa_solo_colores_de_la_paleta_con_contraste_ver
     bloque = css.split("/* Panel «Lo que recuerdo»", 1)[1].split(".entrada { padding", 1)[0]
     assert re.findall(r"#[0-9a-fA-F]{3,6}\b|rgba?\(|color-mix", bloque) == []
     colores = set(re.findall(r"(?<![-\w])(?:color|background|border-color|background-color):\s*(var\(--[\w-]+\))", bloque))
-    assert colores <= {"var(--c)", "var(--ct)", "var(--f)", "var(--apagado)", "var(--p-err-t)", "var(--b)"}, colores
+    assert colores <= {"var(--c)", "var(--ct)", "var(--f)", "var(--t)", "var(--apagado)", "var(--p-err-t)", "var(--b)"}, colores
     # texto con un color de acento o de error solo sobre el fondo del tema (verificado ≥ 4,5:1)
     assert ".mem-error { margin-top: 6px; font-size: 13px; color: var(--p-err-t); }" in bloque
     assert ".mem-lista li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--b); border-radius: var(--r); background: var(--f); }" in bloque
@@ -653,8 +653,8 @@ def test_widget_textos_de_memoria_en_espanol_rioplatense():
 
 def test_widget_ajustes_del_usuario_solo_guardan_preferencias_y_llegan_a_las_dos_voces():
     js = _js()
-    # lo único que se persiste es `this._aj`: motor, volumen y acuse (sin token ni texto)
-    assert 'const AJUSTES_BASE = { motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };' in js
+    # lo único que se persiste es `this._aj`: nombre, motor, volumen y acuse (sin token ni texto)
+    assert 'const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };' in js
     assert "JSON.stringify(this._aj)" in js
     # el volumen del panel llega a la voz del navegador y al audio del servidor; el motor se resuelve en un método
     assert "u.volume = this._volumen();" in js and "a.volume = this._volumen();" in js
@@ -662,3 +662,9 @@ def test_widget_ajustes_del_usuario_solo_guardan_preferencias_y_llegan_a_las_dos
     assert "this._aj.motor" in prefs and 'getAttribute("voz-respuesta")' in prefs
     # ajustes="no" quita el panel y deja mandar a los atributos del anfitrión
     assert 'getAttribute("ajustes")' in js.split("_ajustesActivos() {", 1)[1].split("\n", 1)[0]
+
+
+def test_widget_el_nombre_del_asistente_es_la_palabra_de_activacion():
+    js = _js()
+    # palabra-activacion del anfitrión > nombre del asistente > «asistente»
+    assert 'this.getAttribute("palabra-activacion")?.trim() || (this._nombre() !== NOMBRE_BASE ? this._nombre() : PALABRA_ACTIVACION)' in js

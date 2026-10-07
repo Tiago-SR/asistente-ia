@@ -22,7 +22,7 @@ async (page) => {
   const ctx = page.context();
 
   // `servidor`: lo que dice /v1/estado en voz.respuesta. `navegador`: si existe speechSynthesis.
-  async function nueva({ servidor = false, navegador = true, reco = false, antes } = {}) {
+  async function nueva({ nombreAsistente = null, servidor = false, navegador = true, reco = false, antes } = {}) {
     const p = await ctx.newPage();
     const visto = { sintetizar: 0 };
     await p.addInitScript(({ navegador, reco }) => {
@@ -48,7 +48,7 @@ async (page) => {
     await p.route("**/v1/estado", (route) => {
       if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
       return route.fulfill({ status: 200, headers: { "content-type": "application/json", ...CORS }, body: JSON.stringify({
-        habilitado: true, nombre_sistema: "Sistema PHP", memoria: false, voz: { dictado: false, respuesta: servidor, max_audio_s: 60 } }) });
+        habilitado: true, nombre_sistema: "Sistema PHP", nombre_asistente: nombreAsistente, memoria: false, voz: { dictado: false, respuesta: servidor, max_audio_s: 60 } }) });
     });
     await p.route("**/v1/voz/sintetizar", (route) => {
       if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
@@ -57,7 +57,7 @@ async (page) => {
     });
     if (antes) await p.addInitScript(antes);
     await p.goto(`${BASE}/?usuario=ana`);
-    await p.locator("asistente-chat textarea").waitFor();
+    await p.locator("asistente-chat .barra").waitFor();
     await dormir(300);
     const sel = (css, o) => p.locator("asistente-chat " + css, o);
     const guardado = () => p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x.startsWith("asistente:ajustes:")); return k ? JSON.parse(localStorage.getItem(k)) : null; });
@@ -125,7 +125,7 @@ async (page) => {
     });
     await caso("el ajuste sobrevive a recargar la página", async () => {
       await p.reload();
-      await p.locator("asistente-chat textarea").waitFor(); await dormir(300);
+      await p.locator("asistente-chat .barra").waitFor(); await dormir(300);
       await sel(".ajustes").click();
       afirma((await sel("#aj-vol").inputValue()) === "40", "volumen " + (await sel("#aj-vol").inputValue()));
     });
@@ -173,7 +173,7 @@ async (page) => {
     });
     await caso("volver a la voz del servidor y recargar conserva la elección del usuario", async () => {
       await p.reload();
-      await p.locator("asistente-chat textarea").waitFor(); await dormir(300);
+      await p.locator("asistente-chat .barra").waitFor(); await dormir(300);
       await sel(".ajustes").click();
       afirma(await sel("input[value=navegador]").isChecked(), "no recordó el navegador");
     });
@@ -200,6 +200,55 @@ async (page) => {
     await caso("un guardado inválido se ignora: volumen 100 % y el widget funciona", async () => {
       await sel(".ajustes").click();
       afirma((await sel("#aj-vol").inputValue()) === "100", "volumen " + (await sel("#aj-vol").inputValue()));
+    });
+    await p.close();
+  }
+
+  // — Nombre del asistente: el del sistema (yaml) es el valor por defecto y el usuario lo cambia en sus ajustes —
+  {
+    const { p, sel, guardado } = await nueva({ servidor: true, nombreAsistente: "Sofía" });
+    const titulo = () => sel("h1").textContent();
+    await caso("el nombre del sistema (nombre_asistente) es el título por defecto", async () => {
+      afirma((await titulo()) === "Sofía · Sistema PHP", await titulo());
+    });
+    await caso("el usuario lo cambia en ajustes: se ve ya en el título y la voz, y se guarda", async () => {
+      await sel(".ajustes").click();
+      afirma((await sel("#aj-nombre").getAttribute("placeholder")) === "Sofía", "placeholder");
+      await sel("#aj-nombre").fill("  Don Pepe ");
+      afirma((await titulo()) === "Don Pepe · Sistema PHP", await titulo());
+      afirma((await sel("fieldset.aj-fila legend").textContent()) === "Voz de Don Pepe", "leyenda");
+      afirma((await guardado())?.nombre === "Don Pepe", JSON.stringify(await guardado()));
+    });
+    await caso("el nombre es la palabra que despierta el modo voz (y vaciarlo vuelve a la del sistema)", async () => {
+      const palabra = () => p.locator("asistente-chat").evaluate((e) => e._palabra());
+      afirma((await palabra()) === "Don Pepe", await palabra());
+      await sel("#aj-nombre").fill("");
+      afirma((await palabra()) === "Sofía", await palabra());
+      await sel("#aj-nombre").fill("Don Pepe");
+    });
+    await caso("sobrevive a recargar y «restablecer» vuelve al del sistema", async () => {
+      await p.reload();
+      await p.locator("asistente-chat .barra").waitFor(); await dormir(300);
+      afirma((await titulo()) === "Don Pepe · Sistema PHP", await titulo());
+      await sel(".ajustes").click();
+      afirma((await sel("#aj-nombre").inputValue()) === "Don Pepe", "el campo no recuerda el nombre");
+      await sel(".aj-acciones button", { hasText: "Restablecer" }).click();
+      afirma((await titulo()) === "Sofía · Sistema PHP", await titulo());
+      afirma((await guardado()) === null, "quedó algo guardado");
+    });
+    await caso("vaciar el campo vuelve al nombre por defecto", async () => {
+      await sel("#aj-nombre").fill("Ana");
+      await sel("#aj-nombre").fill("");
+      afirma((await titulo()) === "Sofía · Sistema PHP", await titulo());
+    });
+    await p.close();
+  }
+
+  // — Sin nombre en el yaml: «Asistente» —
+  {
+    const { p, sel } = await nueva({ servidor: false });
+    await caso("sin nombre_asistente el título sigue siendo «Asistente · sistema»", async () => {
+      afirma((await sel("h1").textContent()) === "Asistente · Sistema PHP", await sel("h1").textContent());
     });
     await p.close();
   }

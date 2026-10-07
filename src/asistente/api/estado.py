@@ -21,6 +21,8 @@ async def estado(
     return {
         "habilitado": True,
         "nombre_sistema": sesion.sistema.nombre,
+        # Nombre por defecto del asistente (sistemas.yaml); el usuario puede cambiarlo en el widget.
+        "nombre_asistente": sesion.sistema.nombre_asistente,
         # El widget muestra el panel «Lo que recuerdo» solo si el sistema tiene la memoria encendida.
         "memoria": sesion.sistema.memoria_habilitada and svc.memoria is not None,
         "voz": {
