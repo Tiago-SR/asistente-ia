@@ -44,7 +44,7 @@
  *               momento, lo consulto») para que no haya silencio; "no" la quita.
  *   modo-inicial "auto" (por defecto) | "chat": con "auto" el widget abre en modo voz cuando está disponible (el usuario pasa
  *               al chat con el botón «Chat»); "chat" abre en el chat. El ajuste «Abrir en modo voz» del usuario también lo apaga.
- *   ajustes      "auto" (por defecto) | "no": engranaje con el panel de ajustes del usuario (motor de voz, volumen, lectura
+ *   ajustes      "auto" (por defecto) | "no": engranaje con el panel de ajustes del usuario (motor de voz, voz del servidor —tipo y voz, si el sistema ofrece varias—, volumen, velocidad, lectura
  *               automática, acuse, confirmar con «enviar»). Se guardan en el navegador (localStorage, por servidor). Lo que el usuario elige manda
  *               sobre `voz-respuesta` y `acuse`; con "no" no hay panel y mandan los atributos.
  *   orbe-volumen "auto" (por defecto) | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
@@ -150,6 +150,10 @@
     ajMotorNavegador: "Del navegador",
     ajMotorServidor: "Del servidor (más natural)",
     ajVolumen: "Volumen",
+    ajVelocidad: "Velocidad de la voz",
+    ajGenero: "Tipo de voz",
+    ajGeneros: { femenina: "Femenina", masculina: "Masculina" },
+    ajVozElegir: "Voz",
     ajLeerAuto: "Leer las respuestas en voz alta",
     ajConfirmar: "Pedir «enviar» o «cancelar» antes de enviar (modo voz)",
     ajInicioVoz: "Abrir en modo voz",
@@ -259,7 +263,8 @@
   function nombreLimpio(v) {
     return typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, NOMBRE_MAX).trim() : "";
   }
-  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, acuse: true, confirmar: true, iniciarVoz: true };
+  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, velocidad: 1, voz: "", acuse: true, confirmar: true, iniciarVoz: true };
+  const VEL_MIN = 0.75, VEL_MAX = 1.5;   // velocidad de la voz (1 = normal)
   const MOTORES = ["auto", "navegador", "servidor"];
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
@@ -723,8 +728,9 @@
     .aj-fila legend, .aj-fila > label.aj-tit { display: block; padding: 0; margin: 0 0 6px; font-size: 13px; font-weight: 600; }
     .aj-op { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
     .aj-fila input[type="text"] { box-sizing: border-box; width: 100%; padding: 6px 10px; font: inherit; color: var(--t); background: var(--f); border: 1px solid var(--b); border-radius: var(--r); }
+    .aj-fila select { box-sizing: border-box; width: 100%; padding: 6px 10px; font: inherit; color: var(--t); background: var(--f); border: 1px solid var(--b); border-radius: var(--r); }
     .aj-fila input[type="range"] { width: 100%; accent-color: var(--c); }
-    .aj-fila input:focus-visible, .aj-fila button:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+    .aj-fila input:focus-visible, .aj-fila select:focus-visible, .aj-fila button:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
     .aj-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
     .aj-acciones button { padding: 5px 14px; border-radius: 999px; border: 1px solid var(--c); background: var(--f); color: var(--c); cursor: pointer; }
     .aj-acciones button:hover:not(:disabled) { background: var(--c); color: var(--ct); }
@@ -869,6 +875,8 @@
       this._nombreServidor = "";
       this._dictadoServidor = false;
       this._ttsServidor = false;  // el sistema tiene voz de servidor (/v1/estado: voz.respuesta)
+      this._vocesSrv = [];        // voces que ofrece el servidor: [{ id, etiqueta, genero }] (/v1/estado: voz.voces)
+      this._vozSrvDefecto = "";   // id de la predeterminada (/v1/estado: voz.voz_defecto)
       this._ttsPausaHasta = 0;    // tras un fallo, hasta cuándo se usa solo la voz del navegador
       this._cola = [];            // piezas por decir con voz de servidor: { texto, audio, alIniciar, alTerminar, gen }
       this._sonando = false;      // hay una pieza de la cola sonando
@@ -1080,6 +1088,9 @@
           this._maxAudioS = Number(voz.max_audio_s) > 0 ? Number(voz.max_audio_s) : 60;
           this._dictadoServidor = voz.dictado === true && puedeGrabar();
           this._ttsServidor = voz.respuesta === true;
+          this._vocesSrv = Array.isArray(voz.voces) ? voz.voces.filter((v) => v && typeof v.id === "string" && v.id).map((v) => ({
+            id: v.id, etiqueta: typeof v.etiqueta === "string" && v.etiqueta ? v.etiqueta : v.id, genero: v.genero in TEXTOS.ajGeneros ? v.genero : null })) : [];
+          this._vozSrvDefecto = typeof voz.voz_defecto === "string" ? voz.voz_defecto : "";
           this._nombreServidor = nombreLimpio(e.nombre_asistente);
           this._aplicarNombre();
         }
@@ -1662,6 +1673,12 @@
       if (!MANOS_LIBRES_CONFIRMAR) return false;
       return !(this._ajustesActivos() && this._aj && !this._aj.confirmar);
     }
+    // Voz del servidor elegida: la del usuario si el catálogo aún la tiene; si no, la predeterminada (el servidor decide: no se envía).
+    _vozServidor() {
+      const id = this._ajustesActivos() && this._aj ? this._aj.voz : "";
+      return id && this._vocesSrv.some((v) => v.id === id) ? id : "";
+    }
+    _velocidad() { return this._ajustesActivos() && this._aj ? this._aj.velocidad : 1; }
     _volumen() { return this._ajustesActivos() && this._aj ? this._aj.volumen : 1; }
     _acuseActivo() {
       if (this._ajustesActivos() && this._aj && !this._aj.acuse) return false;
@@ -1723,6 +1740,7 @@
       if (v) this._vozNav = v; else v = this._vozNav || null;
       if (v) { u.voice = v; u.lang = v.lang; } else u.lang = idioma;
       u.volume = this._volumen();
+      u.rate = this._velocidad();
       u.onend = alFin; u.onerror = alFin;
       if (alIniciar) u.onstart = alIniciar;
       u.onboundary = () => { if (this._mhActivo()) this._nivelPulso(0.5 + Math.random() * 0.4); };
@@ -1733,11 +1751,12 @@
     async _pedirAudio(texto, gen, fija = false) {
       const corto = fija && texto.length <= TTS_CACHE_CHARS;
       if (corto && this._cacheTts.has(texto)) return this._cacheTts.get(texto);
+      const voz = this._vozServidor();   // el caché es de una sola voz: se vacía al cambiarla
       const senal = this._abortTts.signal;
       try {
         const pedir = () => this._conToken((h) => fetch(`${this._servidor}/v1/voz/sintetizar`, {
           method: "POST", headers: { ...h, "Content-Type": "application/json" }, signal: senal,
-          body: JSON.stringify({ texto, idioma: this.getAttribute("idioma") || undefined }),
+          body: JSON.stringify({ texto, idioma: this.getAttribute("idioma") || undefined, voz: voz || undefined }),
         }));
         let r = await pedir();
         // Un fallo pasajero (429/5xx) se reintenta una vez: caer a la voz del navegador a mitad de una respuesta cambia la voz.
@@ -1756,7 +1775,7 @@
         this._tl(`audio listo ${texto.length} car, ${blob.size} bytes, ${blob.type}`);
         const url = URL.createObjectURL(blob);
         if (gen !== this._genVoz) { URL.revokeObjectURL(url); return null; }
-        if (corto) {
+        if (corto && voz === this._vozServidor()) {
           this._cacheTts.set(texto, url);
           if (this._cacheTts.size > TTS_CACHE_MAX) {
             const [viejo, u] = this._cacheTts.entries().next().value;
@@ -1837,6 +1856,7 @@
         a.onplaying = arrancar;
         a.onended = () => { this._tl(`ended t=${a.currentTime.toFixed(2)}s`); fin(true); };
         a.onerror = () => fin(empezo, "el navegador no pudo decodificar el audio");
+        a.defaultPlaybackRate = a.playbackRate = this._velocidad();   // asignar `src` reinicia playbackRate: defaultPlaybackRate lo conserva
         a.src = url;
         a.volume = this._volumen();
         const p = a.play();
@@ -2118,6 +2138,8 @@
         aj.nombre = nombreLimpio(g.nombre);
         if (MOTORES.includes(g.motor)) aj.motor = g.motor;
         if (typeof g.volumen === "number" && g.volumen >= 0 && g.volumen <= 1) aj.volumen = g.volumen;
+        if (typeof g.velocidad === "number" && g.velocidad >= VEL_MIN && g.velocidad <= VEL_MAX) aj.velocidad = g.velocidad;
+        if (typeof g.voz === "string") aj.voz = g.voz.slice(0, 64);
         if (typeof g.acuse === "boolean") aj.acuse = g.acuse;
         if (typeof g.confirmar === "boolean") aj.confirmar = g.confirmar;
         if (typeof g.iniciarVoz === "boolean") aj.iniciarVoz = g.iniciarVoz;
@@ -2148,6 +2170,15 @@
       this._ajVol = el("input", { type: "range", id: "aj-vol", min: "0", max: "100", step: "5" });
       this._ajVol.addEventListener("input", () => this._ajustesCambiar({ volumen: Number(this._ajVol.value) / 100 }));
       this._ajFilaVol = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-vol", textContent: TEXTOS.ajVolumen }), this._ajVol);
+      this._ajVel = el("input", { type: "range", id: "aj-vel", min: String(VEL_MIN * 100), max: String(VEL_MAX * 100), step: "5" });
+      this._ajVel.addEventListener("input", () => this._ajustesCambiar({ velocidad: Number(this._ajVel.value) / 100 }));
+      this._ajFilaVel = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-vel", textContent: TEXTOS.ajVelocidad }), this._ajVel);
+      // voz del servidor: tipo (femenina/masculina) y, debajo, las voces de ese tipo
+      this._ajGenero = {};
+      this._ajFilaGenero = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajGenero }));
+      this._ajVozSel = el("select", { id: "aj-voz" });
+      this._ajVozSel.addEventListener("change", () => this._ajustesCambiar({ voz: this._ajVozSel.value }));
+      this._ajFilaVoz = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-voz", textContent: TEXTOS.ajVozElegir }), this._ajVozSel);
       this._ajLeer = el("input", { type: "checkbox", id: "aj-leer" });
       this._ajLeer.addEventListener("change", () => { if (this._ajLeer.checked !== this._leerAuto) this._conmutarLeerAuto(); });
       this._ajFilaLeer = el("div", { class: "aj-fila" }, el("label", { class: "aj-op" }, this._ajLeer, el("span", { textContent: TEXTOS.ajLeerAuto })));
@@ -2163,14 +2194,14 @@
       this._ajProbar = el("button", { type: "button", textContent: TEXTOS.ajProbar });
       this._ajProbar.addEventListener("click", () => { this._pararVoz(); this._decir(TEXTOS.ajPrueba); });
       const restablecer = el("button", { type: "button", textContent: TEXTOS.ajRestablecer });
-      restablecer.addEventListener("click", () => { this._pararVoz(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._ajustesPintar(); this._actualizarVoz(); this._aplicarNombre(); this._ajNombre.value = ""; });
+      restablecer.addEventListener("click", () => { this._pararVoz(); this._vaciarCacheTts(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._ajustesPintar(); this._actualizarVoz(); this._aplicarNombre(); this._ajNombre.value = ""; });
       this._ajFilaAcc = el("div", { class: "aj-fila aj-acciones" }, this._ajProbar, restablecer);
       this._ajCerrar = el("button", { type: "button", textContent: TEXTOS.ajCerrar });
       this._ajCerrar.addEventListener("click", () => this._ajustesCerrar());
       this._ajPanel = el("section", { class: "ajustes-panel", hidden: true, role: "dialog", "aria-labelledby": "aj-titulo" },
         el("div", { class: "mem-cab" }, el("h2", { id: "aj-titulo", textContent: TEXTOS.ajustesTitulo }), this._ajCerrar),
         el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
-          this._ajFilaNombre, this._ajFilaMotor, this._ajFilaVol, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaAcc)));
+          this._ajFilaNombre, this._ajFilaMotor, this._ajFilaGenero, this._ajFilaVoz, this._ajFilaVol, this._ajFilaVel, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaAcc)));
       this._ajPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ajustesCerrar(); } });
       // un clic fuera del menú (y del engranaje) lo cierra; composedPath atraviesa el Shadow DOM
       this._ajFuera = (e) => {
@@ -2184,11 +2215,43 @@
     _ajustesCambiar(cambio) {
       Object.assign(this._aj, cambio);
       this._ajustesGuardar();
-      if (this._audio) this._audio.volume = this._volumen();   // el volumen se oye ya en lo que está sonando
+      if (this._audio) { this._audio.volume = this._volumen(); this._audio.playbackRate = this._audio.defaultPlaybackRate = this._velocidad(); }   // se oye ya en lo que está sonando (la voz del navegador, desde la frase siguiente)
       if ("nombre" in cambio) this._aplicarNombre();
       if ("motor" in cambio) { this._pararVoz(); this._actualizarVoz(); }
+      if ("voz" in cambio) { this._vaciarCacheTts(); this._pararVoz(); }
       if ("confirmar" in cambio && this._mhActivo()) this._mhPintar();
       this._ajustesPintar();
+    }
+
+    _vaciarCacheTts() {
+      for (const u of this._cacheTts.values()) URL.revokeObjectURL(u);
+      this._cacheTts.clear();
+    }
+
+    // Tipo y lista de voces del servidor. Solo aparecen si el servidor las usa y ofrece más de una; el tipo, si hay más de uno.
+    _ajustesPintarVoces(usaServidor) {
+      const voces = this._vocesSrv;
+      const actual = voces.find((v) => v.id === (this._vozServidor() || this._vozSrvDefecto)) || voces[0];
+      const generos = [...new Set(voces.map((v) => v.genero).filter(Boolean))];
+      const hay = usaServidor && voces.length > 1;
+      this._ajFilaVoz.hidden = !hay;
+      this._ajFilaGenero.hidden = !hay || generos.length < 2;
+      if (!hay) return;
+      for (const g of generos) {
+        if (this._ajGenero[g]) continue;
+        const i = el("input", { type: "radio", name: "aj-genero", value: g });
+        i.addEventListener("change", () => {
+          if (!i.checked) return;
+          const de = this._vocesSrv.filter((v) => v.genero === g);
+          this._ajustesCambiar({ voz: (de.find((v) => v.id === this._vozSrvDefecto) || de[0]).id });
+        });
+        this._ajGenero[g] = i;
+        this._ajFilaGenero.append(el("label", { class: "aj-op" }, i, el("span", { textContent: TEXTOS.ajGeneros[g] })));
+      }
+      for (const [g, i] of Object.entries(this._ajGenero)) { i.checked = actual.genero === g; i.closest("label").hidden = !generos.includes(g); }
+      const lista = generos.length > 1 && actual.genero ? voces.filter((v) => v.genero === actual.genero) : voces;
+      this._ajVozSel.replaceChildren(...lista.map((v) => el("option", { value: v.id, textContent: v.etiqueta })));
+      this._ajVozSel.value = actual.id;
     }
 
     // Muestra solo lo que tiene sentido ahora: el selector de motor necesita las dos voces; el resto, alguna voz.
@@ -2198,11 +2261,14 @@
       const motor = this._prefRespuesta();   // lo que de verdad se usa (atributo del anfitrión incluido)
       this._ajRadios.navegador.i.checked = motor === "navegador" || (motor !== "servidor" && !srv);
       this._ajRadios.servidor.i.checked = !this._ajRadios.navegador.i.checked;
+      this._ajustesPintarVoces(this._ajRadios.servidor.i.checked && srv);
       const habla = this._hablaPosible();
-      this._ajFilaVol.hidden = this._ajFilaLeer.hidden = this._ajFilaAcc.hidden = !habla;
+      this._ajFilaVol.hidden = this._ajFilaVel.hidden = this._ajFilaLeer.hidden = this._ajFilaAcc.hidden = !habla;
       this._ajFilaAcuse.hidden = !habla || this._manos.hidden;
       this._ajVol.value = String(Math.round(this._aj.volumen * 100));
       this._ajVol.setAttribute("aria-valuetext", Math.round(this._aj.volumen * 100) + " %");
+      this._ajVel.value = String(Math.round(this._aj.velocidad * 100));
+      this._ajVel.setAttribute("aria-valuetext", "×" + this._aj.velocidad.toFixed(2).replace(/0$/, ""));
       this._ajLeer.checked = this._leerAuto;
       this._ajAcuse.checked = this._aj.acuse;
       this._ajFilaConfirmar.hidden = this._ajFilaInicio.hidden = this._manos.hidden;

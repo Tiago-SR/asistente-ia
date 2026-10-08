@@ -52,10 +52,11 @@ class TtsElevenLabs:
     def _headers(self) -> dict:
         return {"xi-api-key": self._api_key}
 
-    async def sintetizar(self, texto: str, *, idioma: str | None = None) -> bytes:
+    async def sintetizar(self, texto: str, *, idioma: str | None = None, voz_id: str | None = None) -> bytes:
+        voz = quote(voz_id, safe="") if voz_id else self._voz
         try:
             r = await self._cliente.post(
-                f"{self._base}/text-to-speech/{self._voz}",
+                f"{self._base}/text-to-speech/{voz}",
                 params={"output_format": FORMATO},
                 json={"text": texto, "model_id": self._modelo},
                 headers={**self._headers(), "accept": self.tipo_mime},

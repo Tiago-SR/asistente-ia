@@ -22,9 +22,9 @@ async (page) => {
   const ctx = page.context();
 
   // `servidor`: lo que dice /v1/estado en voz.respuesta. `navegador`: si existe speechSynthesis.
-  async function nueva({ nombreAsistente = null, servidor = false, navegador = true, reco = false, antes } = {}) {
+  async function nueva({ nombreAsistente = null, servidor = false, navegador = true, reco = false, antes, voces = null } = {}) {
     const p = await ctx.newPage();
-    const visto = { sintetizar: 0 };
+    const visto = { sintetizar: 0, cuerpos: [] };
     await p.addInitScript(({ navegador, reco }) => {
       window.__hablado = []; window.__audios = [];
       // el dictado del navegador decide si hay modo voz (y por tanto acuse): se controla para que el caso no dependa del Chromium
@@ -33,11 +33,11 @@ async (page) => {
         window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
         Object.defineProperty(window, "speechSynthesis", { configurable: true, value: {
           getVoices: () => [], cancel() {}, onvoiceschanged: null,
-          speak(u) { window.__hablado.push({ texto: u.text, volumen: u.volume }); setTimeout(() => u.onstart && u.onstart(), 0); setTimeout(() => u.onend && u.onend(), 20); },
+          speak(u) { window.__hablado.push({ texto: u.text, volumen: u.volume, velocidad: u.rate }); setTimeout(() => u.onstart && u.onstart(), 0); setTimeout(() => u.onend && u.onend(), 20); },
         } });
       } else { try { delete window.speechSynthesis; } catch (e) { /* nada */ } Object.defineProperty(window, "speechSynthesis", { configurable: true, value: undefined }); }
       HTMLMediaElement.prototype.play = function () {
-        window.__audios.push({ volumen: this.volume });
+        window.__audios.push({ volumen: this.volume, velocidad: this.playbackRate });
         setTimeout(() => { this.dispatchEvent(new Event("playing")); setTimeout(() => this.dispatchEvent(new Event("ended")), 20); }, 0);
         return Promise.resolve();
       };
@@ -48,11 +48,12 @@ async (page) => {
     await p.route("**/v1/estado", (route) => {
       if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
       return route.fulfill({ status: 200, headers: { "content-type": "application/json", ...CORS }, body: JSON.stringify({
-        habilitado: true, nombre_sistema: "Sistema PHP", nombre_asistente: nombreAsistente, memoria: false, voz: { dictado: false, respuesta: servidor, max_audio_s: 60 } }) });
+        habilitado: true, nombre_sistema: "Sistema PHP", nombre_asistente: nombreAsistente, memoria: false, voz: { dictado: false, respuesta: servidor, max_audio_s: 60, ...(voces ? { voces: voces.lista, voz_defecto: voces.defecto } : {}) } }) });
     });
     await p.route("**/v1/voz/sintetizar", (route) => {
       if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
       visto.sintetizar++;
+      try { visto.cuerpos.push(JSON.parse(route.request().postData() || "{}")); } catch { visto.cuerpos.push(null); }
       return route.fulfill({ status: 200, headers: { "content-type": "audio/mpeg", ...CORS }, body: Buffer.from("ID3audio") });
     });
     if (antes) await p.addInitScript(antes);
@@ -62,6 +63,12 @@ async (page) => {
     const sel = (css, o) => p.locator("asistente-chat " + css, o);
     const guardado = () => p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x.startsWith("asistente:ajustes:")); return k ? JSON.parse(localStorage.getItem(k)) : null; });
     return { p, visto, sel, guardado };
+  }
+
+  // Los bloques comparten origen, y por tanto localStorage: se parte de cero (y se recarga para que el widget lo lea).
+  async function limpiarGuardado(p) {
+    await p.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("asistente:ajustes:")) localStorage.removeItem(k); });
+    await p.reload(); await p.locator("asistente-chat .barra").waitFor(); await dormir(300);
   }
 
   // — Engranaje y panel: accesibilidad básica —
@@ -111,7 +118,7 @@ async (page) => {
     const { p, sel, guardado } = await nueva({ servidor: false });
     await sel(".ajustes").click();
     await caso("sin voz de servidor: no hay selector de motor, pero sí volumen, lectura automática y probar voz", async () => {
-      afirma(await sel("fieldset.aj-fila").isHidden(), "el selector de motor está visible");
+      afirma(await sel("fieldset.aj-fila:has(input[value=navegador])").isHidden(), "el selector de motor está visible");
       afirma(await sel("#aj-vol").isVisible() && await sel("#aj-leer").isVisible(), "faltan controles");
       afirma(await sel(".aj-acciones button").first().isVisible(), "falta «Probar voz»");
     });
@@ -122,6 +129,14 @@ async (page) => {
       await p.waitForFunction(() => window.__hablado.length === 1);
       const h = await p.evaluate(() => window.__hablado[0]);
       afirma(h.volumen === 0.4 && /Hola/.test(h.texto), JSON.stringify(h));
+    });
+    await caso("la velocidad se aplica a la voz del navegador (rate) y se guarda", async () => {
+      await sel("#aj-vel").fill("150");
+      afirma((await guardado())?.velocidad === 1.5, "no se guardó: " + JSON.stringify(await guardado()));
+      await sel(".aj-acciones button", { hasText: "Probar voz" }).click();
+      await p.waitForFunction(() => window.__hablado.length === 2);
+      afirma((await p.evaluate(() => window.__hablado[1].velocidad)) === 1.5, "rate " + await p.evaluate(() => window.__hablado[1].velocidad));
+      await sel("#aj-vel").fill("100");
     });
     await caso("el ajuste sobrevive a recargar la página", async () => {
       await p.reload();
@@ -142,6 +157,7 @@ async (page) => {
     await caso("«Restablecer» vuelve al volumen por defecto y borra lo guardado", async () => {
       await sel(".aj-acciones button", { hasText: "Restablecer" }).click();
       afirma((await sel("#aj-vol").inputValue()) === "100", "volumen " + (await sel("#aj-vol").inputValue()));
+      afirma((await sel("#aj-vel").inputValue()) === "100", "velocidad " + (await sel("#aj-vel").inputValue()));
       afirma((await guardado()) === null, "quedó guardado: " + JSON.stringify(await guardado()));
     });
     await p.close();
@@ -152,13 +168,15 @@ async (page) => {
     const { p, visto, sel, guardado } = await nueva({ servidor: true });
     await sel(".ajustes").click();
     await caso("con las dos voces: hay selector y por defecto está la del servidor", async () => {
-      afirma(await sel("fieldset.aj-fila").isVisible(), "no se ve el selector");
+      afirma(await sel("fieldset.aj-fila:has(input[value=navegador])").isVisible(), "no se ve el selector");
       afirma(await sel("input[value=servidor]").isChecked(), "el servidor no es el actual");
     });
     await caso("probar voz con el servidor: pide el audio, lo reproduce al volumen elegido y no usa la voz del navegador", async () => {
       await sel("#aj-vol").fill("30");
+      await sel("#aj-vel").fill("125");
       await sel(".aj-acciones button", { hasText: "Probar voz" }).click();
       await p.waitForFunction(() => window.__audios.length === 1);
+      afirma((await p.evaluate(() => window.__audios[0].velocidad)) === 1.25, "velocidad del audio");
       afirma(visto.sintetizar === 1, "pidió audio " + visto.sintetizar + " veces");
       afirma(Math.abs((await p.evaluate(() => window.__audios[0].volumen)) - 0.3) < 1e-6, "volumen del audio");
       afirma((await p.evaluate(() => window.__hablado.length)) === 0, "habló el navegador");
@@ -178,6 +196,86 @@ async (page) => {
       afirma(await sel("input[value=navegador]").isChecked(), "no recordó el navegador");
     });
     await p.close();
+  }
+
+  // — Varias voces del servidor: tipo (femenina/masculina) y voz dentro del tipo —
+  {
+    const lista = [
+      { id: "m1", etiqueta: "Mateo", genero: "masculina" }, { id: "m2", etiqueta: "Bruno", genero: "masculina" },
+      { id: "f1", etiqueta: "Lucía", genero: "femenina" }, { id: "f2", etiqueta: "Carla", genero: "femenina" },
+    ];
+    const { p, visto, sel, guardado } = await nueva({ servidor: true, voces: { lista, defecto: "m1" } });
+    await limpiarGuardado(p);
+    await sel(".ajustes").click();
+    const opciones = () => sel("#aj-voz option").allTextContents();
+    await caso("con varias voces: aparece el tipo (el de la predeterminada) y solo las voces de ese tipo", async () => {
+      afirma(await sel("#aj-voz").isVisible(), "no se ve la lista de voces");
+      afirma(await sel("input[value=masculina]").isChecked(), "no marca masculina");
+      afirma(JSON.stringify(await opciones()) === JSON.stringify(["Mateo", "Bruno"]), JSON.stringify(await opciones()));
+    });
+    await caso("la voz elegida viaja en la petición y se guarda; sin elegir no se envía", async () => {
+      await sel(".aj-acciones button", { hasText: "Probar voz" }).click();
+      await p.waitForFunction(() => window.__audios.length === 1);
+      afirma(visto.cuerpos[0].voz === undefined, "envió voz sin que la eligieran: " + JSON.stringify(visto.cuerpos[0]));
+      await sel("#aj-voz").selectOption("m2");
+      afirma((await guardado())?.voz === "m2", JSON.stringify(await guardado()));
+      await sel(".aj-acciones button", { hasText: "Probar voz" }).click();
+      await p.waitForFunction(() => window.__audios.length === 2);
+      afirma(visto.cuerpos[1].voz === "m2", JSON.stringify(visto.cuerpos[1]));
+    });
+    await caso("la frase de prueba no se reutiliza de otra voz (el caché es por voz)", async () => {
+      await sel("#aj-voz").selectOption("m1");
+      await sel(".aj-acciones button", { hasText: "Probar voz" }).click();
+      await p.waitForFunction(() => window.__audios.length === 3);
+      afirma(visto.cuerpos.length === 3 && visto.cuerpos[2].voz === "m1", "no volvió a pedir con la otra voz: " + JSON.stringify(visto.cuerpos));
+    });
+    await caso("cambiar el tipo elige una voz de ese tipo y la lista pasa a mostrar solo esas", async () => {
+      await sel("input[value=femenina]").check();
+      afirma(JSON.stringify(await opciones()) === JSON.stringify(["Lucía", "Carla"]), JSON.stringify(await opciones()));
+      afirma((await guardado())?.voz === "f1", JSON.stringify(await guardado()));
+      await sel("#aj-voz").selectOption("f2");
+      afirma((await guardado())?.voz === "f2", "no guardó f2");
+    });
+    await caso("la elección sobrevive a recargar", async () => {
+      await p.reload();
+      await p.locator("asistente-chat .barra").waitFor(); await dormir(300);
+      await sel(".ajustes").click();
+      afirma(await sel("input[value=femenina]").isChecked() && (await sel("#aj-voz").inputValue()) === "f2", "no recordó la voz");
+    });
+    await caso("una voz guardada que el servidor ya no ofrece cae a la predeterminada", async () => {
+      await p.evaluate(() => { const k = Object.keys(localStorage).find((x) => x.startsWith("asistente:ajustes:")); localStorage.setItem(k, JSON.stringify({ voz: "retirada" })); });
+      await p.reload();
+      await p.locator("asistente-chat .barra").waitFor(); await dormir(300);
+      await sel(".ajustes").click();
+      afirma((await sel("#aj-voz").inputValue()) === "m1", "valor " + (await sel("#aj-voz").inputValue()));
+    });
+    await caso("«Restablecer» vuelve a la voz predeterminada", async () => {
+      await sel("#aj-voz").selectOption("m2");
+      await sel(".aj-acciones button", { hasText: "Restablecer" }).click();
+      afirma((await sel("#aj-voz").inputValue()) === "m1" && (await guardado()) === null, "no restableció");
+    });
+    await caso("con la voz del navegador no se ofrecen las del servidor", async () => {
+      await sel("input[value=navegador]").check();
+      afirma(await sel("#aj-voz").isHidden(), "se ve la lista de voces del servidor");
+    });
+    await p.close();
+  }
+  {
+    const una = await nueva({ servidor: true, voces: { lista: [{ id: "m1", etiqueta: "Mateo", genero: "masculina" }], defecto: "m1" } });
+    await limpiarGuardado(una.p);
+    await una.sel(".ajustes").click();
+    await caso("con una sola voz no hay selector", async () => {
+      afirma(await una.sel("#aj-voz").isHidden() && await una.sel("input[value=masculina]").count() === 0, "se ofrece elegir con una sola voz");
+    });
+    await una.p.close();
+    const mismo = await nueva({ servidor: true, voces: { lista: [{ id: "a", etiqueta: "Ana", genero: "femenina" }, { id: "b", etiqueta: "Bea", genero: "femenina" }], defecto: "a" } });
+    await limpiarGuardado(mismo.p);
+    await mismo.sel(".ajustes").click();
+    await caso("con voces de un solo tipo: lista sin selector de tipo", async () => {
+      afirma(await mismo.sel("#aj-voz").isVisible() && await mismo.sel("input[value=femenina]").isHidden(), "tipo visible");
+      afirma((await mismo.sel("#aj-voz option").count()) === 2, "opciones");
+    });
+    await mismo.p.close();
   }
 
   // — Con modo voz disponible: el acuse se puede apagar —
@@ -216,7 +314,7 @@ async (page) => {
       afirma((await sel("#aj-nombre").getAttribute("placeholder")) === "Sofía", "placeholder");
       await sel("#aj-nombre").fill("  Don Pepe ");
       afirma((await titulo()) === "Don Pepe · Sistema PHP", await titulo());
-      afirma((await sel("fieldset.aj-fila legend").textContent()) === "Voz de Don Pepe", "leyenda");
+      afirma((await sel("fieldset.aj-fila:has(input[value=navegador]) legend").textContent()) === "Voz de Don Pepe", "leyenda");
       afirma((await guardado())?.nombre === "Don Pepe", JSON.stringify(await guardado()));
     });
     await caso("el nombre es la palabra que despierta el modo voz (y vaciarlo vuelve a la del sistema)", async () => {

@@ -39,9 +39,11 @@ class TtsFalso:
         self.esta_disponible = disponible
         self.falla = falla
         self.llamadas: list[tuple[str, str | None]] = []
+        self.voces: list[str | None] = []   # voz_id pedido en cada llamada
 
-    async def sintetizar(self, texto: str, *, idioma: str | None = None) -> bytes:
+    async def sintetizar(self, texto: str, *, idioma: str | None = None, voz_id: str | None = None) -> bytes:
         self.llamadas.append((texto, idioma))
+        self.voces.append(voz_id)
         if self.falla:
             raise VozError("falla simulada")
         return self.audio

@@ -53,6 +53,7 @@ def _sin_tts_del_entorno(monkeypatch):
     """Los tests no dependen de los TTS_* del .env de quien los corre."""
     for nombre in ("TTS_PROVEEDOR", "TTS_API_KEY", "TTS_VOZ_ID", "TTS_MODELO"):
         monkeypatch.delenv(nombre, raising=False)
+    monkeypatch.setenv("ASISTENTE_VOCES_PATH", "/no/existe.yaml")   # ni del config/voces.yaml del repo
 
 
 def _settings(**kw) -> Settings:

@@ -92,6 +92,7 @@ async def transcribir(
 class _Sintesis(BaseModel):
     texto: str
     idioma: str | None = None
+    voz: str | None = None   # id del catálogo (`voz.voces` de /v1/estado); si falta o no existe, la predeterminada
 
 
 @router.post("/v1/voz/sintetizar")
@@ -100,7 +101,7 @@ async def sintetizar(
     sesion: Sesion = Depends(sesion_actual),
     svc: Servicios = Depends(servicios),
 ) -> Response:
-    """Respuesta hablada con la voz del servidor: `{ "texto", "idioma"? }` -> `audio/mpeg` de una pieza corta
+    """Respuesta hablada con la voz del servidor: `{ "texto", "idioma"?, "voz"? }` -> `audio/mpeg` de una pieza corta
     (el widget pide frase por frase). El texto no se guarda ni se registra."""
     cfg, u = svc.settings, sesion.usuario
     if svc.tts is None:
@@ -122,7 +123,8 @@ async def sintetizar(
         raise ErrorApi(429, "limite_excedido") from e
 
     try:
-        audio = await svc.tts.sintetizar(texto, idioma=cuerpo.idioma or u.locale)
+        voz = svc.voces.resolver(cuerpo.voz)
+        audio = await svc.tts.sintetizar(texto, idioma=cuerpo.idioma or u.locale, voz_id=voz.voz_id if voz else None)
     except VozError as e:
         log.warning("TTS falló para %s: %s", u.sistema_id, e)
         raise ErrorApi(502, "voz_error") from e

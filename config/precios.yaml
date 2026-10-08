@@ -13,5 +13,7 @@ deepseek-flash:
 # Es un estimado: ElevenLabs cobra por plan de créditos mensuales. Ver PROVEEDORES_VOZ.md (datos del 2026-10-04).
 "elevenlabs:eleven_flash_v2_5": {usd_por_1k_caracteres: 0.04}
 "elevenlabs:eleven_turbo_v2_5": {usd_por_1k_caracteres: 0.04}
+# v4 Turbo: precio de lista 0.04; con la promoción vigente hasta el 2026-10-12 cuesta 0.011 (el informe la sobrestima hasta entonces).
+"elevenlabs:eleven_v4_turbo": {usd_por_1k_caracteres: 0.04}
 "elevenlabs:eleven_multilingual_v2": {usd_por_1k_caracteres: 0.08}
 "elevenlabs:eleven_v3": {usd_por_1k_caracteres: 0.08}

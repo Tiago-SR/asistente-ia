@@ -1,0 +1,18 @@
+# Voces del servidor (respuesta hablada). El widget las ofrece en Ajustes, agrupadas por género.
+# `id`: propio y estable (lo guarda el usuario en su navegador; no lo cambies una vez en uso).
+# `genero`: femenina | masculina.
+# `voz_id` (literal) o `voz_id_env` (nombre de una variable de entorno): el voice_id de ElevenLabs. No sale del servidor.
+# Una voz sin voice_id se ignora: se puede dejar preparada y completar después.
+# Para agregar otra: copiar una entrada con otro `id` y su voice_id (la clave de API no puede listar voces: se copia a mano).
+voces:
+  - id: masculina-1
+    etiqueta: Mateo
+    genero: masculina
+    voz_id_env: TTS_VOZ_ID            # la voz que ya usabas
+
+  - id: femenina-1
+    etiqueta: Lucía
+    genero: femenina
+    voz_id: "lfqEVcJajtKrb24tqe31"
+
+defecto: masculina-1

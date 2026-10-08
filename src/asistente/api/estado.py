@@ -18,6 +18,11 @@ async def estado(
     `max_audio_s` es el tope de duración que el widget usa para cortar la grabación."""
     dictado = svc.stt is not None and await svc.stt.disponible()
     respuesta = svc.tts is not None and await svc.tts.disponible()
+    voz = {"dictado": dictado, "respuesta": respuesta, "max_audio_s": svc.settings.voz_max_audio_s}
+    if respuesta and svc.voces:
+        # Voces del servidor que el usuario puede elegir (sin el voice_id del proveedor).
+        voz["voces"] = svc.voces.publico()
+        voz["voz_defecto"] = svc.voces.defecto
     return {
         "habilitado": True,
         "nombre_sistema": sesion.sistema.nombre,
@@ -25,9 +30,5 @@ async def estado(
         "nombre_asistente": sesion.sistema.nombre_asistente,
         # El widget muestra el panel «Lo que recuerdo» solo si el sistema tiene la memoria encendida.
         "memoria": sesion.sistema.memoria_habilitada and svc.memoria is not None,
-        "voz": {
-            "dictado": dictado,
-            "respuesta": respuesta,
-            "max_audio_s": svc.settings.voz_max_audio_s,
-        },
+        "voz": voz,
     }

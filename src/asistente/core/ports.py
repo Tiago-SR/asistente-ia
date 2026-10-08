@@ -149,7 +149,9 @@ class TTS(Protocol):
     proveedor: str  # con `modelo`, identifica la tarifa en el informe de costo
     modelo: str
 
-    async def sintetizar(self, texto: str, *, idioma: str | None = None) -> bytes: ...
+    async def sintetizar(self, texto: str, *, idioma: str | None = None, voz_id: str | None = None) -> bytes:
+        """`voz_id` es el del proveedor (None = la predeterminada del adaptador)."""
+        ...
 
     async def disponible(self) -> bool: ...
 

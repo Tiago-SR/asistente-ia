@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     tts_proveedor: str | None = _env("TTS_PROVEEDOR", None)
     tts_api_key: str | None = _env("TTS_API_KEY", None)
     tts_voz_id: str | None = _env("TTS_VOZ_ID", None)
+    voces_path: str = _env("ASISTENTE_VOCES_PATH", "/config/voces.yaml")
     tts_modelo: str | None = _env("TTS_MODELO", None)
     voz_max_tts_chars: int = _env("ASISTENTE_VOZ_MAX_TTS_CHARS", 1000)
     voz_tts_max_por_min: int = _env("ASISTENTE_VOZ_TTS_MAX_POR_MIN", 60)

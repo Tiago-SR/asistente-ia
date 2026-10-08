@@ -9,8 +9,8 @@ Ideas sin decidir ni implementar. Lo ya hecho está en el README y el contrato.
 
 ## Panel de ajustes del widget
 
-- Velocidad (rate) y tono (pitch) de la voz; el tono solo con Web Speech.
-- Elegir la voz concreta (lista de voces del navegador o de ElevenLabs).
+- Tono (pitch) de la voz: solo tiene efecto en voces locales del navegador (la de Google en Chrome probablemente lo ignora) y no hay forma simple con la voz del servidor.
+- Elegir la voz concreta de la **voz del navegador** (la del servidor ya se elige: `config/voces.yaml`). Por sistema: hoy el catálogo es global.
 - Idioma de voz y de reconocimiento (hoy sale de `locale_defecto` por sistema).
 - Modo de entrada: pulsar para hablar o manos libres.
 - Tamaño de letra, tema claro u oscuro y alto contraste.

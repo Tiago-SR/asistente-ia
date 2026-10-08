@@ -84,7 +84,7 @@ def llm():
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None, tts=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
-                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None):
+                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None, voces=None):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
@@ -113,6 +113,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             prompts=Prompts(tmp_path), llm_para=llm_para, sesiones=sesiones, stt=stt, tts=tts,
             acciones=AccionesSql(sesiones, max_acciones_hora), recientes=RecientesSql(sesiones),
             memoria=MemoriaSql(sesiones, memoria_dias),
+            **({"voces": voces} if voces else {}),
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")
@@ -741,3 +742,34 @@ async def test_estado_informa_respuesta_segun_el_tts(construir_app):
         async with construir_app(tts=tts) as c:
             r = await c.get("/v1/estado", headers=auth())
             assert r.json()["voz"]["respuesta"] is esperado
+
+
+# --- catálogo de voces del servidor --------------------------------------------------------------
+
+
+def _catalogo():
+    from asistente.core.voz.catalogo import CatalogoVoces, Voz
+
+    return CatalogoVoces((Voz("m1", "Mateo", "masculina", "EL_M1"), Voz("f1", "Lucía", "femenina", "EL_F1")), "m1")
+
+
+async def test_sintetizar_usa_la_voz_pedida_y_cae_a_la_predeterminada(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    tts = TtsFalso()
+    async with construir_app(tts=tts, voces=_catalogo()) as c:
+        assert (await sintetizar(c, voz="f1")).status_code == 200
+        assert (await sintetizar(c)).status_code == 200
+        assert (await sintetizar(c, voz="retirada")).status_code == 200   # una voz que ya no existe no deja mudo
+    assert tts.voces == ["EL_F1", "EL_M1", "EL_M1"]
+
+
+async def test_estado_ofrece_las_voces_sin_el_voice_id(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    async with construir_app(tts=TtsFalso(), voces=_catalogo()) as c:
+        voz = (await c.get("/v1/estado", headers=auth())).json()["voz"]
+    assert voz["voz_defecto"] == "m1"
+    assert voz["voces"] == [{"id": "m1", "etiqueta": "Mateo", "genero": "masculina"},
+                            {"id": "f1", "etiqueta": "Lucía", "genero": "femenina"}]
+    assert "EL_M1" not in str(voz)
