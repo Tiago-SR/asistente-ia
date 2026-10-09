@@ -77,3 +77,37 @@ async def test_el_motivo_del_proveedor_queda_en_el_error():
     cuerpo = {"detail": {"status": "paid_plan_required", "message": "Free users cannot use library voices."}}
     with pytest.raises(VozError, match=r"402.*paid_plan_required.*library voices"):
         await tts_con(lambda req: httpx.Response(402, json=cuerpo)).sintetizar("Hola")
+
+
+# --- streaming ------------------------------------------------------------------------------------
+
+
+async def _juntar(it) -> bytes:
+    return b"".join([t async for t in it])
+
+
+async def test_stream_usa_el_endpoint_stream_y_entrega_el_audio():
+    visto = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        visto["url"] = str(req.url)
+        visto["clave"] = req.headers.get("xi-api-key")
+        return httpx.Response(200, content=b"MP3-STREAM")
+
+    audio = await _juntar(tts_con(handler).sintetizar_stream("Hola", voz_id="otra"))
+    assert audio == b"MP3-STREAM"
+    assert visto["url"] == "http://tts/v1/text-to-speech/otra/stream?output_format=mp3_44100_128" and visto["clave"] == "k"
+
+
+@pytest.mark.parametrize("respuesta", [httpx.Response(401), httpx.Response(429), httpx.Response(200, content=b"")])
+async def test_stream_con_error_o_vacio_lanza_voz_error_en_la_primera_iteracion(respuesta):
+    with pytest.raises(VozError):
+        await anext(tts_con(lambda req: respuesta).sintetizar_stream("Hola"))
+
+
+async def test_stream_con_red_caida_es_voz_error():
+    def handler(req):
+        raise httpx.ConnectError("x")
+
+    with pytest.raises(VozError):
+        await anext(tts_con(handler).sintetizar_stream("Hola"))

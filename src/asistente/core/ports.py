@@ -1,6 +1,6 @@
 """Puertos del core. Sin dependencias de api/, sistemas/ ni store/."""
 
-from collections.abc import Collection, Sequence
+from collections.abc import AsyncIterator, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
@@ -151,6 +151,13 @@ class TTS(Protocol):
 
     async def sintetizar(self, texto: str, *, idioma: str | None = None, voz_id: str | None = None) -> bytes:
         """`voz_id` es el del proveedor (None = la predeterminada del adaptador)."""
+        ...
+
+    def sintetizar_stream(
+        self, texto: str, *, idioma: str | None = None, voz_id: str | None = None
+    ) -> AsyncIterator[bytes]:
+        """El mismo audio en trozos, a medida que el proveedor lo genera. Un fallo antes del primer trozo lanza
+        `VozError` en la primera iteración; uno posterior corta el flujo."""
         ...
 
     async def disponible(self) -> bool: ...

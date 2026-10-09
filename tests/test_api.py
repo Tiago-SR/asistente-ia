@@ -764,6 +764,47 @@ async def test_sintetizar_usa_la_voz_pedida_y_cae_a_la_predeterminada(construir_
     assert tts.voces == ["EL_F1", "EL_M1", "EL_M1"]
 
 
+async def test_sintetizar_stream_devuelve_el_audio_completo_y_lo_cuenta(construir_app, sesiones):
+    from asistente.core.voz.falso import TtsFalso
+
+    mes = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    async with sesiones.begin() as s:
+        await s.execute(delete(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))
+    tts = TtsFalso(b"MP3-COMPLETO")
+    async with construir_app(tts=tts, voces=_catalogo()) as c:
+        r = await sintetizar(c, texto="Hola", stream=True, voz="f1")
+    assert r.status_code == 200 and r.content == b"MP3-COMPLETO"
+    assert r.headers["content-type"] == "audio/mpeg" and r.headers["cache-control"] == "no-store"
+    assert tts.voces == ["EL_F1"]
+    async with sesiones() as s:
+        fila = (await s.execute(select(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))).scalar_one()
+    assert (fila.llamadas, fila.caracteres) == (1, 4)
+
+
+async def test_sintetizar_stream_que_falla_antes_del_primer_trozo_es_502_y_no_cuenta(construir_app, sesiones):
+    from asistente.core.voz.falso import TtsFalso
+
+    mes = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    async with sesiones.begin() as s:
+        await s.execute(delete(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))
+    async with construir_app(tts=TtsFalso(falla=True)) as c:
+        r = await sintetizar(c, stream=True)
+    assert r.status_code == 502 and r.json() == {"error": "voz_error"}
+    async with sesiones() as s:
+        assert (await s.execute(select(UsoVoz).where(UsoVoz.mes == mes, UsoVoz.sistema_id == "mock-a"))).first() is None
+
+
+async def test_sintetizar_stream_sin_soporte_del_adaptador_responde_el_audio_entero(construir_app):
+    from asistente.core.voz.falso import TtsFalso
+
+    class SinStream(TtsFalso):
+        sintetizar_stream = None   # un adaptador que no sabe transmitir
+
+    async with construir_app(tts=SinStream(b"MP3")) as c:
+        r = await sintetizar(c, stream=True)
+    assert r.status_code == 200 and r.content == b"MP3"
+
+
 async def test_estado_ofrece_las_voces_sin_el_voice_id(construir_app):
     from asistente.core.voz.falso import TtsFalso
 

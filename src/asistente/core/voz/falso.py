@@ -48,5 +48,12 @@ class TtsFalso:
             raise VozError("falla simulada")
         return self.audio
 
+    async def sintetizar_stream(self, texto: str, *, idioma: str | None = None, voz_id: str | None = None):
+        """El mismo audio, en tres trozos."""
+        audio = await self.sintetizar(texto, idioma=idioma, voz_id=voz_id)
+        paso = max(1, len(audio) // 3)
+        for i in range(0, len(audio), paso):
+            yield audio[i:i + paso]
+
     async def disponible(self) -> bool:
         return self.esta_disponible

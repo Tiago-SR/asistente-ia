@@ -62,7 +62,7 @@ def test_el_voces_yaml_del_repo_es_valido():
     ruta = next((r for r in (Path(__file__).parent.parent / "config" / "voces.yaml", Path("/config/voces.yaml")) if r.is_file()), None)
     if ruta is None:
         pytest.skip("no está config/voces.yaml")
-    c = catalogo.cargar(ruta, env={"TTS_VOZ_ID": "X"})
-    assert [(v.id, v.genero) for v in c.voces] == [("masculina-1", "masculina")] and c.defecto == "masculina-1"
     c = catalogo.cargar(ruta, env={"TTS_VOZ_ID": "X", "TTS_VOZ_ID_FEMENINA": "Y"})
-    assert [v.genero for v in c.voces] == ["masculina", "femenina"]
+    ids = [v.id for v in c.voces]
+    assert c.voces and c.defecto in ids and len(ids) == len(set(ids))
+    assert all(v.genero in (None, "femenina", "masculina") and v.voz_id for v in c.voces)

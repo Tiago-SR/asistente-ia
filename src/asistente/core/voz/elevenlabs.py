@@ -4,6 +4,7 @@ El texto viaja al proveedor y no se guarda ni se registra aquí.
 """
 
 import logging
+from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 import httpx
@@ -69,6 +70,35 @@ class TtsElevenLabs:
         if not r.content:
             raise VozError("TTS devolvió audio vacío")
         return r.content
+
+    async def sintetizar_stream(
+        self, texto: str, *, idioma: str | None = None, voz_id: str | None = None
+    ) -> AsyncIterator[bytes]:
+        """Como `sintetizar`, pero entrega el audio a medida que ElevenLabs lo genera (`/stream`): el primer trozo llega
+        en ~0,35 s sea cual sea el largo del texto. Un fallo antes del primer trozo lanza `VozError` en la primera
+        iteración (el endpoint puede entonces responder un error); uno posterior corta el flujo."""
+        voz = quote(voz_id, safe="") if voz_id else self._voz
+        try:
+            async with self._cliente.stream(
+                "POST",
+                f"{self._base}/text-to-speech/{voz}/stream",
+                params={"output_format": FORMATO},
+                json={"text": texto, "model_id": self._modelo},
+                headers={**self._headers(), "accept": self.tipo_mime},
+                timeout=self._timeout,
+            ) as r:
+                if r.status_code != 200:
+                    await r.aread()
+                    raise VozError(f"TTS respondió HTTP {r.status_code}{_motivo(r)}")
+                hubo_audio = False
+                async for trozo in r.aiter_bytes():
+                    if trozo:
+                        hubo_audio = True
+                        yield trozo
+                if not hubo_audio:
+                    raise VozError("TTS devolvió audio vacío")
+        except httpx.HTTPError as e:
+            raise VozError(f"TTS inaccesible: {type(e).__name__}") from e
 
     async def disponible(self) -> bool:
         """`/v1/estado` no puede comprobarlo: ElevenLabs no ofrece un chequeo gratuito que sirva con una

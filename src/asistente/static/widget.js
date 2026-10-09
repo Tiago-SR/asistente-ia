@@ -25,6 +25,8 @@
  *               navegador (Web Speech; en Chrome el audio lo procesa el servicio de Google) y, si no existe,
  *               el STT del asistente (POST /v1/voz/transcribir). "servidor" evita enviar el audio a Google.
  *               No afecta a la respuesta hablada (ver voz-respuesta).
+ *   voz-streaming  "auto" (por defecto) | "no": con la voz del servidor, empieza a sonar con el primer trozo de audio (MediaSource)
+ *               en vez de esperar la frase entera; sin soporte del navegador, o con "no", se espera el audio completo.
  *   voz-respuesta  "auto" (por defecto), "servidor" o "navegador": con qué voz habla el asistente. "auto" usa la
  *               voz del servidor (POST /v1/voz/sintetizar, p. ej. ElevenLabs) si el sistema la tiene configurada
  *               (/v1/estado: voz.respuesta) y, si falla o no existe, la del navegador (speechSynthesis).
@@ -254,6 +256,10 @@
     return trozos.filter(Boolean);
   }
   const TTS_PAUSA_MS = 30000;        // tras un fallo de la voz del servidor, ese tiempo habla el navegador
+  // ¿Puede el navegador reproducir MP3 que llega por trozos? (Chrome y Firefox sí; Safari de iPhone no.)
+  function puedeStreamAudio() {
+    try { return typeof window.MediaSource === "function" && MediaSource.isTypeSupported("audio/mpeg"); } catch { return false; }
+  }
   const TTS_CACHE_MAX = 12;          // frases fijas (acuses) cuyo audio se guarda en memoria; el texto de las respuestas nunca
   const TTS_CACHE_CHARS = 60;
   const CLAVE_LEER = "asistente:leer-en-voz-alta";
@@ -883,6 +889,7 @@
       this._audio = null;         // <audio> reutilizado
       this._abortTts = new AbortController();
       this._cacheTts = new Map(); // texto corto -> URL del audio
+      this._urlsVivas = new Set(); // URLs de MediaSource pendientes de sonar: se pueden adjuntar al <audio> una sola vez
       this._vozAn = null; this._vozBuf = null; this._anIntentado = false; this._motivoRespaldo = "";
       this._finAudio = null; this._tPulso = 0;
       this._reco = null;
@@ -1752,11 +1759,13 @@
       const corto = fija && texto.length <= TTS_CACHE_CHARS;
       if (corto && this._cacheTts.has(texto)) return this._cacheTts.get(texto);
       const voz = this._vozServidor();   // el caché es de una sola voz: se vacía al cambiarla
+      // Las frases fijas (con caché) se piden enteras; el resto empieza a sonar con el primer trozo.
+      const envivo = !corto && puedeStreamAudio() && (this.getAttribute("voz-streaming") || "auto").toLowerCase() !== "no";
       const senal = this._abortTts.signal;
       try {
         const pedir = () => this._conToken((h) => fetch(`${this._servidor}/v1/voz/sintetizar`, {
           method: "POST", headers: { ...h, "Content-Type": "application/json" }, signal: senal,
-          body: JSON.stringify({ texto, idioma: this.getAttribute("idioma") || undefined, voz: voz || undefined }),
+          body: JSON.stringify({ texto, idioma: this.getAttribute("idioma") || undefined, voz: voz || undefined, stream: envivo || undefined }),
         }));
         let r = await pedir();
         // Un fallo pasajero (429/5xx) se reintenta una vez: caer a la voz del navegador a mitad de una respuesta cambia la voz.
@@ -1771,6 +1780,7 @@
           else if (r.status !== 413 && r.status !== 422) this._ttsPausaHasta = Date.now() + TTS_PAUSA_MS;
           return null;
         }
+        if (envivo && r.body) return await this._audioEnVivo(r, gen, texto.length);
         const blob = await r.blob();
         this._tl(`audio listo ${texto.length} car, ${blob.size} bytes, ${blob.type}`);
         const url = URL.createObjectURL(blob);
@@ -1819,11 +1829,54 @@
       } else terminar();
     }
 
+    // Con la respuesta en curso de /v1/voz/sintetizar (stream), devuelve la URL de un MediaSource en cuanto llega el primer
+    // trozo y sigue añadiendo el resto en segundo plano; el <audio> arranca sin esperar la frase entera. null si no llegó audio.
+    // Un corte a mitad (red) cierra el audio con lo recibido.
+    async _audioEnVivo(r, gen, car) {
+      const lector = r.body.getReader();
+      const primero = await lector.read();
+      if (primero.done || !primero.value || !primero.value.length) return null;
+      if (gen !== this._genVoz) { lector.cancel().catch(() => {}); return null; }
+      this._tl(`primer trozo ${primero.value.length} bytes (${car} car)`);
+      const ms = new MediaSource(), url = URL.createObjectURL(ms);
+      const pend = [primero.value];
+      let sb = null, fin = false;
+      const bombear = () => {
+        if (!sb || sb.updating || ms.readyState !== "open") return;
+        try {
+          if (pend.length) sb.appendBuffer(pend.shift());
+          else if (fin) ms.endOfStream();
+        } catch { try { ms.endOfStream(); } catch { /* ya cerrado */ } }
+      };
+      ms.addEventListener("sourceopen", () => {
+        if (sb) return;
+        try {
+          sb = ms.addSourceBuffer("audio/mpeg");
+          try { sb.mode = "sequence"; } catch { /* el navegador lo decide */ }
+          sb.addEventListener("updateend", bombear);
+          bombear();
+        } catch { try { ms.endOfStream("decode"); } catch { /* ya cerrado */ } }
+      }, { once: true });
+      (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await lector.read();
+            if (done) break;
+            if (value && value.length) { pend.push(value); bombear(); }
+          }
+        } catch { /* cortado (voz detenida o red): se cierra con lo recibido */ }
+        fin = true; bombear();
+      })();
+      this._urlsVivas.add(url);
+      return url;
+    }
+
     // Reproduce `url`; resuelve true al terminar (o si falla ya empezado) y false si no llegó a sonar.
     // Si el primer `play()` falla antes de sonar (se ha visto en la primera reproducción de la página), se reintenta una vez.
     async _sonarAudio(url, pieza, gen) {
       await this._prepararAnalizador();
       if (gen !== this._genVoz) return true;
+      if (this._urlsVivas.delete(url)) return this._intentarAudio(url, pieza);   // un MediaSource no se vuelve a adjuntar: sin reintento
       if (await this._intentarAudio(url, pieza)) return true;
       if (gen !== this._genVoz) return true;
       console.warn("[asistente] el audio del servidor no arrancó (" + this._motivoRespaldo + "); se reintenta");
@@ -1898,6 +1951,7 @@
     _pararVoz() {
       if (this._sonando || this._cola.length) console.info("[asistente] voz cortada por:", (new Error().stack.split("\n")[2] || "").trim());
       this._genVoz++; this._pendientesVoz = 0;
+      this._urlsVivas.clear();
       const pendientes = this._cola.splice(0);
       this._abortTts.abort(); this._abortTts = new AbortController();
       this._sonando = false;

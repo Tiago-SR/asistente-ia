@@ -7,6 +7,7 @@ el campo (sin envío automático). El audio no se guarda.
 import logging
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
@@ -93,6 +94,7 @@ class _Sintesis(BaseModel):
     texto: str
     idioma: str | None = None
     voz: str | None = None   # id del catálogo (`voz.voces` de /v1/estado); si falta o no existe, la predeterminada
+    stream: bool = False     # true: el audio llega a medida que se genera (el primer trozo en ~0,35 s)
 
 
 @router.post("/v1/voz/sintetizar")
@@ -101,8 +103,9 @@ async def sintetizar(
     sesion: Sesion = Depends(sesion_actual),
     svc: Servicios = Depends(servicios),
 ) -> Response:
-    """Respuesta hablada con la voz del servidor: `{ "texto", "idioma"?, "voz"? }` -> `audio/mpeg` de una pieza corta
-    (el widget pide frase por frase). El texto no se guarda ni se registra."""
+    """Respuesta hablada con la voz del servidor: `{ "texto", "idioma"?, "voz"?, "stream"? }` -> `audio/mpeg` de una
+    pieza corta (el widget pide frase por frase). Con `stream: true` el audio se envía a medida que el proveedor lo
+    genera; si falla antes del primer trozo se responde el mismo error JSON. El texto no se guarda ni se registra."""
     cfg, u = svc.settings, sesion.usuario
     if svc.tts is None:
         raise ErrorApi(503, "voz_no_disponible")
@@ -122,19 +125,50 @@ async def sintetizar(
     except LimiteExcedido as e:
         raise ErrorApi(429, "limite_excedido") from e
 
-    try:
-        voz = svc.voces.resolver(cuerpo.voz)
-        audio = await svc.tts.sintetizar(texto, idioma=cuerpo.idioma or u.locale, voz_id=voz.voz_id if voz else None)
-    except VozError as e:
-        log.warning("TTS falló para %s: %s", u.sistema_id, e)
-        raise ErrorApi(502, "voz_error") from e
+    voz = svc.voces.resolver(cuerpo.voz)
+    voz_id = voz.voz_id if voz else None
+    idioma = cuerpo.idioma or u.locale
+    cabeceras = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
 
-    if svc.sesiones is not None:
+    async def contar() -> None:
+        if svc.sesiones is None:
+            return
         try:   # el costo es contabilidad: si falla no se pierde el audio que el usuario ya pagó
             await sumar_uso_voz(svc.sesiones, u.sistema_id, svc.tts.proveedor, svc.tts.modelo, len(texto))
         except Exception:
             log.warning("no se pudo registrar el uso de voz de %s", u.sistema_id, exc_info=True)
 
+    transmitir = getattr(svc.tts, "sintetizar_stream", None)
+    if cuerpo.stream and transmitir:
+        flujo = transmitir(texto, idioma=idioma, voz_id=voz_id)
+        try:   # el primer trozo decide: si el proveedor falla antes, se responde el error de siempre
+            primero = await anext(flujo)
+        except (VozError, StopAsyncIteration) as e:
+            await flujo.aclose()
+            log.warning("TTS falló para %s: %s", u.sistema_id, e or "audio vacío")
+            raise ErrorApi(502, "voz_error") from e
+        await contar()
+        log.info("síntesis (stream) sistema=%s usuario=%s caracteres=%d", u.sistema_id, u.usuario_ref, len(texto))
+
+        async def trozos():
+            try:
+                yield primero
+                async for t in flujo:
+                    yield t
+            except VozError as e:   # ya se envió parte del audio: solo se corta (el widget lo trata como fin del audio)
+                log.warning("TTS se cortó a mitad para %s: %s", u.sistema_id, e)
+            finally:
+                await flujo.aclose()
+
+        return StreamingResponse(trozos(), media_type=svc.tts.tipo_mime, headers=cabeceras)
+
+    try:
+        audio = await svc.tts.sintetizar(texto, idioma=idioma, voz_id=voz_id)
+    except VozError as e:
+        log.warning("TTS falló para %s: %s", u.sistema_id, e)
+        raise ErrorApi(502, "voz_error") from e
+
+    await contar()
     # Solo metadatos: ni el texto ni el audio.
     log.info("síntesis sistema=%s usuario=%s caracteres=%d bytes=%d", u.sistema_id, u.usuario_ref, len(texto), len(audio))
-    return Response(audio, media_type=svc.tts.tipo_mime, headers={"Cache-Control": "no-store"})
+    return Response(audio, media_type=svc.tts.tipo_mime, headers=cabeceras)
