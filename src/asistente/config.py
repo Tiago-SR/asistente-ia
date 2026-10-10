@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     timeout_turno_s: float = _env("ASISTENTE_TIMEOUT_TURNO_S", 120.0)
     max_turnos_historial: int = _env("ASISTENTE_MAX_TURNOS_HISTORIAL", 10)
     max_mensaje_chars: int = _env("ASISTENTE_MAX_MENSAJE_CHARS", 4000)
+    # Imágenes de referencia: solo si el modelo las admite (`LLM_IMAGENES=true`, o `imagenes: true` en el `llm` del
+    # sistema). Viajan en el turno y no se guardan. 700 KB × 3 cabe en el `client_max_body_size 4m` del proxy.
+    llm_imagenes: bool = _env("LLM_IMAGENES", False)
+    max_imagenes: int = _env("ASISTENTE_MAX_IMAGENES", 3)
+    max_imagen_kb: int = _env("ASISTENTE_MAX_IMAGEN_KB", 700)
     heartbeat_s: float = _env("ASISTENTE_HEARTBEAT_S", 15.0)
 
     # Purga de retención: cada cuántos segundos (0 = desactivada).

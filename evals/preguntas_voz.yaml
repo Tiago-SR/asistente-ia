@@ -7,6 +7,7 @@
 #   2) el resumen hablado (evento `voz`): existe, es breve (≤ 45 palabras por defecto), sin Markdown ni enlaces, a lo sumo
 #      3 cifras (todas respaldadas por las tools), más corto que la respuesta y sin leerla entera.
 # Criterios nuevos, bajo `voz:` en la pregunta (todos opcionales): max_palabras, max_cifras, contiene, no_contiene.
+# `max_palabras` fuera de `voz:` limita la respuesta de pantalla (ver preguntas.yaml).
 # Correr: python evals/correr.py --preguntas evals/preguntas_voz.yaml
 
 sistema: sistema-php
@@ -41,3 +42,10 @@ preguntas:
      turnos: ["Explicame con detalle cómo está repartida mi superficie entre cultivos y establecimientos."],
      tools_requeridas: [resumen_por_cultivo], numeros: [660.5, 210], permitidos: [870.5, 75.9, 24.1, 62.1, 13.8, 38.1, 61.9, 100],
      voz: {max_cifras: 3}}   # reparto entre cultivos: dos cultivos y el total son tres cifras legítimas
+  - {id: v11, categoria: voz-tabla, usuario: ana,
+     turnos: ["Hacé una tabla con cada establecimiento, su cultivo, sus hectáreas y el porcentaje del total."],
+     tools_requeridas: [listar_establecimientos], numeros: [540.5, 210, 120], permitidos: [870.5, 62.1, 62.09, 24.1, 24.12, 13.8, 13.78, 100],
+     voz: {max_cifras: 2, max_palabras: 40, contiene: [["pantalla", "tabla", "detalle", "chat"]], no_contiene: ["%", "fila", "columna"]}}
+  - {id: v12, categoria: voz-tabla, usuario: ana, turnos: ["Dame en una tabla las hectáreas por cultivo con su porcentaje."],
+     tools_requeridas: [resumen_por_cultivo], numeros: [660.5, 210, 870.5], permitidos: [75.9, 75.87, 24.1, 24.12, 100],
+     voz: {max_cifras: 2, max_palabras: 40, contiene: [["pantalla", "tabla", "detalle", "chat"]], no_contiene: ["%", "fila", "columna"]}}

@@ -70,10 +70,14 @@ class ConectorConfig(_Modelo):
 
 
 class LLMConfig(_Modelo):
-    proveedor: str
-    modelo: str
+    # Todo es opcional: lo que se omite se hereda de la configuración global (`LLM_*`, `ASISTENTE_MODELO_DEFAULT`),
+    # así que `llm: {imagenes: true}` basta para encender solo las imágenes de ese sistema.
+    proveedor: str | None = None
+    modelo: str | None = None
     base_url_env: str | None = None
     api_key_env: str | None = None
+    # ¿el modelo admite imágenes? None = lo que diga `LLM_IMAGENES`
+    imagenes: bool | None = None
 
 
 class LimitesConfig(_Modelo):

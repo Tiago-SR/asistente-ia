@@ -34,13 +34,25 @@ class LlamadaTool:
 
 
 @dataclass(frozen=True)
+class Adjunto:
+    """Imagen que acompaña a un mensaje del usuario. `datos` viaja solo durante el turno: lo guardado es la
+    metadata (`tipo_mime`, `bytes`) y, si algún día hay almacenamiento, `ref`. Sin `datos` no se manda al modelo."""
+
+    tipo_mime: str
+    datos: bytes = b""
+    bytes: int = 0
+    ref: str | None = None
+
+
+@dataclass(frozen=True)
 class Mensaje:
-    """`user`: texto. `assistant`: texto y/o llamadas. `tool`: resultado de `llamada_id`."""
+    """`user`: texto (y adjuntos). `assistant`: texto y/o llamadas. `tool`: resultado de `llamada_id`."""
 
     rol: Literal["user", "assistant", "tool"]
     texto: str = ""
     llamadas: tuple[LlamadaTool, ...] = ()
     llamada_id: str | None = None
+    adjuntos: tuple[Adjunto, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,4 +89,5 @@ class Capacidades:
     soporta_cache: bool = False
     soporta_tools_paralelas: bool = True
     soporta_streaming_tools: bool = True
+    soporta_imagenes: bool = False  # el modelo acepta imágenes en el mensaje del usuario
     contexto_max: int | None = None

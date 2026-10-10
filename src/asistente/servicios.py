@@ -7,6 +7,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from asistente.config import Settings
+from asistente.core.adjuntos import AlmacenAdjuntos, NoGuarda
 from asistente.core.llm.openai_compat import OpenAICompat
 from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites
 from asistente.core.prompts import Prompts
@@ -51,15 +52,16 @@ class Servicios:
     acciones: AccionesSql | None = None  # None = sin acciones con confirmación
     recientes: RecientesSql | None = None  # None = sin la tool `consultas_recientes`
     memoria: MemoriaSql | None = None  # None = sin memoria por usuario
+    adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
 
 
 def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
     cliente = httpx.AsyncClient(follow_redirects=False)
-    cache: dict[tuple[str, str | None], LLM] = {}
+    cache: dict[tuple[str, str | None, bool], LLM] = {}
 
     def llm_para(sistema: Sistema) -> tuple[LLM, str]:
         cfg = sistema.llm
-        proveedor = cfg.proveedor if cfg else settings.llm_proveedor
+        proveedor = (cfg.proveedor if cfg else None) or settings.llm_proveedor
         modelo = (cfg.modelo if cfg else None) or settings.modelo_default
         base_url = (sistema.secreto(cfg.base_url_env, registro.env) if cfg else None) or settings.llm_base_url
         api_key = (sistema.secreto(cfg.api_key_env, registro.env) if cfg else None) or settings.llm_api_key
@@ -67,9 +69,10 @@ def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Si
             raise LLMNoConfigurado(f"proveedor no soportado: {proveedor}")
         if not base_url or not modelo:
             raise LLMNoConfigurado("falta base_url o modelo del LLM")
-        clave = (base_url, api_key)
+        imagenes = cfg.imagenes if cfg and cfg.imagenes is not None else settings.llm_imagenes
+        clave = (base_url, api_key, imagenes)
         if clave not in cache:
-            cache[clave] = OpenAICompat(base_url, api_key, cliente=cliente)
+            cache[clave] = OpenAICompat(base_url, api_key, cliente=cliente, soporta_imagenes=imagenes)
         return cache[clave], modelo
 
     return llm_para

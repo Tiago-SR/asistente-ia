@@ -417,7 +417,7 @@ def test_widget_solo_un_clic_real_confirma_y_ninguna_orden_de_voz():
 
 def test_widget_envia_la_zona_horaria_del_navegador():
     js = _js()
-    assert 'zona_horaria: zonaHoraria() });' in js
+    assert 'zona_horaria: zonaHoraria(),' in js
     fn = js.split("function zonaHoraria() {", 1)[1].split("\n  }\n", 1)[0]
     assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in fn and "catch" in fn  # nunca rompe el envío
 
@@ -465,7 +465,7 @@ def test_suavizado_sube_rapido_y_baja_despacio_sin_pasarse():
 def test_widget_un_turno_nuevo_empieza_sin_interrumpido():
     """Dictar con la palabra de activación pone _leerCortado en true; si el turno no lo limpia al enviar, el acuse y el resumen no suenan."""
     js = _js()
-    envio = js.split("async _enviarMensaje(texto) {", 1)[1].split("this._bloquear(true);", 1)[0]
+    envio = js.split("async _enviarMensaje(texto, imagenes = []) {", 1)[1].split("this._bloquear(true);", 1)[0]
     assert "this._leerCortado = false;" in envio and envio.index("this._leerCortado = false;") < envio.index("this._acuseProgramar();")
 
 
@@ -499,3 +499,13 @@ def test_widget_el_nombre_del_asistente_es_la_palabra_de_activacion():
     js = _js()
     # palabra-activacion del anfitrión > nombre del asistente > «asistente»
     assert 'this.getAttribute("palabra-activacion")?.trim() || (this._nombre() !== NOMBRE_BASE ? this._nombre() : PALABRA_ACTIVACION)' in js
+
+
+def test_widget_imagenes_solo_se_ofrecen_si_el_estado_las_informa_y_se_reducen_antes_de_enviar():
+    js = _js()
+    # oculto hasta que /v1/estado informe `imagenes` y el atributo no lo apague
+    assert 'this._adjBtn.hidden = !(habilitado && this._imgInfo);' in js
+    assert '(this.getAttribute("imagenes") || "auto").toLowerCase() !== "no"' in js
+    # lo que viaja es la imagen ya reducida (JPEG), y el aviso de privacidad acompaña a las imágenes por enviar
+    assert '"image/jpeg", calidad' in js and "TEXTOS.avisoImagen" in js
+    assert "imagenes: imagenes.map((i) => ({ tipo: i.tipo, datos: i.datos }))" in js

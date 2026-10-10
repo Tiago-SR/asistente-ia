@@ -34,6 +34,11 @@ sistemas:
     # («la de siempre»), por usuario y por sistema. Vencen al mes sin usarse (ASISTENTE_MEMORIA_DIAS_SIN_USO) y el
     # usuario los ve y borra desde el widget. Los nombres `recordar` y `olvidar` quedan reservados en el manifiesto.
     # memoria_habilitada: true
+    # LLM de este sistema (opcional; todo lo que se omita se hereda de LLM_* y ASISTENTE_MODELO_DEFAULT).
+    # `imagenes: true` deja adjuntar imágenes de referencia SOLO si el modelo las admite (contrato, 7.7); sin esto manda
+    # LLM_IMAGENES. Para cambiar de modelo o de endpoint: proveedor, modelo, base_url_env y api_key_env (nombres de variables).
+    # llm:
+    #   imagenes: true
     # Nombre del asistente en el widget (título, avisos, ajustes), hasta 40 caracteres. Es el valor por defecto: cada usuario
     # puede cambiarlo en su panel de ajustes (se guarda en su navegador). Sin esto el widget dice «Asistente».
     # nombre_asistente: Sofía

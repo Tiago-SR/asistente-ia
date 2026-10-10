@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
+from asistente.core import adjuntos as adj
 from asistente.core import events, zona
 from asistente.core.agent import ConfigTurno, run_turn
 from asistente.core.memoria import ServicioMemoria
@@ -25,9 +26,16 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class ImagenIn(BaseModel):
+    tipo: str  # image/jpeg | image/png
+    datos: str  # base64 estricto, sin prefijo `data:`
+
+
 class ChatIn(BaseModel):
     conversacion_id: uuid.UUID | None = None
-    mensaje: str
+    mensaje: str = ""
+    # Imágenes de referencia (solo si `GET /v1/estado` informa `imagenes`). Viajan en el turno y no se guardan.
+    imagenes: list[ImagenIn] = []
     # «voz»: el modelo agrega un resumen hablado (evento `voz`); la respuesta completa no cambia.
     canal: Literal["texto", "voz"] = "texto"
     # Zona del navegador (IANA). Opcional y nunca bloquea: una inválida se ignora y rige la del sistema, luego UTC.
@@ -53,7 +61,7 @@ async def chat(
 ) -> StreamingResponse:
     cfg = svc.settings
     texto = body.mensaje.strip()
-    if not texto or len(texto) > cfg.max_mensaje_chars:
+    if (not texto and not body.imagenes) or len(texto) > cfg.max_mensaje_chars:
         raise ErrorApi(422, "mensaje_invalido")
 
     u, sistema = sesion.usuario, sesion.sistema
@@ -62,6 +70,16 @@ async def chat(
     except LLMNoConfigurado as e:
         log.error("LLM sin configurar para %s: %s", sistema.id, e)
         raise ErrorApi(503, "llm_no_configurado") from e
+
+    adjuntos: tuple = ()
+    if body.imagenes:
+        if not llm.capacidades.soporta_imagenes:
+            raise ErrorApi(422, "imagenes_no_soportadas")
+        try:
+            adjuntos = adj.decodificar([(i.tipo, i.datos) for i in body.imagenes],
+                                       max_imagenes=cfg.max_imagenes, max_bytes=cfg.max_imagen_kb * 1024)
+        except adj.AdjuntoInvalido as e:
+            raise ErrorApi(413 if e.codigo == "imagen_demasiado_grande" else 422, e.codigo) from e
 
     if body.conversacion_id is not None:
         # Ajena o inexistente: misma respuesta, para no revelar ids de otros.
@@ -114,11 +132,14 @@ async def chat(
             res = await run_turn(ctx, llm, conector, svc.auditoria, svc.limites, historial,
                                  texto, filtrado, conv_id, config, acciones=svc.acciones,
                                  recientes=svc.recientes if sistema.consultas_recientes else None,
-                                 memoria=memoria)
+                                 memoria=memoria, adjuntos=adjuntos)
             if res.completo:
                 try:
+                    # la imagen no se guarda: queda la marca y la metadata (ver core/adjuntos.py)
+                    nuevos = [await adj.para_guardar(m, svc.adjuntos, u.sistema_id, u.usuario_ref)
+                              for m in res.nuevos]
                     await asyncio.shield(svc.repo.guardar_turno(
-                        u.sistema_id, u.usuario_ref, conv_id, texto[:60], res.nuevos,
+                        u.sistema_id, u.usuario_ref, conv_id, (texto or "Imagen")[:60], nuevos,
                         res.uso, modelo, version))
                 except Exception:
                     log.exception("[%s] no se pudo guardar el turno", request_id)

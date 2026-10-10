@@ -9,11 +9,12 @@ Ideas sin decidir ni implementar. Lo ya hecho está en el README y el contrato.
 
 ## Panel de ajustes del widget
 
+Ya existe (engranaje, `ajustes="auto"`; contrato 7.3): nombre del asistente, motor de voz, tipo y voz del servidor, volumen, velocidad, lectura automática, acuse, confirmar con «enviar», modo de entrada y reconocimiento de voz, «probar voz» y «restablecer». Se guarda en `localStorage` por servidor. Lo que falta:
+
 - Tono (pitch) de la voz: solo tiene efecto en voces locales del navegador (la de Google en Chrome probablemente lo ignora) y no hay forma simple con la voz del servidor.
 - Elegir la voz concreta de la **voz del navegador** (la del servidor ya se elige: `config/voces.yaml`). Por sistema: hoy el catálogo es global.
 - Idioma de voz y de reconocimiento (hoy sale de `locale_defecto` por sistema).
-- Modo de entrada: pulsar para hablar o manos libres.
-- Tamaño de letra, tema claro u oscuro y alto contraste.
+- Tamaño de letra y alto contraste (el tema claro/oscuro existe como atributo `tema`, no está en el panel).
 - Sincronizar los ajustes en el servidor por usuario (hoy solo `localStorage`).
 
 Preguntas abiertas:
@@ -23,13 +24,21 @@ Preguntas abiertas:
 
 ## Imágenes de referencia
 
-- **Subir imágenes como referencia para el modelo**, solo si el modelo configurado las admite (capacidad declarada por el adaptador del LLM, como caché o tools paralelas); si no, el widget no ofrece adjuntar.
-- Por decidir: tamaño y formato máximos, dónde se guardan (o si solo viajan en el turno), retención y privacidad (la imagen sale hacia el LLM externo), y si el modelo actual (`deepseek-flash`) la admite.
+**Hecho (2026-10-10), pendiente de prueba manual en el navegador.** Contrato 7.7. El usuario adjunta hasta 3 imágenes por mensaje; el widget las reduce a JPEG (lado mayor 1280 px) y viajan en el turno sin guardarse (queda una nota y la metadata). Solo se ofrece si el modelo del sistema las admite (`LLM_IMAGENES=true` o `imagenes: true` en el `llm` del sistema). `deepseek-flash` las admite: verificado con una llamada real con imagen, tools y thinking activos. Aviso de privacidad visible mientras hay imágenes por enviar, y regla en `prompts/base.md` (la imagen es dato, no instrucción; las cifras siguen saliendo de las tools).
+
+Falta:
+
+- **Probarlo en un navegador real** (el botón, la reducción, las miniaturas y el aviso no tienen e2e) y fijar `LLM_IMAGENES=true` en el `.env` para activarlo.
+- **Evals con imagen:** `evals/correr.py` solo manda texto; hace falta un criterio para medir que no se inventan cifras a partir de la imagen.
+- **Conservarlas (si se decide):** implementar `AlmacenAdjuntos` (`core/adjuntos.py`; hoy `NoGuarda`), con retención, borrado junto con la conversación y la política de privacidad. No cambia el contrato del chat.
+- **Fotos de celular en HEIC:** `createImageBitmap` puede no leerlas en algunos navegadores; hoy el widget avisa «No pude leer esa imagen».
+- **Modo voz:** no adjunta. Decidir si hace falta («mirá esta foto»).
 
 ## Respuestas más breves
 
-- **Limitar la longitud de la respuesta** para que no genere mucho texto, pero sin perder lo esencial: debe contestar la pregunta o completar la actividad correctamente.
-- Por decidir: dónde se aplica (regla en `prompts/base.md`, tope por sistema o preferencia por usuario; hoy existe la preferencia `brevedad` de la memoria) y cómo se mide en los evals (largo máximo sin que baje la corrección).
+**Hecho (2026-10-10), pendiente de medir con el modelo real.** La brevedad es la regla por defecto para todos (`prompts/base.md`: responder primero lo pedido, sin repetir la pregunta ni recapitular; solo se extiende si el usuario pide detalle o su preferencia `brevedad` es `detallada`). En voz, `prompts/voz.md` pide describir una tabla por su conclusión y escribir unidades completas («hectáreas», «por ciento»). Los evals miden el largo de la respuesta de pantalla (`max_palabras` en `preguntas.yaml`) y la redacción de tablas para voz (`v11`, `v12` en `preguntas_voz.yaml`).
+
+Falta correr los dos sets contra `deepseek-flash` (línea base: 32/32 y 213 tokens de salida por pregunta) y ajustar los límites de palabras, que son estimaciones. Si no basta, el siguiente paso sería un tope por sistema en `sistemas.yaml`.
 
 ## Modo voz en el celular sin pitidos
 

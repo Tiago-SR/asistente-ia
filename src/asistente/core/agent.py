@@ -14,7 +14,7 @@ from typing import Any
 from asistente.core import events
 from asistente.core import memoria as memorias
 from asistente.core import recientes as consultas
-from asistente.core.llm.base import LlamadaTool, LLMError, Mensaje, Uso
+from asistente.core.llm.base import Adjunto, LlamadaTool, LLMError, Mensaje, Uso
 from asistente.core.ports import (
     LLM,
     Acciones,
@@ -85,6 +85,7 @@ async def run_turn(
     acciones: Acciones | None = None,
     recientes: Recientes | None = None,
     memoria: Memoria | None = None,
+    adjuntos: tuple[Adjunto, ...] = (),
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
@@ -97,7 +98,7 @@ async def run_turn(
     try:
         async with asyncio.timeout(config.timeout_turno_s):
             await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                        conversacion_id, config, estado, acciones, recientes, memoria)
+                        conversacion_id, config, estado, acciones, recientes, memoria, adjuntos)
     except TimeoutError:
         estado.motivo, estado.nuevos = "error", []
         await emit(events.ERROR, "timeout_turno")
@@ -105,7 +106,8 @@ async def run_turn(
 
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                conversacion_id, config, estado, acciones=None, recientes=None, memoria=None) -> None:
+                conversacion_id, config, estado, acciones=None, recientes=None, memoria=None,
+                adjuntos=()) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
     lectura = {t.nombre for t in tools if not t.escritura}
@@ -115,7 +117,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         tools = [*tools, *memorias.TOOLS]  # `recordar` y `olvidar`: locales, siempre con botón
     propuesta_hecha = False  # una sola propuesta por turno
     reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
-    nuevos = [Mensaje("user", texto)]
+    nuevos = [Mensaje("user", texto, adjuntos=adjuntos)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
     sem = asyncio.Semaphore(config.max_tools_concurrentes if usar_paralelas else 1)
 

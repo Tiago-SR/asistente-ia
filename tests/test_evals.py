@@ -120,7 +120,7 @@ def test_el_set_de_preguntas_es_valido():
     ids = [q["id"] for q in conjunto["preguntas"]]
     assert len(ids) == len(set(ids)) >= 30
     permitidos = {"turnos", "id", "categoria", "usuario", "tools_requeridas", "tools_prohibidas", "numeros",
-                  "sin_numeros", "contiene", "no_contiene", "permitidos"}
+                  "sin_numeros", "contiene", "no_contiene", "permitidos", "max_palabras"}
     for q in conjunto["preguntas"]:
         assert set(q) <= permitidos, q["id"]
         assert q["turnos"] and q["usuario"] in ("ana", "beto"), q["id"]
@@ -147,7 +147,7 @@ def test_el_set_de_memoria_es_valido():
     ids = [q["id"] for q in conjunto["preguntas"]]
     assert len(ids) == len(set(ids)) >= 6
     permitidos = {"turnos", "id", "categoria", "usuario", "previas", "tools_requeridas", "tools_prohibidas",
-                  "numeros", "sin_numeros", "contiene", "no_contiene", "permitidos"}
+                  "numeros", "sin_numeros", "contiene", "no_contiene", "permitidos", "max_palabras"}
     for q in conjunto["preguntas"]:
         assert set(q) <= permitidos, q["id"]
         assert q["turnos"] and q["usuario"] in ("ana", "beto"), q["id"]
@@ -321,3 +321,13 @@ def test_sin_memoria_en_el_set_no_se_limpia_nada_ni_se_confirma():
     cli = ClienteDeMemoria(lambda n: tarjeta(n))
     correr.correr_pregunta(cli, {"id": "x", "categoria": "c", "usuario": "ana", "turnos": ["a"], "previas": ["b"]}, BASE, None)
     assert cli.limpiadas == [] and cli.confirmadas == []
+
+
+def test_max_palabras_limita_la_respuesta_de_pantalla_sin_contar_barras_de_tabla():
+    q = pregunta(max_palabras=8)
+    tabla = "| Campo | Ha |\n|---|---|\n| El Matorral | 540,5 |\n| San Pedro | 120 |"
+    assert p.puntuar(q, tabla, [], BASE, None)["ok"]
+    largo = "El Matorral tiene 540,5 ha y es el establecimiento más grande de todos los que tienes."
+    r = p.puntuar(q, largo, [], BASE, None)
+    assert not r["ok"] and "respuesta larga" in r["fallos"][0]
+    assert p.puntuar(pregunta(), largo, [], BASE, None)["ok"]   # sin criterio, no se mide

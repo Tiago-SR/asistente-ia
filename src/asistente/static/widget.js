@@ -53,6 +53,9 @@
  *               (sin palabra de activación ni reconocimiento continuo: un arranque por turno, sin la ráfaga de pitidos de
  *               Android); "libres" = escucha continua y palabra de activación; "auto" = "tocar" en Android y "libres" en el
  *               resto. Con voz-motor="servidor" el modo voz solo existe en "tocar". El usuario lo cambia en sus ajustes.
+ *   imagenes     "auto" (por defecto) | "no": botón para adjuntar imágenes de referencia, solo si el modelo del sistema las admite
+ *               (/v1/estado: imagenes). Se reducen en el navegador (JPEG, lado mayor 1280 px) y viajan solo en el turno: el servidor no
+ *               las guarda y salen hacia el proveedor del modelo (el widget lo avisa). "no" quita el botón.
  *   orbe-volumen "auto" (por defecto) | "si" | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
  *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre; "auto" tampoco en Android
  *               (ahí el segundo flujo deja sin señal al reconocimiento); "si" lo fuerza.
@@ -113,6 +116,11 @@
     pensando: "Pensando…",
     consultando: "Consultando",
     dictar: "Dictar",
+    adjuntar: "Adjuntar imagen",
+    quitarImagen: "Quitar imagen",
+    avisoImagen: "La imagen se envía al proveedor del modelo para responderte y no se guarda.",
+    imagenIlegible: "No pude leer esa imagen.",
+    imagenMax: "Máximo {n} imágenes por mensaje.",
     detener: "Detener grabación",
     transcribiendo: "Transcribiendo…",
     escuchando: "Escuchando…",
@@ -206,6 +214,10 @@
     origen_no_permitido: "Esta página no está autorizada para usar el asistente.",
     mensaje_invalido: "El mensaje está vacío o es demasiado largo.",
     no_se_pudo_guardar: "No se pudo guardar la conversación.",
+    imagenes_no_soportadas: "Este asistente no admite imágenes por ahora.",
+    imagenes_invalidas: "No pude usar esa imagen. Probá con una foto JPG o PNG.",
+    imagen_demasiado_grande: "La imagen es demasiado pesada.",
+    demasiadas_imagenes: "Adjuntaste demasiadas imágenes.",
   };
   // Estado final de una acción propuesta (tarjeta de confirmación).
   const ESTADOS_ACCION = {
@@ -854,6 +866,16 @@
     form button.mic:hover:not(:disabled) { color: var(--c); border-color: var(--c); }
     form button.mic.grabando { background: var(--p-rec); border-color: var(--p-rec); color: var(--p-rec-t); }
     form button.mic[hidden] { display: none; }
+    form button.adjuntar { background: transparent; color: var(--apagado); border: 1px solid var(--b); }
+    form button.adjuntar:hover:not(:disabled) { color: var(--c); border-color: var(--c); }
+    form button.adjuntar[hidden] { display: none; }
+    .imagenes { max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .imagenes:empty { display: none; }
+    .imagenes .mini { position: relative; width: 56px; height: 56px; }
+    .imagenes .mini img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--b); }
+    .imagenes .mini button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; font-size: 12px; line-height: 1;
+      border: 0; border-radius: 50%; background: var(--c); color: var(--ct); cursor: pointer; }
+    .msg.user img.adjunta { display: block; max-width: 160px; max-height: 120px; margin-top: 6px; border-radius: 10px; }
     .aviso-voz { font-size: 12px; color: var(--apagado); text-align: center; padding-top: 4px; min-height: 16px; }
     .aviso-voz:empty { display: none; }
     .aviso-voz.err { color: var(--p-err-t); }
@@ -882,6 +904,7 @@
     x: "M6 6l12 12M18 6L6 18",
     enviar: "M12 19V5M5 12l7-7 7 7",
     mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
+    adjuntar: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
     parar: "M7 7h10v10H7z",
     chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
     manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
@@ -914,6 +937,35 @@
     return el("div", { class: "orbe", "aria-hidden": "true" }, capa("o-halo"), capa("o-onda"), capa("o-onda o2"), circulo("o-marcas", 48),
       capa("o-fino"), capa("o-nivel"), capa("o-barrido"), capa("o-disco"), capa("o-aro"), circulo("o-seg", 47), capa("o-nucleo"),
       glifo("mic"), glifo("esc"), glifo("pausa"), glifo("pensar"), glifo("habla"));
+  }
+
+  // Reduce una imagen a JPEG de a lo sumo `maxBytes`: baja el lado y la calidad hasta que entra. Lanza si no se puede leer.
+  async function reducirImagen(archivo, maxBytes) {
+    const bmp = await createImageBitmap(archivo);
+    let lado = 1280, calidad = 0.85;
+    try {
+      for (let i = 0; i < 6; i++) {
+        const k = Math.min(1, lado / Math.max(bmp.width, bmp.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+        const g = c.getContext("2d");
+        g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);   // un PNG con transparencia no queda negro
+        g.drawImage(bmp, 0, 0, c.width, c.height);
+        const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", calidad));
+        if (blob && blob.size <= maxBytes) return blob;
+        calidad = Math.max(0.5, calidad - 0.15); lado = Math.round(lado * 0.75);
+      }
+    } finally { if (bmp.close) bmp.close(); }
+    throw new Error("imagen_grande");
+  }
+
+  function base64De(blob) {
+    return new Promise((ok, mal) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result).split(",")[1] || "");
+      r.onerror = () => mal(r.error);
+      r.readAsDataURL(blob);
+    });
   }
 
   function icono(nombre) {
@@ -951,6 +1003,8 @@
       this._iniciado = false;
       this._nombreSistema = "";
       this._nombreServidor = "";
+      this._imgInfo = null;       // {max, max_kb} si el modelo admite imágenes (/v1/estado: imagenes)
+      this._imgPend = [];         // imágenes por enviar: [{url, tipo, datos}] (solo en memoria)
       this._dictadoServidor = false;
       this._ttsServidor = false;  // el sistema tiene voz de servidor (/v1/estado: voz.respuesta)
       this._vocesSrv = [];        // voces que ofrece el servidor: [{ id, etiqueta, genero }] (/v1/estado: voz.voces)
@@ -1068,7 +1122,14 @@
       this._mic = el("button", { type: "button", class: "mic", hidden: true, title: TEXTOS.dictar, "aria-label": TEXTOS.dictar }, icono("mic"));
       this._mic.addEventListener("click", () => this._conmutarDictado());
       this._avisoVoz = el("div", { class: "aviso-voz", role: "status" });
-      const form = el("form", {}, this._entrada, this._mic, this._enviar);
+      // imágenes de referencia: oculto hasta que /v1/estado diga que el modelo las admite
+      this._adjInput = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
+      this._adjInput.addEventListener("change", () => { const f = [...this._adjInput.files]; this._adjInput.value = ""; this._imgElegir(f); });
+      this._adjBtn = el("button", { type: "button", class: "adjuntar", hidden: true, title: TEXTOS.adjuntar, "aria-label": TEXTOS.adjuntar }, icono("adjuntar"));
+      this._adjBtn.addEventListener("click", () => this._adjInput.click());
+      this._imgChips = el("div", { class: "imagenes" });
+      this._imgAviso = el("div", { class: "aviso-voz", role: "status" });
+      const form = el("form", {}, this._adjBtn, this._adjInput, this._entrada, this._mic, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
       // indicador de manos libres: visible siempre que el micrófono esté abierto, con el botón de apagar
       this._mhEtiqueta = el("span", { class: "mh-estado", role: "status", "aria-live": "polite" });
@@ -1097,7 +1158,7 @@
       this._escena = el("section", { class: "escena", "aria-label": TEXTOS.escenaVoz }, this._mhDicho, this._verChat);
       this.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._mhActivo()) this._mhApagar(""); });
       this._form = form;
-      this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, form, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
+      this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, this._imgChips, form, this._imgAviso, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
       this._construirMemoria();
       this._construirAjustes();
       const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada, this._memPanel, this._ajPanel);
@@ -1174,6 +1235,9 @@
           this._vocesSrv = Array.isArray(voz.voces) ? voz.voces.filter((v) => v && typeof v.id === "string" && v.id).map((v) => ({
             id: v.id, etiqueta: typeof v.etiqueta === "string" && v.etiqueta ? v.etiqueta : v.id, genero: v.genero in TEXTOS.ajGeneros ? v.genero : null })) : [];
           this._vozSrvDefecto = typeof voz.voz_defecto === "string" ? voz.voz_defecto : "";
+          const im = e.imagenes;
+          this._imgInfo = (this.getAttribute("imagenes") || "auto").toLowerCase() !== "no" && im && Number(im.max) > 0 && Number(im.max_kb) > 0
+            ? { max: Number(im.max), maxKb: Number(im.max_kb) } : null;
           this._nombreServidor = nombreLimpio(e.nombre_asistente);
           this._aplicarNombre();
         }
@@ -1181,6 +1245,7 @@
       this._actualizarVoz();
       this._arrancarEnVoz();
       this._memBtn.hidden = !(habilitado && this._memoria);
+      this._adjBtn.hidden = !(habilitado && this._imgInfo);
       this._raiz.classList.toggle("sin-acceso", !habilitado);
       this._raiz.hidden = false;
       if (habilitado) { this._cargarHistorial(); this._entrada.focus(); this._restaurar(); }
@@ -2372,38 +2437,72 @@
     }
 
     // — chat —
+    // — imágenes de referencia: se reducen aquí (JPEG, lado mayor 1280 px) y viajan solo en el turno —
+    async _imgElegir(archivos) {
+      if (!this._imgInfo) return;
+      const cupo = this._imgInfo.max - this._imgPend.length;
+      let error = archivos.length > cupo ? TEXTOS.imagenMax.replace("{n}", this._imgInfo.max) : "";
+      for (const f of archivos.slice(0, Math.max(0, cupo))) {
+        try {
+          const blob = await reducirImagen(f, this._imgInfo.maxKb * 1024);
+          this._imgPend.push({ url: URL.createObjectURL(blob), tipo: "image/jpeg", datos: await base64De(blob) });
+        } catch { error = TEXTOS.imagenIlegible; }
+      }
+      this._imgPintar(error);
+    }
+
+    _imgQuitar(i) {
+      const [q] = this._imgPend.splice(i, 1);
+      if (q) URL.revokeObjectURL(q.url);
+      this._imgPintar();
+    }
+
+    _imgPintar(error = "") {
+      this._imgChips.replaceChildren(...this._imgPend.map((im, i) => {
+        const x = el("button", { type: "button", title: TEXTOS.quitarImagen, "aria-label": TEXTOS.quitarImagen, textContent: "×" });
+        x.addEventListener("click", () => this._imgQuitar(i));
+        return el("div", { class: "mini" }, el("img", { src: im.url, alt: "" }), x);
+      }));
+      this._imgAviso.textContent = error || (this._imgPend.length ? TEXTOS.avisoImagen : "");
+      this._imgAviso.classList.toggle("err", !!error);
+    }
+
     _enviarForm() {
       const texto = this._entrada.value.trim();
-      if (!texto || this._ocupado) return;
+      const imagenes = this._imgPend;
+      if ((!texto && !imagenes.length) || this._ocupado) return;
       this._entrada.value = ""; this._entrada.style.height = "auto";
-      this._enviarMensaje(texto);
+      this._imgPend = []; this._imgPintar();
+      this._enviarMensaje(texto, imagenes);
     }
 
     _bloquear(si) {
-      this._ocupado = si; this._enviar.disabled = si;
+      this._ocupado = si; this._enviar.disabled = si; this._adjBtn.disabled = si;
       this._raiz.setAttribute("aria-busy", String(si));
       this._mhFase();
       if (!si) this._mhRevisarFin();
     }
 
-    async _enviarMensaje(texto) {
+    async _enviarMensaje(texto, imagenes = []) {
       this._pararVoz();
       // un turno nuevo empieza sin «interrumpido» (decir la palabra de activación para dictar lo deja en true hasta la respuesta)
       this._dichoTurno = false; this._propuestaTurno = false; this._leerCortado = false; this._mhDicho.replaceChildren();
       if (this._mhActivo()) { this._metricasIniciar(); this._acuseProgramar(); } else this._t = null;
       if (this._mhActivo()) this._mhEstado("respondiendo");   // también si se envió con Enter o el botón
       this._bloquear(true);
-      this._burbuja("user").textContent = texto;
+      const mia = this._burbuja("user");
+      mia.textContent = texto;
+      for (const im of imagenes) mia.append(el("img", { class: "adjunta", src: im.url, alt: "" }));
       const burbuja = this._burbuja("assistant");
       const estado = el("div", { class: "estado", textContent: TEXTOS.pensando });
       burbuja.append(estado);
       this._abort = new AbortController();
       try {
-        let res = await this._turno(texto, burbuja, estado);
+        let res = await this._turno(texto, burbuja, estado, imagenes);
         if (res === "token_expirado") {  // el turno no se guardó: se renueva y se reintenta una vez
           await this._asegurarToken(true);
           estado.textContent = TEXTOS.pensando;
-          res = await this._turno(texto, burbuja, estado);
+          res = await this._turno(texto, burbuja, estado, imagenes);
         }
         if (res === "token_expirado") this._error("token_invalido");
       } catch (e) {
@@ -2416,9 +2515,10 @@
     }
 
     // Devuelve "ok" | "token_expirado" | "error".
-    async _turno(texto, burbuja, estado) {
+    async _turno(texto, burbuja, estado, imagenes = []) {
       const canalVoz = this._mhActivo();   // en el modo voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual)
-      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria() });
+      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria(),
+        ...(imagenes.length ? { imagenes: imagenes.map((i) => ({ tipo: i.tipo, datos: i.datos })) } : {}) });
       const r = await this._conToken((h) => fetch(this._servidor + "/v1/chat", {
         method: "POST", signal: this._abort.signal, body: cuerpo,
         headers: { ...h, "Content-Type": "application/json", Accept: "text/event-stream" },

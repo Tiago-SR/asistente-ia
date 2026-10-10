@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
-from asistente.servicios import Servicios
+from asistente.core import adjuntos
+from asistente.servicios import LLMNoConfigurado, Servicios
 
 router = APIRouter()
 
@@ -23,7 +24,7 @@ async def estado(
         # Voces del servidor que el usuario puede elegir (sin el voice_id del proveedor).
         voz["voces"] = svc.voces.publico()
         voz["voz_defecto"] = svc.voces.defecto
-    return {
+    resp = {
         "habilitado": True,
         "nombre_sistema": sesion.sistema.nombre,
         # Nombre por defecto del asistente (sistemas.yaml); el usuario puede cambiarlo en el widget.
@@ -32,3 +33,13 @@ async def estado(
         "memoria": sesion.sistema.memoria_habilitada and svc.memoria is not None,
         "voz": voz,
     }
+    # Imágenes de referencia: solo si el modelo de este sistema las admite.
+    try:
+        llm, _ = svc.llm_para(sesion.sistema)
+        admite = llm.capacidades.soporta_imagenes
+    except LLMNoConfigurado:
+        admite = False
+    if admite:
+        cfg = svc.settings
+        resp["imagenes"] = {"max": cfg.max_imagenes, "max_kb": cfg.max_imagen_kb, "tipos": list(adjuntos.TIPOS)}
+    return resp

@@ -79,6 +79,11 @@ def _puntuar_propuestas(pregunta: dict, propuestas: list[dict], texto: str) -> l
     return fallos
 
 
+def _palabras_pantalla(respuesta: str) -> int:
+    """Palabras de la respuesta de pantalla; los separadores de tablas Markdown (`|`, `---`) no cuentan."""
+    return sum(1 for w in respuesta.split() if not set(w) <= set("|-:*#"))
+
+
 MARCAS_MARKDOWN = ("*", "|", "#", "`", "[", "]", "<", ">", "http")
 
 
@@ -147,6 +152,10 @@ def puntuar(pregunta: dict, respuesta: str, herramientas: list[str], base: list[
     for prohibido in pregunta.get("no_contiene", []):
         if normalizar(prohibido) in texto:
             fallos.append(f"contiene «{prohibido}»")
+
+    maximo = pregunta.get("max_palabras")
+    if maximo is not None and (n := _palabras_pantalla(respuesta)) > maximo:
+        fallos.append(f"respuesta larga: {n} palabras (máximo {maximo})")
 
     fallos += _puntuar_propuestas(pregunta, propuestas or [], texto)
 

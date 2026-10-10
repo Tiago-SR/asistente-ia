@@ -247,6 +247,8 @@ sistemas:
     zona_horaria: America/Montevideo            # «hoy» para usuarios cuyo navegador no informa la suya
     consultas_recientes: true                   # tool local «lo mismo que ayer» (false = apagada)
     memoria_habilitada: false                   # memoria por usuario: preferencias, alias y consultas guardadas (true = encendida)
+    llm:                                        # opcional: lo que se omita se hereda de LLM_* y ASISTENTE_MODELO_DEFAULT
+      imagenes: true                            # admite imágenes de referencia (7.7); sin esto manda LLM_IMAGENES
     limites:
       mensajes_por_usuario_min: 10
       mensajes_por_usuario_dia: 200
@@ -394,6 +396,7 @@ El widget guarda el token solo en memoria (nunca en `localStorage`) y, en `sessi
 | `palabra-activacion` | Palabra que despierta el modo voz en modo `libres` (por defecto `asistente`). |
 | `modo-entrada` | `auto` (por defecto), `tocar` o `libres`: cómo se habla en el modo voz. `tocar` = un turno por toque del orbe, sin palabra de activación ni reconocimiento continuo; `libres` = escucha continua con palabra de activación. `auto` es `tocar` en Android (donde el reconocimiento continuo pita en cada arranque) y `libres` en el resto. Con `voz-motor="servidor"` el modo voz solo existe en `tocar`. Lo que el usuario elija en sus ajustes manda sobre el atributo (ver [7.4](#74-voz-opcional)). |
 | `manos-libres-inactividad` | Minutos sin interacción tras los que el modo voz se apaga solo (por defecto 5; `0` = no se apaga; el atributo conserva su nombre anterior por compatibilidad). |
+| `imagenes` | `auto` (por defecto) o `no`: botón para adjuntar imágenes de referencia, solo si `GET /v1/estado` informa `imagenes` (ver [7.7](#77-imágenes-de-referencia-opcional)). |
 | `ajustes` | `auto` (por defecto) o `no`: engranaje con el panel de ajustes del usuario (voz del asistente —navegador o servidor, si hay las dos—, tipo y voz del servidor si ofrece varias, volumen, velocidad, lectura automática, acuse, modo de entrada del modo voz, reconocimiento de voz —navegador o servidor, solo si hay los dos y `voz-motor` es `auto`—, «probar voz» y «restablecer»). Se guardan en el navegador (`localStorage`, por servidor; nunca el token ni texto del chat) y lo que el usuario elige manda sobre `voz-respuesta` y `acuse`; con `no` no hay panel y mandan los atributos. |
 | `acuse` | `auto` (por defecto) o `no`: en el modo voz, si pasan unos 0,9 s desde «enviar» sin nada que decir, el widget dice una frase corta («Un momento, lo consulto») para que no haya silencio; `no` la quita (ver [7.4](#74-voz-opcional)). |
 | `orbe-volumen` | `auto` (por defecto) o `no`: si el orbe del modo voz sigue el volumen del micrófono (ver [7.4](#74-voz-opcional)); `no` evita abrir el segundo flujo de audio que lo mide. |
@@ -567,6 +570,17 @@ Si el servicio tiene un STT configurado (`/v1/estado` → `voz.dictado: true`), 
 ### 7.6 Lo que hoy no existe
 
 Para no dar por hecho algo que no está: **contexto de la pantalla actual** (que el asistente sepa en qué ficha está el usuario), **manifiesto de tools por rol** (es global por sistema: el sistema rechaza lo que el usuario no puede hacer, pero el modelo puede ofrecerlo), **avisos proactivos** (webhooks o consultas programadas), **memoria de hechos de negocio** entre conversaciones (lo único que cruza conversaciones es repetir una consulta anterior con [`consultas_recientes`](#67-lo-mismo-que-ayer-consultas_recientes) y, si el sistema la habilita, lo que el usuario pida guardar: preferencias, alias y consultas guardadas ([6.8](#68-memoria-por-usuario-recordar-y-olvidar)); nunca cifras ni datos de negocio), **síntesis de voz de servidor** (las respuestas se leen con las voces del navegador) y **borrar o deshacer** desde el asistente. Son decisiones de producto: conviene acordar el caso de uso antes de pedirlas.
+
+### 7.7 Imágenes de referencia (opcional)
+
+El usuario puede adjuntar imágenes a un mensaje (una foto, una captura, una planilla) para que el modelo las use como referencia. Solo existe si el modelo del sistema las admite; si no, el widget no ofrece adjuntar.
+
+- **Quién las admite.** `LLM_IMAGENES=true` (global) o `imagenes: true|false` en el bloque `llm` del sistema (manda sobre el global; el bloque no exige `modelo`: `llm: {imagenes: true}` hereda el modelo y el endpoint globales). Es una declaración del operador: el servicio no lo detecta. `deepseek-flash` las admite (verificado con imagen, tools y thinking activos).
+- **`GET /v1/estado`** agrega `imagenes: { max, max_kb, tipos }` solo si el modelo las admite (`max` imágenes por mensaje, hasta `max_kb` KB cada una, `tipos` MIME aceptados). Sin la clave, no hay adjuntos.
+- **`POST /v1/chat`** acepta `imagenes: [{ tipo, datos }]` (`datos` = base64 estricto, sin prefijo `data:`). `mensaje` puede ir vacío si hay imágenes. Tipos: `image/jpeg` e `image/png`, con la firma del archivo comprobada. Topes: `ASISTENTE_MAX_IMAGENES` (3) e `ASISTENTE_MAX_IMAGEN_KB` (700 KB por imagen, decodificada; tres caben en el `client_max_body_size 4m` del proxy). Errores: `422 imagenes_no_soportadas`, `422 imagenes_invalidas`, `422 demasiadas_imagenes`, `413 imagen_demasiado_grande`, `422 mensaje_invalido` (sin texto ni imágenes).
+- **Solo en el turno.** Las imágenes viajan en la petición, se mandan al modelo en ese turno y **no se guardan**: en la conversación queda una nota («[El usuario adjuntó 1 imagen; no se conserva.]») y la metadata (tipo y tamaño), nunca los bytes. En turnos siguientes el modelo solo ve esa nota. Conservarlas más adelante es otra implementación de `AlmacenAdjuntos` (`core/adjuntos.py`): no cambia este contrato.
+- **El widget** (atributo `imagenes`: `auto` | `no`) las reduce en el navegador a JPEG con el lado mayor en 1280 px (y baja la calidad hasta entrar en `max_kb`), muestra miniaturas con «quitar» y, mientras haya imágenes por enviar, el aviso «La imagen se envía al proveedor del modelo para responderte y no se guarda». Se adjunta desde el chat; el modo voz no adjunta.
+- **Privacidad.** La imagen sale hacia el proveedor del LLM, igual que el texto. Puede contener datos de terceros o documentos: el aviso es parte del producto. Para el modelo la imagen es un dato aportado por el usuario, nunca una instrucción, y las cifras del sistema siguen saliendo solo de las herramientas (regla en `prompts/base.md`).
 
 ## 8. Acciones con confirmación (opcional)
 
