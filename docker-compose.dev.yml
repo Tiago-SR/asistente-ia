@@ -75,7 +75,7 @@ services:
       SISTEMA_SECRETO: secreto-php-0123456789-0123456789-ab
       SISTEMA_CLAVE_PRIVADA_ARCHIVO: ${PHP_CLAVE_PRIVADA_ARCHIVO:-}
       SISTEMA_TOKEN_MANIFIESTO: manifiesto-php
-      ASISTENTE_URL: http://localhost:8100
+      ASISTENTE_URL: ${PHP_ASISTENTE_URL:-http://localhost:8100}   # con túnel: la URL HTTPS pública del asistente
     volumes:
       - ./ejemplos/sistema-php/src:/app/src:ro
       - ./ejemplos/sistema-php/public:/app/public:ro

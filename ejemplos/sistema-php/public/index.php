@@ -89,5 +89,5 @@ header('Content-Type: text/html; charset=utf-8');
 <strong><?= $h($titulo) ?></strong> · <?= $h($cuerpo) ?><?php if ($cfg->local): ?> · usuario de prueba: <a href="/?usuario=ana">ana</a> · <a href="/?usuario=beto">beto</a><?php endif; ?>
 </nav>
 <script src="<?= $h($cfg->asistenteUrl) ?>/widget.js" defer></script>
-<asistente-chat style="flex:1;min-height:0" servidor="<?= $h($cfg->asistenteUrl) ?>" token-url="/asistente/token<?= $cfg->local ? '?usuario=' . $h(rawurlencode($usuario)) : '' ?>"></asistente-chat>
+<asistente-chat style="flex:1;min-height:0"<?= $cfg->local && ($_GET['orbe'] ?? '') === 'no' ? ' orbe-volumen="no"' : '' ?> servidor="<?= $h($cfg->asistenteUrl) ?>" token-url="/asistente/token<?= $cfg->local ? '?usuario=' . $h(rawurlencode($usuario)) : '' ?>"></asistente-chat>
 </body></html>

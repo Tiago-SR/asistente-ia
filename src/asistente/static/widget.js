@@ -49,8 +49,9 @@
  *   ajustes      "auto" (por defecto) | "no": engranaje con el panel de ajustes del usuario (motor de voz, voz del servidor —tipo y voz, si el sistema ofrece varias—, volumen, velocidad, lectura
  *               automática, acuse, confirmar con «enviar»). Se guardan en el navegador (localStorage, por servidor). Lo que el usuario elige manda
  *               sobre `voz-respuesta` y `acuse`; con "no" no hay panel y mandan los atributos.
- *   orbe-volumen "auto" (por defecto) | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
- *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre.
+ *   orbe-volumen "auto" (por defecto) | "si" | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
+ *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre; "auto" tampoco en Android
+ *               (ahí el segundo flujo deja sin señal al reconocimiento); "si" lo fuerza.
  *
  * Personalización por variables CSS (se heredan a través del Shadow DOM):
  *   --asistente-color, --asistente-color-texto, --asistente-fondo, --asistente-texto,
@@ -335,6 +336,24 @@
       return resto === null ? { accion: "ignorar" } : { accion: "activar", resto };
     }
     return { accion: "ignorar" };
+  }
+  // Chrome Android con reconocimiento continuo entrega cada actualización como un resultado final NUEVO con el texto
+  // acumulado («cuántas», «cuántas hectáreas», «cuántas hectáreas tengo»). Une un final con el anterior: si el nuevo
+  // lo extiende (o lo repite) lo REEMPLAZA en el campo en vez de añadirlo. Devuelve el valor del campo y el último final.
+  function unirFinal(campo, ultimo, texto) {
+    const n = normalizarFrase(texto), u = normalizarFrase(ultimo);
+    const sep = (c) => (c && !/\s$/.test(c) ? c + " " : c);
+    if (u && n && campo.endsWith(ultimo)) {
+      if (n === u || u.startsWith(n + " ")) return { valor: campo, ultimo };   // repetido o un parcial más viejo
+      const a = u.split(" "), b = n.split(" ");
+      let comun = 0;
+      while (comun < a.length && comun < b.length && a[comun] === b[comun]) comun++;
+      // extiende al anterior, aunque Chrome haya corregido su última palabra («hectarea» → «hectáreas tengo»)
+      if (b.length > a.length && comun >= Math.max(1, a.length - 1)) {
+        return { valor: sep(campo.slice(0, campo.length - ultimo.length)) + texto, ultimo: texto };
+      }
+    }
+    return { valor: sep(campo) + texto, ultimo: texto };
   }
   // Espera antes de reiniciar el reconocedor: breve si terminó por silencio, creciente si falló.
   function retrasoReinicio(fallos) { return Math.min(5000, 250 * 2 ** fallos); }
@@ -868,7 +887,7 @@
 
   class AsistenteChat extends HTMLElement {
     static get observedAttributes() { return ["token-url", "servidor", "tema"]; }
-    static get _utiles() { return { partirParaVoz, textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, retrasoReinicio }; }  // para los tests
+    static get _utiles() { return { partirParaVoz, textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, unirFinal, retrasoReinicio }; }  // para los tests
 
     constructor() {
       super();
@@ -903,7 +922,7 @@
       this._t = null;            // tiempos del turno por voz (ver _metricas*)
       this._tAcuse = 0;          // temporizador del acuse inmediato
       this._nAcuse = 0;          // rota las frases
-      this._mh = { estado: "apagado", reco: null, fallos: 0, ultimoError: "", siguiente: 0, idxActivacion: -1, tCierre: null, tInact: null, tReinicio: null };
+      this._mh = { estado: "apagado", reco: null, fallos: 0, ultimoError: "", siguiente: 0, idxActivacion: -1, ultimoFinal: "", vacios: 0, hubo: false, tCierre: null, tInact: null, tReinicio: null };
       this.attachShadow({ mode: "open" });
     }
 
@@ -1436,8 +1455,8 @@
       const r = new SR();
       r.lang = this.getAttribute("idioma") || "es-UY";
       r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
-      mh.siguiente = 0; mh.idxActivacion = -1;                 // los índices de resultados empiezan de cero en cada sesión
-      r.onresult = (e) => { mh.fallos = 0; this._mhResultados(e); };
+      mh.siguiente = 0; mh.idxActivacion = -1; mh.ultimoFinal = "";   // los índices de resultados empiezan de cero en cada sesión
+      r.onresult = (e) => { mh.fallos = 0; mh.vacios = 0; mh.hubo = true; this._mhResultados(e); };
       r.onerror = (e) => {
         // «no-speech» y «aborted» son el ciclo normal (silencio, o lo cortamos nosotros): onend reinicia.
         if (e.error === "no-speech" || e.error === "aborted") return;
@@ -1449,6 +1468,7 @@
       r.onend = () => {
         if (mh.reco !== r) return;                             // lo reemplazamos o lo apagamos nosotros
         mh.reco = null;
+        mh.vacios = mh.hubo ? 0 : mh.vacios + 1; mh.hubo = false;   // sesiones sin ningún resultado: cada arranque suena en Android
         this._mhReprogramar();
       };
       mh.reco = r;
@@ -1462,7 +1482,18 @@
       if (!this._mhActivo()) return;
       if (mh.fallos >= MH_MAX_FALLOS) { this._mhApagar(mh.ultimoError || "reco_error"); return; }
       clearTimeout(mh.tReinicio);
-      mh.tReinicio = setTimeout(() => { mh.tReinicio = null; this._mhIniciarReco(); }, retrasoReinicio(mh.fallos));
+      // Con sesiones vacías seguidas el reinicio se espacia (en Android cada arranque emite un pitido), y mientras el
+      // asistente habla se espera a que termine: la síntesis suele tumbar el reconocimiento y reiniciarlo ahí solo suena y capta el eco.
+      const espera = Math.max(retrasoReinicio(mh.fallos), mh.vacios > 1 ? Math.min(1500, 300 * 2 ** mh.vacios) : 0);
+      const intentar = () => {
+        mh.tReinicio = null;
+        if (!this._mhActivo()) return;
+        if (this._pendientesVoz > 0 || (typeof speechSynthesis !== "undefined" && speechSynthesis.speaking)) {
+          mh.tReinicio = setTimeout(intentar, 400); return;
+        }
+        this._mhIniciarReco();
+      };
+      mh.tReinicio = setTimeout(intentar, espera);
     }
 
     _mhResultados(e) {
@@ -1488,7 +1519,7 @@
         case "activar": {
           this._leerCortado = true; this._pararVoz();          // hablarle al asistente corta su lectura
           this._avisarVoz("");
-          mh.idxActivacion = i;
+          mh.idxActivacion = i; mh.ultimoFinal = "";
           this._mhEstado("capturando");
           this._mhTexto(a.resto, final);
           break;
@@ -1497,7 +1528,7 @@
         case "cancelar": this._mhDescartar(); break;
         case "texto": {
           if (mh.estado === "confirmando") this._mhEstado("capturando");   // sigue dictando: vuelve a capturar
-          const resto = i === mh.idxActivacion ? buscarActivacion(texto, this._palabra()) : null;
+          const resto = buscarActivacion(texto, this._palabra());   // los resultados acumulativos (Android) repiten la palabra en cada uno
           this._mhTexto(resto === null ? texto : resto, final);
           break;
         }
@@ -1510,7 +1541,13 @@
       if (this._mh.estado === "capturando" && !this._mhCaja.classList.contains("pulso")) {   // un golpe del orbe por cada resultado del reconocimiento
         this._mhCaja.classList.add("pulso"); setTimeout(() => this._mhCaja.classList.remove("pulso"), 400);
       }
-      if (final && texto) { this._mhParcial.textContent = ""; this._anadirAlCampo(texto); }
+      if (final && texto) {
+        this._mhParcial.textContent = "";
+        const u = unirFinal(this._entrada.value, this._mh.ultimoFinal, texto);
+        this._mh.ultimoFinal = u.ultimo;
+        this._entrada.value = u.valor;
+        this._entrada.dispatchEvent(new Event("input")); this._entrada.focus();
+      }
       else this._mhParcial.textContent = texto ? "… " + texto : "";
       this._mhArmarCierre();
     }
@@ -1559,14 +1596,16 @@
     // lado). Si el navegador no lo da (permiso, micrófono ocupado, sin Web Audio) el orbe sigue con sus animaciones y el
     // reconocimiento no se entera. Para la voz del ASISTENTE el navegador no entrega amplitud: el orbe da un pulso por cada
     // palabra que dice (evento `boundary`), que sigue el ritmo real del habla pero no su volumen. Con
-    // prefers-reduced-motion no se hace nada. Atributo `orbe-volumen="no"` lo apaga (no se abre el segundo flujo).
+    // prefers-reduced-motion no se hace nada. Atributo `orbe-volumen="no"` lo apaga (no se abre el segundo flujo); en Android «auto» ya lo apaga.
     async _nivelIniciar() {
       const n = this._niv;
       if (n.activo) return;
       if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       n.activo = true;
       const AC = window.AudioContext || window.webkitAudioContext;
-      const quiere = (this.getAttribute("orbe-volumen") || "auto").toLowerCase() !== "no";
+      // «auto»: sin segundo flujo en Android, donde abrirlo deja al reconocimiento sin señal (el modo voz no oye ni la palabra de activación).
+      const modo = (this.getAttribute("orbe-volumen") || "auto").toLowerCase();
+      const quiere = modo === "si" || (modo !== "no" && !/android/i.test(navigator.userAgent || ""));
       if (quiere && AC && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         try {
           const flujo = await navigator.mediaDevices.getUserMedia({ audio: true });

@@ -171,6 +171,29 @@ def test_buscar_activacion_solo_al_comienzo_de_la_frase():
     }
 
 
+def test_unir_final_reemplaza_resultados_acumulativos_de_android():
+    r = _utiles_voz(
+        """
+        let campo = "", ultimo = "";
+        for (const t of ["cuántas", "cuántas hectáreas", "cuántas hectáreas", "cuántas hectáreas tengo"]) {
+          ({ valor: campo, ultimo } = U.unirFinal(campo, ultimo, t));
+        }
+        const dos = U.unirFinal("hola", "hola", "buenas tardes");   // frase nueva: se añade
+        const viejo = U.unirFinal("cuántas hectáreas", "cuántas hectáreas", "cuántas");   // parcial más viejo: se ignora
+        const otroCampo = U.unirFinal("", "cuántas", "cuántas hectáreas");   // campo vaciado: no hay qué reemplazar
+        const corr = U.unirFinal("cuántas hectarea", "cuántas hectarea", "cuántas hectáreas tengo");   // corrige la última palabra
+        return { campo, dos: dos.valor, viejo: viejo.valor, otroCampo: otroCampo.valor, corr: corr.valor };
+        """
+    )
+    assert r == {
+        "campo": "cuántas hectáreas tengo",
+        "dos": "hola buenas tardes",
+        "viejo": "cuántas hectáreas",
+        "otroCampo": "cuántas hectáreas",
+        "corr": "cuántas hectáreas tengo",
+    }
+
+
 def test_comandos_solo_valen_como_frase_entera():
     r = _utiles_voz(
         """
