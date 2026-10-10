@@ -715,19 +715,20 @@
     @keyframes habla { 0%, 100% { transform: scale(.9); } 20% { transform: scale(1.22); } 45% { transform: scale(1); } 70% { transform: scale(1.14); } }
 
     /* ── Vista de voz: otra «ventana» (sin chat ni campo); el chat sigue ahí y se alterna con «Ver el chat» ── */
-    .escena { display: none; flex: 1; min-height: 0; position: relative; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px 16px; overflow-y: auto; }
+    .escena { display: none; flex: 1; min-height: 0; position: relative; flex-direction: column; align-items: center; justify-content: center; justify-content: safe center; gap: 14px; padding: 20px 16px; overflow-y: auto; }
+    .escena > * { flex-shrink: 0; }   /* nada se encoge debajo de su contenido: si no cabe, la escena se desplaza (antes el texto se salía de su caja y se solapaba) */
     .escena::before, .escena::after { content: ""; position: absolute; width: 18px; height: 18px; border: 1.5px solid color-mix(in srgb, var(--c) 70%, var(--b)); }
     .escena::before { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
     .escena::after { bottom: 14px; right: 14px; border-left: 0; border-top: 0; }
     .vista-voz .escena { display: flex; }
     .raiz.vista-voz .scroll, .vista-voz .entrada form, .vista-voz .entrada .pie, .vista-voz .barra .altavoz { display: none; }
-    .escena .mh { --s: clamp(112px, 26vh, 176px); grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 4px; border: 0; background: none; margin: 0; padding: 0; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }
+    .escena .mh { --s: clamp(112px, 26vh, 176px); grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 4px; border: 0; background: none; margin: auto 0 0; padding: 0; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }   /* margin-top auto (como el aviso del fondo): el espacio libre se reparte y el orbe queda centrado */
     .escena .mh-estado { font-size: 15px; letter-spacing: .02em; }
     .escena .mh-campo { display: block; font-size: 17px; max-width: 100%; overflow-wrap: anywhere; min-height: 1.5em; }
     .escena .mh-parcial { font-size: 15px; white-space: normal; max-width: 100%; }
     .escena .mh-botones { grid-column: auto; justify-content: center; margin-top: 8px; }
     .escena .mh-apagar { display: none; }   /* en la vista de voz se vuelve al chat con «Chat» o «Ver el chat»; apagar queda en el panel compacto y con Esc */
-    .escena .mh-priv { position: absolute; left: 40px; right: 40px; bottom: 12px; margin: 0; font-size: 11px; text-align: center; }   /* aviso fijo al fondo de la escena */
+    .escena .mh-priv { margin: auto 0 0; padding: 6px 24px 0; max-width: 100%; box-sizing: border-box; font-size: 11px; text-align: center; }   /* último de la escena: al fondo si sobra espacio y debajo del contenido si falta */
     .escena .o-marcas { display: block; opacity: .55; }
     .escena .o-aro { --g: 4px; }
     .escena .msg.confirmacion { align-self: center; box-sizing: border-box; width: 100%; max-width: var(--asistente-ancho-columna, 760px); }
@@ -1522,6 +1523,9 @@
       this._raiz.classList.toggle("vista-voz", voz);
       if (voz) { if (this._mhCaja.parentNode !== this._escena) this._escena.insertBefore(this._mhCaja, this._mhDicho); }
       else if (this._mhCaja.parentNode !== this._cajaEntrada) this._cajaEntrada.insertBefore(this._mhCaja, this._form);
+      // el aviso de privacidad cierra la escena (después de «Ver el chat»): flotando al fondo se solapaba con el botón en pantallas bajas
+      const priv = voz ? this._escena : this._mhCaja;
+      if (this._mhPriv.parentNode !== priv) priv.appendChild(this._mhPriv);
       if (foco) (voz ? this._verChat : this._entrada).focus();
       // el botón de la barra lleva a la otra vista: «Chat» desde la voz, «Voz» desde el chat
       const t = voz ? TEXTOS.chatBoton : this._mhActivo() ? TEXTOS.volverVoz : TEXTOS.manosLibres;

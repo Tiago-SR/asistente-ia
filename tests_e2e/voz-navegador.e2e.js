@@ -1,7 +1,7 @@
 // E2E del dictado y la respuesta hablada con la voz DEL NAVEGADOR (Web Speech). Sin LLM, sin whisper y
 // sin micrófono real: SpeechRecognition y speechSynthesis se simulan con un guion y la respuesta del chat
 // se fabrica con page.route. Comprueba el cableado del widget (no la calidad de las voces, que se juzga
-// a mano con herramientas/probar_audio). Se ejecuta como widget.e2e.js (ver README.md).
+// a mano, ver PRUEBA_MANUAL_VOZ.md). Se ejecuta como widget.e2e.js (ver README.md).
 async (page) => {
   const BASE = "http://localhost:8203";
   const SHOTS = ".playwright-mcp/e2e";

@@ -111,7 +111,6 @@ Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL
 - [`contrato/GUIA_TOOLS.md`](contrato/GUIA_TOOLS.md): cómo diseñar las tools (elegirlas, describirlas, qué devolver, errores de negocio).
 - `ejemplos/sistema-mock/`: implementación de referencia con datos ficticios. `MOCK_DEFECTO=<nombre>` rompe una regla del contrato a propósito (lo usan los tests del verificador).
 - `ejemplos/sistema-php/`: implementación de referencia en PHP 8.2+ (router mínimo, portable a CodeIgniter 4), con tests PHPUnit y su [README](ejemplos/sistema-php/README.md). Servicio `sistema-php` en `docker-compose.dev.yml` (puerto 8203).
-- `herramientas/probar_audio/`: banco de pruebas de audio, independiente del servicio. `python3 herramientas/probar_audio/servidor.py` y abrir <http://127.0.0.1:8400> (Chrome o Edge). Prueba el micrófono con detección de voz por energía, la transcripción con su latencia, el TTS en streaming, la interrupción y un modo eco. También puede usar el reconocimiento y la síntesis de voz del propio navegador (sin clave) para compararlos. Usa por defecto el speaches local (`--profile voz`); para otro proveedor, `STT_BASE_URL`/`STT_MODELO`/`STT_API_KEY` y `TTS_*` (cualquier endpoint compatible con OpenAI). La cabecera de `servidor.py` lista todas las variables.
 - `herramientas/verificar_sistema.py`: verificador de conformidad; un sistema no se habilita en producción sin pasarlo. Los secretos se pasan por variables de entorno y no se imprimen:
 
 ```sh
@@ -153,7 +152,7 @@ ejemplos/sistema-mock/   sistema de referencia con datos ficticios
 ejemplos/sistema-php/    referencia PHP del contrato
 tests_e2e/               e2e del widget en navegador (Playwright MCP)
 evals/                   preguntas (lectura y acciones), corredor y línea base por modelo (resultados/)
-herramientas/            verificador de conformidad y banco de pruebas de audio
+herramientas/            verificador de conformidad
 PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
 PRUEBA_MANUAL_VOZ.md     checklist de la prueba manual de voz en navegadores reales
 IDEAS.md                 ideas pendientes (deshacer en acciones, ajustes del widget)
