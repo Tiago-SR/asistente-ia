@@ -49,6 +49,10 @@
  *   ajustes      "auto" (por defecto) | "no": engranaje con el panel de ajustes del usuario (motor de voz, voz del servidor —tipo y voz, si el sistema ofrece varias—, volumen, velocidad, lectura
  *               automática, acuse, confirmar con «enviar»). Se guardan en el navegador (localStorage, por servidor). Lo que el usuario elige manda
  *               sobre `voz-respuesta` y `acuse`; con "no" no hay panel y mandan los atributos.
+ *   modo-entrada "auto" (por defecto) | "tocar" | "libres": cómo se habla en el modo voz. "tocar" = un turno por toque del orbe
+ *               (sin palabra de activación ni reconocimiento continuo: un arranque por turno, sin la ráfaga de pitidos de
+ *               Android); "libres" = escucha continua y palabra de activación; "auto" = "tocar" en Android y "libres" en el
+ *               resto. Con voz-motor="servidor" el modo voz solo existe en "tocar". El usuario lo cambia en sus ajustes.
  *   orbe-volumen "auto" (por defecto) | "si" | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
  *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre; "auto" tampoco en Android
  *               (ahí el segundo flujo deja sin señal al reconocimiento); "si" lo fuerza.
@@ -125,6 +129,15 @@
     mhCapturando: "Te escucho…",
     mhConfirmando: "¿Lo envío? Decí «enviar» o «cancelar».",
     mhRespondiendo: "Respondiendo… Decí «{p}» para interrumpir.",
+    mhListoTocar: "Tocá el orbe para hablar.",
+    mhCapturandoTocar: "Te escucho… Tocá el orbe para terminar.",
+    mhConfirmandoTocar: "¿Lo envío? Tocá «Enviar» o «Cancelar».",
+    mhRespondiendoTocar: "Respondiendo… Tocá el orbe para interrumpir y hablar.",
+    mhPrivacidadTocar: "El micrófono se abre solo mientras hablás. El audio se envía al servicio de voz del navegador (Google, en Chrome).",
+    mhPrivacidadTocarServidor: "El micrófono se abre solo mientras hablás. El audio se envía al servicio de voz del asistente.",
+    mhHablar: "Hablar",
+    mhTerminar: "Terminar",
+    mhInterrumpir: "Interrumpir y hablar",
     mhEsperar: "Esperá a que termine la respuesta para enviar.",
     mhPrivacidad: "Micrófono abierto: el audio se envía al servicio de voz del navegador (Google, en Chrome).",
     mhInactividad: "Modo voz apagado por inactividad.",
@@ -152,6 +165,10 @@
     ajMotor: "Voz de {n}",
     ajMotorNavegador: "Del navegador",
     ajMotorServidor: "Del servidor (más natural)",
+    ajEntrada: "Cómo hablar en el modo voz",
+    ajEntradas: { auto: "Automático", tocar: "Tocar para hablar", libres: "Manos libres (palabra de activación)" },
+    ajDictado: "Reconocimiento de voz",
+    ajDictados: { auto: "Automático", navegador: "Del navegador", servidor: "Del servidor (sin pitido)" },
     ajVolumen: "Volumen",
     ajVelocidad: "Velocidad de la voz",
     ajGenero: "Tipo de voz",
@@ -270,9 +287,10 @@
   function nombreLimpio(v) {
     return typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, NOMBRE_MAX).trim() : "";
   }
-  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, velocidad: 1, voz: "", acuse: true, confirmar: true, iniciarVoz: true };
+  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, velocidad: 1, voz: "", acuse: true, confirmar: true, iniciarVoz: true, entrada: "auto", dictado: "auto" };
   const VEL_MIN = 0.75, VEL_MAX = 1.5;   // velocidad de la voz (1 = normal)
   const MOTORES = ["auto", "navegador", "servidor"];
+  const ENTRADAS = ["auto", "tocar", "libres"];
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (_) { return undefined; }
@@ -289,6 +307,12 @@
   const MH_ACUSE_PAUSA_MS = 500;            // silencio entre el acuse y lo que se diga después, para que no se pisen
   const MH_ACUSE_MS = 900;                  // si pasado este tiempo tras «enviar» no hay nada que decir, se dice un acuse corto
   const MH_MAX_FALLOS = 5;                  // reinicios seguidos del reconocedor con error antes de apagar
+  // «Tocar para hablar» con el STT del servidor: fin de frase por energía con histéresis (nivel 0..1 de nivelDe).
+  const TOCAR_UMBRAL_ALTO = 0.12;           // por encima se considera voz
+  const TOCAR_UMBRAL_BAJO = 0.07;           // una vez hablando, la voz se sostiene por encima de este (histéresis)
+  const TOCAR_SILENCIO_MS = 1200;           // silencio tras hablar que cierra el turno
+  const TOCAR_ESPERA_MS = 7000;             // sin voz en este tiempo, el turno se descarta
+  const TOCAR_MIN_MS = 300;                 // una grabación más corta no se envía (el proveedor pide ≥ 100 ms de audio)
 
   const COMANDOS = {
     enviar: ["enviar", "envia", "enviar mensaje", "enviar pregunta"],
@@ -354,6 +378,30 @@
       }
     }
     return { valor: sep(campo) + texto, ultimo: texto };
+  }
+  // Modo de entrada del modo voz: "tocar" (un turno por toque) o "libres" (palabra de activación). Manda lo que el usuario eligió,
+  // luego el atributo; «auto» (o nada) es «tocar» en Android, donde el reconocimiento continuo pita en cada arranque.
+  function resolverEntrada(usuario, atributo, android) {
+    for (const v of [usuario, atributo]) {
+      const x = String(v || "").trim().toLowerCase();
+      if (x === "tocar" || x === "libres") return x;
+    }
+    return android ? "tocar" : "libres";
+  }
+  // Un paso del detector de fin de frase por energía (histéresis): `s` = { inicio, hablo, silencioDesde } (se crea con
+  // vadInicial). Devuelve el estado nuevo; `fin` es null, "silencio" (habló y se calló) o "sin_voz" (nadie habló a tiempo).
+  function vadInicial(t) { return { inicio: t, hablo: false, silencioDesde: null, fin: null }; }
+  function vadPaso(s, nivel, t, cfg = {}) {
+    const alto = cfg.alto ?? TOCAR_UMBRAL_ALTO, bajo = cfg.bajo ?? TOCAR_UMBRAL_BAJO;
+    const silencioMs = cfg.silencioMs ?? TOCAR_SILENCIO_MS, esperaMs = cfg.esperaMs ?? TOCAR_ESPERA_MS;
+    if (s.fin) return s;
+    const voz = nivel >= (s.hablo ? bajo : alto);
+    if (voz) return { ...s, hablo: true, silencioDesde: null };
+    if (s.hablo) {
+      const desde = s.silencioDesde ?? t;
+      return { ...s, silencioDesde: desde, fin: t - desde >= silencioMs ? "silencio" : null };
+    }
+    return { ...s, fin: t - s.inicio >= esperaMs ? "sin_voz" : null };
   }
   // Espera antes de reiniciar el reconocedor: breve si terminó por silencio, creciente si falló.
   function retrasoReinicio(fallos) { return Math.min(5000, 250 * 2 ** fallos); }
@@ -608,6 +656,10 @@
     .mh .mh-enviar { background: var(--c); border-color: var(--c); color: var(--ct); }
     .mh .mh-enviar:hover { color: var(--ct); opacity: .9; }
     .mh button[hidden] { display: none; }
+    .mh .mh-hablar { background: var(--c); border-color: var(--c); color: var(--ct); font-weight: 600; }
+    .mh .mh-hablar:hover { color: var(--ct); opacity: .9; }
+    .mh .mh-hablar:disabled { opacity: .5; cursor: default; }
+    .mh[data-entrada="tocar"] .orbe { cursor: pointer; }
     .mh-priv { grid-column: 1 / -1; font-size: 10.5px; color: var(--apagado); }
     @container (max-width: 560px) { .mh-botones { grid-column: 1 / -1; justify-content: flex-start; } }
 
@@ -887,7 +939,7 @@
 
   class AsistenteChat extends HTMLElement {
     static get observedAttributes() { return ["token-url", "servidor", "tema"]; }
-    static get _utiles() { return { partirParaVoz, textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, unirFinal, retrasoReinicio }; }  // para los tests
+    static get _utiles() { return { partirParaVoz, textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, unirFinal, retrasoReinicio, resolverEntrada, vadInicial, vadPaso }; }  // para los tests
 
     constructor() {
       super();
@@ -922,7 +974,7 @@
       this._t = null;            // tiempos del turno por voz (ver _metricas*)
       this._tAcuse = 0;          // temporizador del acuse inmediato
       this._nAcuse = 0;          // rota las frases
-      this._mh = { estado: "apagado", reco: null, fallos: 0, ultimoError: "", siguiente: 0, idxActivacion: -1, ultimoFinal: "", vacios: 0, hubo: false, tCierre: null, tInact: null, tReinicio: null };
+      this._mh = { estado: "apagado", modo: "libres", turno: null, reco: null, fallos: 0, ultimoError: "", siguiente: 0, idxActivacion: -1, ultimoFinal: "", vacios: 0, hubo: false, tCierre: null, tInact: null, tReinicio: null };
       this.attachShadow({ mode: "open" });
     }
 
@@ -1024,13 +1076,17 @@
       this._mhEnviar = el("button", { type: "button", class: "mh-enviar", textContent: TEXTOS.enviar });
       this._mhCancelar = el("button", { type: "button", class: "mh-cancelar", textContent: TEXTOS.cancelar });
       this._mhApagarBtn = el("button", { type: "button", class: "mh-apagar", textContent: TEXTOS.apagarManosLibres });
+      this._mhHablar = el("button", { type: "button", class: "mh-hablar", hidden: true, textContent: TEXTOS.mhHablar });
+      this._mhHablar.addEventListener("click", () => this._mhTocar());
+      this._mhPriv = el("div", { class: "mh-priv", textContent: TEXTOS.mhPrivacidad });
       this._mhEnviar.addEventListener("click", () => this._mhEnviarTexto());
       this._mhCancelar.addEventListener("click", () => this._mhDescartar());
       this._mhApagarBtn.addEventListener("click", () => this._mhApagar(""));
       this._mhCaja = el("div", { class: "mh", hidden: true, "data-estado": "armado" }, orbe(),
         el("div", { class: "mh-texto" }, this._mhEtiqueta, this._mhCampo, this._mhParcial),
-        el("div", { class: "mh-botones" }, this._mhEnviar, this._mhCancelar, this._mhApagarBtn),
-        el("div", { class: "mh-priv", textContent: TEXTOS.mhPrivacidad }));
+        el("div", { class: "mh-botones" }, this._mhHablar, this._mhEnviar, this._mhCancelar, this._mhApagarBtn),
+        this._mhPriv);
+      this._mhCaja.querySelector(".orbe").addEventListener("click", () => this._mhTocar());   // solo hace algo en el modo «tocar»
       this._entrada.addEventListener("input", () => this._mhPintarCampo());
       // vista de voz: lo que te dice el asistente (resumen) y el paso al chat
       this._mhDicho = el("div", { class: "dicho" });
@@ -1247,18 +1303,29 @@
 
     // "navegador" | "servidor" | null según el atributo voz-motor y lo disponible.
     _motorDictado() {
-      const pref = (this.getAttribute("voz-motor") || "auto").toLowerCase();
+      let pref = (this.getAttribute("voz-motor") || "auto").toLowerCase();
       const navegador = !!reconocimiento(), servidor = this._dictadoServidor;
+      // la elección del usuario solo vale con voz-motor="auto" (el anfitrión que fija un motor, por privacidad, manda) y si ese motor existe
+      const mio = this._ajustesActivos() && this._aj ? this._aj.dictado : "auto";
+      if (pref === "auto" && ((mio === "servidor" && servidor) || (mio === "navegador" && navegador))) pref = mio;
       if (pref === "servidor") return servidor ? "servidor" : null;
       if (pref === "navegador") return navegador ? "navegador" : null;
       return navegador ? "navegador" : (servidor ? "servidor" : null);
     }
 
+    // "tocar" | "libres". Con el STT del servidor no hay palabra de activación (necesita el reconocimiento continuo del navegador).
+    _entradaModo() {
+      if (this._motorDictado() === "servidor") return "tocar";
+      const mio = this._ajustesActivos() && this._aj ? this._aj.entrada : "auto";
+      return resolverEntrada(mio, this.getAttribute("modo-entrada"), /android/i.test(navigator.userAgent || ""));
+    }
+
     _actualizarVoz() {
       this._mic.hidden = !this._motorDictado();
       this._altavoz.hidden = !this._hablaPosible();
-      // manos libres: solo con el reconocimiento del navegador (la palabra de activación no existe en el STT del servidor)
-      this._manos.hidden = !(this._motorDictado() === "navegador" && this._hablaPosible() && window.isSecureContext !== false);
+      // modo voz: con el reconocimiento del navegador (tocar o manos libres) o con el STT del servidor (solo tocar: la palabra
+      // de activación necesita el reconocimiento continuo del navegador)
+      this._manos.hidden = !(this._motorDictado() && this._hablaPosible() && window.isSecureContext !== false);
       if (this._manos.hidden) this._mhApagar("", true);
     }
 
@@ -1360,15 +1427,18 @@
         this._vista = this._vista === "chat" ? "voz" : "chat"; this._mhActividad(); this._aplicarVista(true);
         return;
       }
-      if (!reconocimiento() || this._ocupado) return;
+      if (!this._motorDictado() || this._ocupado) return;
       this._detenerReco(true); this._detenerGrabacion(true);   // un solo micrófono a la vez
       this._pararVoz();
       this._avisarVoz("");
       this._mh.fallos = 0; this._mh.ultimoError = "";
+      this._mh.modo = this._entradaModo();
       this._vista = "voz";
       this._mhEstado("armado");
-      this._mhIniciarReco();                                   // dentro del gesto del usuario (el navegador lo exige)
-      this._nivelIniciar();
+      if (this._mh.modo === "libres") {
+        this._mhIniciarReco();                                 // dentro del gesto del usuario (el navegador lo exige)
+        this._nivelIniciar();
+      }                                                        // «tocar»: el micrófono se abre solo en cada turno
     }
 
     // `motivo`: "" (lo pidió el usuario), "voz", "inactividad" o un código de ERRORES_VOZ.
@@ -1378,6 +1448,7 @@
       clearTimeout(mh.tReinicio); mh.tReinicio = null;
       const r = mh.reco; mh.reco = null;
       if (r) { try { r.abort(); } catch { /* ya terminó */ } }
+      this._mhTurnoCancelar();
       this._leerCortado = true; this._pararVoz();
       clearTimeout(this._tAcuse);
       this._nivelDetener();
@@ -1412,11 +1483,17 @@
       const p = this._palabra();
       this._mhCaja.hidden = !activo;
       if (!activo) { this._vista = "chat"; this._mhDicho.replaceChildren(); }
-      this._mhEtiqueta.textContent = ({
+      const tocar = mh.modo === "tocar";
+      this._mhEtiqueta.textContent = (tocar ? {
+        armado: TEXTOS.mhListoTocar, capturando: TEXTOS.mhCapturandoTocar, confirmando: TEXTOS.mhConfirmandoTocar, respondiendo: TEXTOS.mhRespondiendoTocar,
+      } : {
         armado: TEXTOS.mhArmado, capturando: TEXTOS.mhCapturando, confirmando: TEXTOS.mhConfirmando, respondiendo: TEXTOS.mhRespondiendo,
-      }[e] || "").replace("{p}", p);
+      })[e]?.replace("{p}", p) || "";
       this._mhParcial.textContent = "";
+      this._mhCaja.dataset.entrada = mh.modo;
+      this._mhPriv.textContent = !tocar ? TEXTOS.mhPrivacidad : this._motorDictado() === "servidor" ? TEXTOS.mhPrivacidadTocarServidor : TEXTOS.mhPrivacidadTocar;
       this._mhEnviar.hidden = this._mhCancelar.hidden = !this._confirmarActivo() || !(e === "capturando" || e === "confirmando");
+      if (tocar && e === "capturando") this._mhEnviar.hidden = true;   // en «tocar» el orbe termina el turno; el texto aún no existe
       this._manos.setAttribute("aria-pressed", String(activo));
       const t = activo ? TEXTOS.volverVoz : TEXTOS.manosLibres;
       this._manos.title = t; this._manos.setAttribute("aria-label", t);
@@ -1429,6 +1506,11 @@
     _mhFase() {
       const e = this._mh.estado;
       this._mhCaja.dataset.estado = e === "respondiendo" ? (this._pendientesVoz > 0 ? "hablando" : "procesando") : (e === "apagado" ? "armado" : e);
+      // el botón de «tocar para hablar» es el equivalente accesible del orbe (que es decorativo)
+      const hablando = e === "respondiendo" && this._pendientesVoz > 0;
+      this._mhHablar.hidden = this._mh.modo !== "tocar" || e === "apagado";
+      this._mhHablar.disabled = e === "respondiendo" && !hablando;   // aún piensa: no hay nada que interrumpir
+      this._mhHablar.textContent = e === "capturando" ? TEXTOS.mhTerminar : hablando ? TEXTOS.mhInterrumpir : TEXTOS.mhHablar;
     }
 
     _mhPintarCampo() { this._mhCampo.textContent = this._mhActivo() ? this._entrada.value : ""; }
@@ -1447,6 +1529,185 @@
       this._manos.title = t; this._manos.setAttribute("aria-label", t);
       this._tarjetaPosicionar();
       if (!voz) this._bajar();
+    }
+
+    // — «tocar para hablar»: un turno por toque, sin palabra de activación ni reconocimiento continuo —
+    //   armado → (toque) capturando → fin por silencio o segundo toque → confirmando/enviando → respondiendo → armado (quieto).
+    // Tocar el orbe mientras el asistente habla corta la lectura y abre el micrófono. No hay interrupción por voz.
+    _mhTocar() {
+      const mh = this._mh;
+      if (!this._mhActivo() || mh.modo !== "tocar") return;
+      this._mhActividad();
+      if (mh.estado === "capturando") { this._mhTurnoTerminar(); return; }   // segundo toque: fin de frase
+      if (mh.estado === "respondiendo") {
+        if (this._pendientesVoz <= 0) return;                  // todavía piensa: no hay nada que interrumpir
+        this._leerCortado = true; this._pararVoz();
+      }
+      clearTimeout(this._tAcuse);
+      this._mhTurnoIniciar();
+    }
+
+    _mhTurnoIniciar() {
+      const mh = this._mh;
+      if (mh.turno || mh.reco) return;
+      this._avisarVoz("");
+      mh.ultimoFinal = "";
+      this._mhEstado("capturando");
+      if (this._motorDictado() === "servidor") this._mhTurnoGrabar(); else this._mhTurnoReco();
+    }
+
+    // Un reconocimiento no continuo por turno (como el dictado del chat): un arranque, un pitido.
+    _mhTurnoReco() {
+      const SR = reconocimiento(), mh = this._mh;
+      if (!SR) { this._mhTurnoError("reco_error"); return; }
+      const r = new SR();
+      r.lang = this.getAttribute("idioma") || "es-UY";
+      r.continuous = false; r.interimResults = true; r.maxAlternatives = 1;
+      let texto = "", ultimo = "", fallo = "";
+      r.onresult = (e) => {
+        let parcial = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i], t = String(res[0].transcript || "").trim();
+          if (!t) continue;
+          if (res.isFinal) { const u = unirFinal(texto, ultimo, t); texto = u.valor; ultimo = u.ultimo; }   // Android entrega finales acumulativos
+          else parcial = t;
+        }
+        this._mhParcial.textContent = parcial ? "… " + parcial : "";
+      };
+      r.onerror = (e) => {
+        fallo = ({ "not-allowed": "mic_denegado", "service-not-allowed": "mic_denegado", "audio-capture": "mic_no_disponible",
+          "network": "reco_red", "no-speech": "sin_texto", "aborted": "" })[e.error] ?? "reco_error";
+      };
+      r.onend = () => {
+        if (mh.reco !== r) return;                             // lo cancelamos nosotros
+        mh.reco = null;
+        if (texto.trim()) this._mhTurnoFin(texto.trim()); else this._mhTurnoError(fallo || "sin_texto");
+      };
+      mh.reco = r;
+      try { r.start(); }
+      catch { mh.reco = null; this._mhTurnoError("reco_error"); }
+    }
+
+    // Variante sin pitido: el micrófono lo abre getUserMedia (no el servicio de reconocimiento), el fin de frase lo decide la
+    // energía con histéresis (vadPaso) y la transcripción la hace el servidor. Se abre y se cierra en cada turno.
+    async _mhTurnoGrabar() {
+      const mh = this._mh;
+      const turno = { cancelada: false, limpiar: () => {}, terminar: () => {}, cancelar: () => { turno.cancelada = true; turno.limpiar(); } };
+      mh.turno = turno;
+      let flujo;
+      try { flujo = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (e) {
+        if (mh.turno !== turno) return;
+        mh.turno = null;
+        this._mhTurnoError(e && (e.name === "NotAllowedError" || e.name === "SecurityError") ? "mic_denegado" : "mic_no_disponible");
+        return;
+      }
+      if (mh.turno !== turno || turno.cancelada) { flujo.getTracks().forEach((t) => t.stop()); return; }
+      const tipo = TIPOS_GRABACION.find((t) => MediaRecorder.isTypeSupported(t));
+      let grabador;
+      try { grabador = new MediaRecorder(flujo, tipo ? { mimeType: tipo } : undefined); }
+      catch { flujo.getTracks().forEach((t) => t.stop()); mh.turno = null; this._mhTurnoError("mic_no_disponible"); return; }
+
+      const AC = window.AudioContext || window.webkitAudioContext;
+      let ctx = null, analizador = null, buf = null;
+      try {
+        if (AC) {
+          ctx = new AC();
+          analizador = ctx.createAnalyser(); analizador.fftSize = 512;
+          ctx.createMediaStreamSource(flujo).connect(analizador);
+          buf = new Uint8Array(analizador.fftSize);
+        }
+      } catch { ctx = analizador = buf = null; }               // sin medidor: solo termina el toque o el tope de duración
+      const n = this._niv;
+      if (analizador && !n.activo && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        Object.assign(n, { activo: true, analizador, buf });   // el orbe sigue el nivel de este mismo flujo (no hay segundo flujo)
+        if (!n.raf) this._nivelBucle();
+      }
+      let vad = vadInicial(performance.now());
+      let motivo = "toque", tick = 0, tope = 0;
+      const trozos = [];
+      const inicio = performance.now();
+      turno.limpiar = () => {
+        clearInterval(tick); clearTimeout(tope);
+        flujo.getTracks().forEach((t) => { try { t.stop(); } catch { /* ya parado */ } });
+        if (ctx) { try { ctx.close(); } catch { /* ya cerrado */ } ctx = null; }
+        if (n.analizador === analizador && analizador) this._nivelDetener();
+        if (grabador.state !== "inactive") { try { grabador.stop(); } catch { /* ya terminó */ } }
+      };
+      turno.terminar = () => { turno.terminar = () => {}; if (grabador.state !== "inactive") grabador.stop(); };
+      grabador.addEventListener("dataavailable", (ev) => { if (ev.data && ev.data.size) trozos.push(ev.data); });
+      grabador.addEventListener("stop", async () => {
+        if (turno.cancelada) return;
+        const segundos = (performance.now() - inicio) / 1000;
+        clearInterval(tick); clearTimeout(tope);
+        flujo.getTracks().forEach((t) => { try { t.stop(); } catch { /* ya parado */ } });   // el micrófono se cierra ya, antes de transcribir
+        if (ctx) { try { ctx.close(); } catch { /* ya cerrado */ } ctx = null; }
+        if (analizador && n.analizador === analizador) this._nivelDetener();
+        turno.terminar = () => {};
+        if (motivo === "sin_voz" || segundos * 1000 < TOCAR_MIN_MS || !trozos.length) {
+          if (mh.turno === turno) mh.turno = null;
+          this._mhTurnoError("sin_texto");
+          return;
+        }
+        const blob = new Blob(trozos, { type: grabador.mimeType || tipo || "audio/webm" });
+        this._avisarVoz(TEXTOS.transcribiendo);
+        const t0 = performance.now();
+        const r = await this._sttPedir(blob, segundos);
+        // latencia fin de frase → texto (se lee en la consola del celular; no viaja a ningún lado)
+        console.info(`[asistente] tocar: fin=${motivo} audio_s=${segundos.toFixed(1)} bytes=${blob.size} stt_ms=${Math.round(performance.now() - t0)}`);
+        if (turno.cancelada || mh.turno !== turno) return;
+        mh.turno = null;
+        this._avisarVoz("");
+        if (r.texto) this._mhTurnoFin(r.texto); else this._mhTurnoFin("", r.aviso);
+      });
+      if (analizador) {
+        tick = setInterval(() => {
+          analizador.getByteTimeDomainData(buf);
+          vad = vadPaso(vad, nivelDe(buf), performance.now());
+          if (vad.fin) { motivo = vad.fin; turno.terminar(); }
+        }, 60);
+      }
+      tope = setTimeout(() => { motivo = "tope"; turno.terminar(); }, Math.max(1, this._maxAudioS - 1) * 1000);
+      this._mhParcial.textContent = "";
+      grabador.start();
+    }
+
+    // Segundo toque (o «Terminar»): cierra el turno y entrega lo captado.
+    _mhTurnoTerminar() {
+      const mh = this._mh;
+      if (mh.reco) { try { mh.reco.stop(); } catch { /* ya terminó */ } return; }   // onend entrega lo reconocido
+      if (mh.turno) mh.turno.terminar();
+    }
+
+    _mhTurnoCancelar() {
+      const mh = this._mh;
+      const r = mh.reco; mh.reco = null;
+      if (r) { try { r.abort(); } catch { /* ya terminó */ } }
+      const t = mh.turno; mh.turno = null;
+      if (t) t.cancelar();
+    }
+
+    // Fin de un turno: con texto, pasa a confirmación (o se envía, según confirmar-local); sin texto, vuelve a «listo» con un aviso.
+    _mhTurnoFin(texto, aviso = "") {
+      const mh = this._mh;
+      if (!this._mhActivo() || mh.estado !== "capturando") return;
+      this._mhParcial.textContent = "";
+      if (!texto) {
+        this._mhEstado(this._entrada.value.trim() ? "confirmando" : "armado");   // si venía de confirmar, lo dictado antes se conserva
+        this._avisarVoz(aviso || ERRORES_VOZ.sin_texto, true);
+        return;
+      }
+      const actual = this._entrada.value;
+      this._entrada.value = (actual && !/\s$/.test(actual) ? actual + " " : actual) + texto;   // sin foco: no abrir el teclado del celular
+      this._entrada.dispatchEvent(new Event("input"));
+      this._avisarVoz("");
+      this._mhCerrarFrase();
+    }
+
+    // Error del reconocimiento en un turno: sin permiso o sin micrófono se apaga el modo; el resto vuelve a «listo».
+    _mhTurnoError(codigo) {
+      if (codigo === "mic_denegado" || codigo === "mic_no_disponible") { this._mhApagar(codigo); return; }
+      this._mhTurnoFin("", ERRORES_VOZ[codigo]);
     }
 
     _mhIniciarReco() {
@@ -1581,6 +1842,7 @@
 
     _mhDescartar() {
       if (!this._mhActivo()) return;
+      this._mhTurnoCancelar();
       this._entrada.value = ""; this._entrada.dispatchEvent(new Event("input"));
       this._avisarVoz("");
       this._mhEstado("armado");
@@ -2078,6 +2340,17 @@
       this._transcribiendo = true; this._mic.disabled = true;
       this._avisarVoz(TEXTOS.transcribiendo);
       try {
+        const r = await this._sttPedir(blob, segundos);
+        if (r.texto) { this._anadirAlCampo(r.texto); this._avisarVoz(""); }
+        else this._avisarVoz(r.aviso, true);
+      } finally {
+        this._transcribiendo = false; this._mic.disabled = false;
+      }
+    }
+
+    // POST /v1/voz/transcribir con el audio crudo. Devuelve { texto } o { aviso } (el mensaje para el usuario). No lanza.
+    async _sttPedir(blob, segundos) {
+      try {
         const tipo = blob.type.split(";")[0] || "audio/webm";
         const r = await this._conToken((h) => fetch(`${this._servidor}/v1/voz/transcribir`, {
           method: "POST", body: blob,
@@ -2085,17 +2358,12 @@
         }));
         if (!r.ok) {
           let codigo = ""; try { codigo = (await r.json()).error; } catch { /* sin cuerpo */ }
-          this._avisarVoz(ERRORES_VOZ[codigo] || ERROR_GENERICO, true);
-          return;
+          return { aviso: ERRORES_VOZ[codigo] || ERROR_GENERICO };
         }
         const texto = String((await r.json()).texto ?? "").trim();
-        if (!texto) { this._avisarVoz(ERRORES_VOZ.sin_texto, true); return; }
-        this._anadirAlCampo(texto);
-        this._avisarVoz("");
+        return texto ? { texto } : { aviso: ERRORES_VOZ.sin_texto };
       } catch {
-        this._avisarVoz(ERROR_GENERICO, true);
-      } finally {
-        this._transcribiendo = false; this._mic.disabled = false;
+        return { aviso: ERROR_GENERICO };
       }
     }
 
@@ -2236,6 +2504,8 @@
         if (typeof g.acuse === "boolean") aj.acuse = g.acuse;
         if (typeof g.confirmar === "boolean") aj.confirmar = g.confirmar;
         if (typeof g.iniciarVoz === "boolean") aj.iniciarVoz = g.iniciarVoz;
+        if (ENTRADAS.includes(g.entrada)) aj.entrada = g.entrada;
+        if (MOTORES.includes(g.dictado)) aj.dictado = g.dictado;
       } catch { /* sin storage o JSON roto: valores por defecto */ }
       return aj;
     }
@@ -2260,6 +2530,17 @@
       this._ajRadios = { navegador: radio("navegador", TEXTOS.ajMotorNavegador), servidor: radio("servidor", TEXTOS.ajMotorServidor) };
       this._ajFilaMotor = el("fieldset", { class: "aj-fila" }, (this._ajMotorLeyenda = el("legend", { textContent: TEXTOS.ajMotor.replace("{n}", this._nombre()) })),
         this._ajRadios.navegador.fila, this._ajRadios.servidor.fila);
+      const grupo = (clave, valores, textos, destino) => valores.map((v) => {
+        const i = el("input", { type: "radio", name: "aj-" + clave, value: clave + "-" + v });   // valores propios: no chocan con los del motor de la voz del asistente
+        i.addEventListener("change", () => { if (i.checked) this._ajustesCambiar({ [clave]: v }); });
+        destino[v] = i;
+        return el("label", { class: "aj-op" }, i, el("span", { textContent: textos[v] }));
+      });
+      this._ajEntradaRadios = {}; this._ajDictadoRadios = {};
+      this._ajFilaEntrada = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajEntrada }),
+        ...grupo("entrada", ENTRADAS, TEXTOS.ajEntradas, this._ajEntradaRadios));
+      this._ajFilaDictado = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajDictado }),
+        ...grupo("dictado", MOTORES, TEXTOS.ajDictados, this._ajDictadoRadios));
       this._ajVol = el("input", { type: "range", id: "aj-vol", min: "0", max: "100", step: "5" });
       this._ajVol.addEventListener("input", () => this._ajustesCambiar({ volumen: Number(this._ajVol.value) / 100 }));
       this._ajFilaVol = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-vol", textContent: TEXTOS.ajVolumen }), this._ajVol);
@@ -2294,7 +2575,7 @@
       this._ajPanel = el("section", { class: "ajustes-panel", hidden: true, role: "dialog", "aria-labelledby": "aj-titulo" },
         el("div", { class: "mem-cab" }, el("h2", { id: "aj-titulo", textContent: TEXTOS.ajustesTitulo }), this._ajCerrar),
         el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
-          this._ajFilaNombre, this._ajFilaMotor, this._ajFilaGenero, this._ajFilaVoz, this._ajFilaVol, this._ajFilaVel, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaAcc)));
+          this._ajFilaNombre, this._ajFilaMotor, this._ajFilaGenero, this._ajFilaVoz, this._ajFilaVol, this._ajFilaVel, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaEntrada, this._ajFilaDictado, this._ajFilaAcc)));
       this._ajPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ajustesCerrar(); } });
       // un clic fuera del menú (y del engranaje) lo cierra; composedPath atraviesa el Shadow DOM
       this._ajFuera = (e) => {
@@ -2313,6 +2594,10 @@
       if ("motor" in cambio) { this._pararVoz(); this._actualizarVoz(); }
       if ("voz" in cambio) { this._vaciarCacheTts(); this._pararVoz(); }
       if ("confirmar" in cambio && this._mhActivo()) this._mhPintar();
+      if ("entrada" in cambio || "dictado" in cambio) {
+        if (this._mhActivo()) this._mhApagar("", true);        // el modo se vuelve a encender con el otro motor o modo
+        this._actualizarVoz();
+      }
       this._ajustesPintar();
     }
 
@@ -2367,6 +2652,11 @@
       this._ajFilaConfirmar.hidden = this._ajFilaInicio.hidden = this._manos.hidden;
       this._ajInicio.checked = this._aj.iniciarVoz;
       this._ajConfirmar.checked = this._aj.confirmar;
+      this._ajFilaEntrada.hidden = this._manos.hidden || this._motorDictado() === "servidor";   // con el STT del servidor siempre es «tocar»
+      for (const v of ENTRADAS) this._ajEntradaRadios[v].checked = this._aj.entrada === v;
+      // elegir el reconocimiento solo tiene sentido si hay dos y el anfitrión no fijó uno (voz-motor)
+      this._ajFilaDictado.hidden = !(this._dictadoServidor && reconocimiento() && (this.getAttribute("voz-motor") || "auto").toLowerCase() === "auto");
+      for (const v of MOTORES) this._ajDictadoRadios[v].checked = this._aj.dictado === v;
     }
 
     _ajustesAbrir() {

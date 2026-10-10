@@ -3,6 +3,7 @@ import pytest
 
 from asistente.config import Settings
 from asistente.core.voz.base import AudioInvalido, VozError
+from asistente.core.voz.elevenlabs_stt import SttElevenLabs
 from asistente.core.voz.openai_compat import SttOpenAICompat
 from asistente.servicios import _fabrica_stt
 
@@ -116,3 +117,72 @@ def test_fabrica_exige_url_y_modelo(sin_stt_en_entorno):
                  STT_BASE_URL="http://stt/v1", STT_MODELO="m")
     )
     assert isinstance(stt, SttOpenAICompat)
+
+
+# — ElevenLabs Scribe —
+
+def eleven_con(handler, **kw) -> SttElevenLabs:
+    cliente = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return SttElevenLabs("k", "scribe_v2", base_url="http://eleven/v1", cliente=cliente, **kw)
+
+
+async def test_elevenlabs_transcribe_con_su_cabecera_y_campos():
+    visto = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        visto["url"] = str(req.url)
+        visto["clave"] = req.headers.get("xi-api-key")
+        visto["auth"] = req.headers.get("authorization")
+        visto["cuerpo"] = req.content
+        return httpx.Response(200, json={"text": " ¿Cuántas hectáreas tengo? ", "words": []})
+
+    texto = await eleven_con(handler).transcribir(b"AUDIO", tipo_mime="audio/webm;codecs=opus", idioma="es-UY")
+    assert texto == "¿Cuántas hectáreas tengo?"
+    assert visto["url"] == "http://eleven/v1/speech-to-text"
+    assert visto["clave"] == "k" and visto["auth"] is None
+    for fragmento in (b'name="model_id"', b"scribe_v2", b'name="language_code"', b"audio.webm", b"AUDIO"):
+        assert fragmento in visto["cuerpo"]
+    assert b'name="model"' not in visto["cuerpo"]
+
+
+async def test_elevenlabs_sin_idioma_reconocible_lo_detecta_el_proveedor():
+    visto = {}
+
+    def handler(req):
+        visto["cuerpo"] = req.content
+        return httpx.Response(200, json={"text": "x"})
+
+    await eleven_con(handler).transcribir(b"A", tipo_mime="audio/webm", idioma="???")
+    assert b'name="language_code"' not in visto["cuerpo"]
+
+
+@pytest.mark.parametrize("status", [400, 415, 422])
+async def test_elevenlabs_audio_rechazado(status):
+    with pytest.raises(AudioInvalido):
+        await eleven_con(lambda r: httpx.Response(status)).transcribir(b"x", tipo_mime="audio/webm")
+
+
+@pytest.mark.parametrize(
+    "respuesta",
+    [httpx.Response(401, json={"detail": {"status": "missing_permissions", "message": "x"}}),
+     httpx.Response(500), httpx.Response(200, text="no es json"), httpx.Response(200, json={"text": 5})],
+)
+async def test_elevenlabs_fallas_del_proveedor(respuesta):
+    with pytest.raises(VozError):
+        await eleven_con(lambda r: respuesta).transcribir(b"x", tipo_mime="audio/webm")
+
+
+async def test_elevenlabs_red_caida_no_filtra_detalles():
+    def handler(req):
+        raise httpx.ConnectError("boom http://interno:9/secreto")
+
+    with pytest.raises(VozError) as e:
+        await eleven_con(handler).transcribir(b"x", tipo_mime="audio/webm")
+    assert "secreto" not in str(e.value)
+
+
+def test_fabrica_elevenlabs(sin_stt_en_entorno):
+    with pytest.raises(ValueError):
+        _fabrica_stt(Settings(database_url="x", STT_PROVEEDOR="elevenlabs", STT_MODELO="scribe_v2"))
+    stt = _fabrica_stt(Settings(database_url="x", STT_PROVEEDOR="elevenlabs", STT_API_KEY="k", STT_MODELO="scribe_v2"))
+    assert isinstance(stt, SttElevenLabs)

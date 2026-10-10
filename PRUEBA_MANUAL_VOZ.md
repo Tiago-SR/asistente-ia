@@ -39,6 +39,9 @@ Marca cada celda con ✅ / ⚠️ (funciona con reservas) / ❌ / — (no aplica
 | B10 Modo voz: alternar con el chat, tarjeta de acción | | | | | |
 | B11 Tema oscuro y orbe (rendimiento en móvil) | | | | | |
 | B12 Volumen del orbe y tiempos (¿degrada el reconocimiento?) | | | | | |
+| B13 Tocar para hablar (navegador): un pitido por turno, sin duplicados | — | — | | — | |
+| B14 Tocar para hablar con STT del servidor: sin pitido y latencia | | | | — | |
+| B15 Tocar: interrumpir la lectura con el toque y quedar quieto | | | | — | |
 | C1 Layout y teclado en móvil | — | — | | — | |
 
 ## 2. Casos
@@ -70,6 +73,10 @@ Marca cada celda con ✅ / ⚠️ (funciona con reservas) / ❌ / — (no aplica
 - **B11 – Tema oscuro y orbe.** Cambia el tema del sistema con la página abierta: el widget debe seguirlo sin recargar. En el modo voz, comprueba en el móvil que el orbe no hace ir lenta la página ni calienta el equipo tras unos minutos en «armado», y que con «reducir movimiento» del sistema no hay animaciones.
 
 - **B12 – Volumen del orbe y tiempos (el que más importa).** El orbe mide el volumen con un **segundo flujo de audio** del mismo micrófono; en algún navegador eso podría empeorar el reconocimiento (en una prueba anterior la interrupción por voz exigió hablar muy fuerte). Compara **con y sin** (`orbe-volumen="no"` en el widget): (1) en «armado», di algo y comprueba que el anillo del orbe se mueve con tu voz y no con el ruido de fondo; (2) ¿la palabra de activación se reconoce igual de bien y a la misma distancia con y sin el atributo?; (3) ¿el modo voz sigue funcionando si denegas el permiso la segunda vez?; (4) abre la consola y mira `[asistente] tiempos del turno por voz` o escucha `asistente:metricas`: anota `voz_ms`, `habla_ms` y `tts_ms` de 3 preguntas. *Confirmado en Chrome Android: con el segundo flujo el modo voz no oye; por eso `auto` ya no lo abre en Android (`orbe-volumen="si"` lo fuerza para comparar).*
+
+- **B13 – Tocar para hablar con el reconocimiento del navegador (Chrome Android).** Con `modo-entrada="auto"` (en Android es «tocar») pulsa **Voz**: debe decir «Tocá el orbe para hablar» y **no pitar ni abrir el micrófono** (no aparece el ícono de micrófono en la barra de estado). Toca el orbe y haz 5 preguntas seguidas («¿cuántas hectáreas de soja tengo?», …). *Esperado:* **un solo pitido por pregunta** (el del arranque del reconocimiento), el texto sin frases duplicadas ni acumulativas, se detiene solo al callarte (anota cuánto tarda en cortar), el modo queda **quieto** tras la respuesta (el ícono de micrófono desaparece) y no hay pitidos entre turnos. Comprueba también el segundo toque («Terminar») y que, con la confirmación desactivada en ajustes, la frase se envía sola.
+- **B14 – Tocar con el STT del servidor (sin pitido) y latencia.** Pon `voz-motor="servidor"` en la etiqueta (o elige «Del servidor (sin pitido)» en Ajustes → Reconocimiento de voz; solo aparece si el servidor tiene STT y `voz-motor` es `auto`). *Esperado:* **ningún pitido**, el micrófono solo está abierto durante el turno, el turno se cierra ~1,2 s después de callarte, y un turno sin hablar se descarta a los ~7 s con «No se entendió nada». Anota la latencia: conecta el celular por USB, abre `chrome://inspect` en el PC, inspecciona la página y busca en la consola `[asistente] tocar: fin=silencio audio_s=… stt_ms=…` (anota `stt_ms` de 5 preguntas con ElevenLabs Scribe y, si lo tienes, con Whisper). Si el fin por silencio corta a mitad de frase, o no corta nunca por ruido de fondo, anótalo con el lugar (los umbrales son `TOCAR_UMBRAL_*` y `TOCAR_SILENCIO_MS` en `widget.js`).
+- **B15 – Interrumpir y quedar quieto.** Mientras el asistente lee el resumen, toca el orbe (o **Interrumpir y hablar**). *Esperado:* la lectura se corta al instante y se abre el micrófono; no hay interrupción por voz (decir algo mientras habla no hace nada). Al terminar la respuesta el modo vuelve a «Tocá el orbe para hablar» y no reabre el micrófono solo. Probado con parlante (sin auriculares): no debe haber eco ni disparos falsos, porque el micrófono está cerrado mientras habla.
 
 ### C. Móvil
 

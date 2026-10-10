@@ -12,6 +12,7 @@ from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites
 from asistente.core.prompts import Prompts
 from asistente.core.voz import catalogo
 from asistente.core.voz.elevenlabs import TtsElevenLabs
+from asistente.core.voz.elevenlabs_stt import SttElevenLabs
 from asistente.core.voz.openai_compat import SttOpenAICompat
 from asistente.limits import LimitesPostgres
 from asistente.sistemas.auth import Autenticador
@@ -77,6 +78,10 @@ def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Si
 def _fabrica_stt(settings: Settings) -> STT | None:
     if not settings.stt_proveedor:
         return None
+    if settings.stt_proveedor == "elevenlabs":
+        if not settings.stt_api_key or not settings.stt_modelo:
+            raise ValueError("STT_PROVEEDOR=elevenlabs requiere STT_API_KEY y STT_MODELO")
+        return SttElevenLabs(settings.stt_api_key, settings.stt_modelo)
     if settings.stt_proveedor != "openai_compat":
         raise ValueError(f"STT_PROVEEDOR no soportado: {settings.stt_proveedor}")
     if not settings.stt_base_url or not settings.stt_modelo:

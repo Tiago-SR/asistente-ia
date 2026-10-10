@@ -268,10 +268,10 @@ async (page) => {
 
   // ── voz-motor="servidor" ──
   const s = await abrir();
-  await caso("voz-motor=\"servidor\" oculta el modo (la palabra de activación no existe en el STT del servidor)", async () => {
+  await caso("voz-motor=\"servidor\": el modo existe solo si el servidor tiene STT (y entonces es «tocar»; ver modo-tocar.e2e.js)", async () => {
     await W(s, "button.manos").waitFor({ state: "visible", timeout: 10000 });
-    await s.evaluate(() => { const e = document.querySelector("asistente-chat"); e.setAttribute("voz-motor", "servidor"); e._actualizarVoz(); });
-    afirma(!(await W(s, "button.manos").isVisible()), "sigue visible con voz-motor=servidor");
+    const stt = await s.evaluate(() => { const e = document.querySelector("asistente-chat"); e.setAttribute("voz-motor", "servidor"); e._actualizarVoz(); return e._dictadoServidor; });
+    afirma((await W(s, "button.manos").isVisible()) === stt, "visible=" + (await W(s, "button.manos").isVisible()) + " con STT del servidor=" + stt);
   });
   await s.close();
 

@@ -39,7 +39,10 @@ Preguntas abiertas:
 
 Piezas que ya existen: `POST /v1/voz/transcribir` (audio crudo → texto, `STT_*`), `voz-motor="servidor"` (el dictado graba con `MediaRecorder` y usa ese endpoint), `POST /v1/voz/sintetizar` con streaming, y `herramientas/probar_audio` con VAD por energía, interrupción y modo eco.
 
-### Opción 1: tocar para hablar (corto plazo)
+### Opción 1: tocar para hablar (corto plazo) — implementada, pendiente de medir en un Android real
+
+**Hecho (2026-10-10).** Atributo `modo-entrada` (`auto` | `tocar` | `libres`; `auto` = «tocar» en Android) y ajuste del usuario; un turno por toque con `SpeechRecognition` no continuo, o con `voz-motor="servidor"` (o el ajuste «Reconocimiento de voz») con `getUserMedia` + `MediaRecorder` + `/v1/voz/transcribir`, fin de frase por energía con histéresis (`vadPaso`); tocar el orbe corta la lectura. STT del servidor con ElevenLabs Scribe (`STT_PROVEEDOR=elevenlabs`, `scribe_v2`). Contrato §7.3 y §7.4 actualizados. Cómo probarlo en el celular: casos B13–B15 de `PRUEBA_MANUAL_VOZ.md`. **Falta** medir en el celular: pitidos por turno, latencia `stt_ms` (consola) y si los umbrales del VAD sirven con ese micrófono. El texto de abajo es el diseño original.
+
 
 Un toque abre el micrófono para un turno; sin palabra de activación ni reconocimiento continuo.
 

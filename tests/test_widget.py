@@ -254,6 +254,54 @@ def test_reinicio_del_reconocedor_crece_y_tiene_tope():
     assert r == [250, 500, 1000, 2000, 4000, 5000, 5000]
 
 
+def test_modo_de_entrada_usuario_manda_sobre_atributo_y_auto_es_tocar_en_android():
+    r = _utiles_voz("""
+      const f = U.resolverEntrada;
+      return [
+        f("auto", "auto", true), f("auto", "auto", false),     // auto: Android toca, el resto manos libres
+        f("auto", "libres", true), f("auto", "tocar", false),  // el atributo manda sobre el auto
+        f("libres", "tocar", false), f("tocar", "libres", true),   // el usuario manda sobre el atributo
+        f("raro", undefined, true), f(undefined, "raro", false),   // valores desconocidos equivalen a auto
+      ];""")
+    assert r == ["tocar", "libres", "libres", "tocar", "libres", "tocar", "tocar", "libres"]
+
+
+def test_fin_de_frase_por_energia_con_histeresis():
+    r = _utiles_voz("""
+      const cfg = { alto: 0.12, bajo: 0.07, silencioMs: 1000, esperaMs: 5000 };
+      const correr = (muestras) => {            // muestras: [t, nivel]
+        let s = U.vadInicial(0);
+        for (const [t, n] of muestras) s = U.vadPaso(s, n, t, cfg);
+        return s;
+      };
+      const callado = correr([[100, 0.01], [2000, 0.02], [4900, 0.0]]);          // nadie habla, todavía a tiempo
+      const sinVoz = correr([[100, 0.01], [5000, 0.0]]);                          // nadie habló a tiempo
+      const habloYSeCalla = correr([[100, 0.3], [600, 0.4], [700, 0.01], [1800, 0.01]]);
+      const corto = correr([[100, 0.3], [700, 0.01], [1500, 0.01]]);              // 800 ms de silencio: todavía no
+      // histéresis: tras empezar, 0,09 (entre bajo y alto) sigue contando como voz y no cierra la frase
+      const sostiene = correr([[100, 0.3], [300, 0.09], [1500, 0.09], [2600, 0.09]]);
+      // antes de hablar, 0,09 no alcanza el umbral alto: no inicia
+      const noInicia = correr([[100, 0.09], [1500, 0.09]]);
+      // el ruido que interrumpe el silencio reinicia la cuenta
+      const reinicia = correr([[100, 0.3], [200, 0.01], [900, 0.3], [1500, 0.01]]);
+      const final = U.vadPaso(habloYSeCalla, 0.5, 5000, cfg);                     // un estado terminado no cambia
+      return [callado.fin, sinVoz.fin, habloYSeCalla.fin, corto.fin, sostiene.fin, noInicia.hablo, reinicia.fin, final.fin];""")
+    assert r == [None, "sin_voz", "silencio", None, None, False, None, "silencio"]
+
+
+def test_widget_tocar_para_hablar_no_abre_el_microfono_hasta_el_toque():
+    """En «tocar» el modo voz no arranca el reconocimiento continuo ni el segundo flujo del orbe al encenderse."""
+    js = _js()
+    cuerpo = js.split("_conmutarManosLibres() {", 1)[1].split("    // `motivo`:", 1)[0]
+    bloque = cuerpo.split('if (this._mh.modo === "libres") {', 1)[1].split("}", 1)[0]
+    assert "_mhIniciarReco()" in bloque and "_nivelIniciar()" in bloque
+    # el turno es no continuo y no hay reinicio automático
+    turno = js.split("_mhTurnoReco() {", 1)[1].split("_mhTurnoGrabar", 1)[0]
+    assert "r.continuous = false" in turno and "_mhReprogramar" not in turno
+    # el modo con STT del servidor es siempre «tocar»
+    assert 'if (this._motorDictado() === "servidor") return "tocar";' in js
+
+
 # ───────────────────────── tema claro / oscuro ─────────────────────────
 
 

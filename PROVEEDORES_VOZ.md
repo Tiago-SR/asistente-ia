@@ -26,7 +26,7 @@ Pendiente de medir: ElevenLabs, OpenAI, Deepgram y demás de las tablas de abajo
 
 ## Cómo se lee la columna "Encaje"
 
-El servicio ya habla con cualquier endpoint compatible con OpenAI (`/v1/audio/transcriptions`), configurado por `STT_BASE_URL`, `STT_MODELO` y `STT_API_KEY` (`core/voz/openai_compat.py`).
+El servicio ya habla con cualquier endpoint compatible con OpenAI (`/v1/audio/transcriptions`), configurado por `STT_PROVEEDOR=openai_compat`, `STT_BASE_URL`, `STT_MODELO` y `STT_API_KEY` (`core/voz/openai_compat.py`), y con **ElevenLabs Scribe** con `STT_PROVEEDOR=elevenlabs`, `STT_MODELO=scribe_v2` y `STT_API_KEY` (`core/voz/elevenlabs_stt.py`: `POST https://api.elevenlabs.io/v1/speech-to-text`, cabecera `xi-api-key`, `multipart` con `model_id` y `file`; la clave necesita el permiso «Speech to Text»). `scribe_v1` está deprecado; `scribe_v2_realtime` (WebSocket) no está integrado.
 
 - **Directo:** solo se cambian variables de entorno.
 - **Adaptador:** hay que escribir un adaptador nuevo en `core/voz/` (el puerto `STT` ya existe; el de `TTS` falta y se diseña igual).
