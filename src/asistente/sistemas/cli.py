@@ -4,12 +4,17 @@
     python -m asistente.sistemas.cli exportar-yaml [RUTA]
     python -m asistente.sistemas.cli rotar-clave
     python -m asistente.sistemas.cli generar-clave
+    python -m asistente.sistemas.cli crear-admin EMAIL [--rol admin|operador]
+    python -m asistente.sistemas.cli cambiar-clave-admin EMAIL
+
+Los comandos de admin piden la contraseña por terminal (o por stdin si no hay TTY); nunca por argumento.
 
 Necesitan `ASISTENTE_DATABASE_URL` y, para secretos, `ASISTENTE_CLAVES_MAESTRAS` (`kid:base64[,kid:base64]`).
 """
 
 import argparse
 import asyncio
+import getpass
 import os
 import sys
 from pathlib import Path
@@ -19,6 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from asistente.sistemas import registro_bd
 from asistente.sistemas.cifrado import Cifrador, ClaveAusente, ErrorCifrado, generar_clave
+from asistente.store.admin import ROLES, AdminSql, ErrorAdmin
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,7 +37,21 @@ def _parser() -> argparse.ArgumentParser:
     e.add_argument("ruta", nargs="?", help="archivo de salida (por defecto, la salida estándar)")
     sub.add_parser("rotar-clave", help="re-cifra los secretos con la primera clave maestra")
     sub.add_parser("generar-clave", help="imprime una clave maestra nueva (base64)")
+    c = sub.add_parser("crear-admin", help="crea un usuario del panel (el primero se crea siempre por aquí)")
+    c.add_argument("email")
+    c.add_argument("--rol", choices=ROLES, default="admin")
+    k = sub.add_parser("cambiar-clave-admin", help="cambia la contraseña y revoca sus sesiones")
+    k.add_argument("email")
     return p
+
+
+def _pedir_clave() -> str:
+    if sys.stdin.isatty():
+        clave = getpass.getpass("Contraseña: ")
+        if getpass.getpass("Repetir: ") != clave:
+            raise ErrorAdmin("las contraseñas no coinciden")
+        return clave
+    return sys.stdin.readline().rstrip("\n")
 
 
 async def _ejecutar(args: argparse.Namespace) -> int:
@@ -60,7 +80,13 @@ async def _ejecutar(args: argparse.Namespace) -> int:
                 print("falta ASISTENTE_CLAVES_MAESTRAS", file=sys.stderr)
                 return 2
             print(f"rotados {await registro_bd.rotar_clave(sesiones, cifrador)} secreto(s)")
-    except (registro_bd.ErrorRegistro, ErrorCifrado) as e:
+        elif args.comando == "crear-admin":
+            await AdminSql(sesiones).crear_usuario(args.email, _pedir_clave(), args.rol)
+            print(f"usuario {args.email.strip().lower()} creado ({args.rol})")
+        elif args.comando == "cambiar-clave-admin":
+            await AdminSql(sesiones).cambiar_clave(args.email, _pedir_clave())
+            print("contraseña cambiada; sesiones revocadas")
+    except (registro_bd.ErrorRegistro, ErrorCifrado, ErrorAdmin) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     finally:

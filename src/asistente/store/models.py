@@ -256,3 +256,50 @@ class RegistroVersion(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     version: Mapped[int] = mapped_column(BigInteger, server_default="0")
+
+
+class AdminUsuario(Base):
+    """Usuario del panel de administración (no confundir con los usuarios finales, que llegan en el JWT)."""
+
+    __tablename__ = "admin_usuario"
+    __table_args__ = (CheckConstraint("rol IN ('admin', 'operador')", name="ck_admin_usuario_rol"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(320), unique=True)  # siempre en minúsculas
+    hash: Mapped[str] = mapped_column(String(200))  # argon2id
+    rol: Mapped[str] = mapped_column(String(16))
+    activo: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    fallos: Mapped[int] = mapped_column(Integer, server_default="0")
+    bloqueado_hasta: Mapped[datetime | None] = mapped_column(_ahora())
+    ultimo_login: Mapped[datetime | None] = mapped_column(_ahora())
+    creado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+
+
+class AdminSesion(Base):
+    """Sesión del panel. Solo se guarda el SHA-256 del token (el valor en claro vive en la cookie)."""
+
+    __tablename__ = "admin_sesion"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    usuario_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("admin_usuario.id", ondelete="CASCADE"), index=True
+    )
+    csrf: Mapped[str] = mapped_column(String(64))
+    creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    expira: Mapped[datetime] = mapped_column(_ahora())  # tope absoluto
+    ultimo_uso: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+
+
+class AdminAuditoria(Base):
+    """Quién cambió qué en el panel. `antes`/`despues` nunca llevan secretos."""
+
+    __tablename__ = "admin_auditoria"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fecha: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now(), index=True)
+    actor: Mapped[str] = mapped_column(String(320))  # email, o `token` para la automatización
+    accion: Mapped[str] = mapped_column(String(64))
+    objetivo: Mapped[str | None] = mapped_column(String(200))
+    antes: Mapped[dict | None] = mapped_column(JSONB)
+    despues: Mapped[dict | None] = mapped_column(JSONB)
+    ip: Mapped[str | None] = mapped_column(String(64))

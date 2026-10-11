@@ -214,10 +214,16 @@ COPY --from=panel-build /panel/dist /app/src/asistente/static/panel
 - **Salida**: todos los tests y e2e actuales pasan leyendo el registro desde BD; importar el YAML actual y
   exportarlo da un resultado equivalente.
 
-### Fase 2 — Usuarios admin
-- [ ] Migración: `admin_usuario`, `admin_sesion`, `admin_auditoria`.
-- [ ] Login/logout, sesiones, CSRF, roles `admin`/`operador`, bloqueo por intentos, auditoría de cambios.
-- [ ] Comando CLI para crear el primer admin. Excluir `/admin` y `/panel` de CORS (`api/cors.py`).
+### Fase 2 — Usuarios admin  *(implementada 2026-10-11)*
+- [x] Migración 0008: `admin_usuario`, `admin_sesion`, `admin_auditoria`.
+- [x] Login/logout/`/admin/yo`, sesiones, CSRF (Origin + `X-CSRF`), bloqueo por usuario (5 fallos → 15 min) e IP
+      (10 fallos / 15 min, en memoria), auditoría de login/logout/recargar.
+- [x] CLI: `crear-admin`, `cambiar-clave-admin` (revoca sesiones). `/admin` y `/panel` fuera de CORS.
+- **Hecho tal como quedó**: `store/admin.py` (`AdminSql`); `api/admin.py` acepta Bearer (automatización, sin CSRF) o
+  cookie `__Host-admin` (`admin` si `ASISTENTE_ADMIN_COOKIE_SECURE=false`); `ASISTENTE_ADMIN_ORIGENES` para dev.
+  Los endpoints actuales las admiten ambas y cualquier rol (incl. `operador` recargando). **Pendiente**: aplicar
+  `rol == admin` a los endpoints de escritura de la Fase 3 (base_url, auth, llm) y gestión de usuarios;
+  retención de `admin_auditoria` sin decidir; el bloqueo por IP es por réplica (en memoria).
 
 ### Fase 3 — Panel (frontend)
 - [ ] Andamiaje `panel/` (Vite + React + TS), `Dockerfile` multi-stage y servicio `panel` con HMR (sección 6).

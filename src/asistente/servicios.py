@@ -28,6 +28,7 @@ from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas, Sistema
 from asistente.sistemas.registro_bd import FuenteBD
 from asistente.store.acciones import AccionesSql
+from asistente.store.admin import AdminSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
 from asistente.store.recientes import RecientesSql
@@ -63,6 +64,7 @@ class Servicios:
     memoria: MemoriaSql | None = None  # None = sin memoria por usuario
     web: WebConRespaldo | None = None  # None = sin búsqueda web (aunque el sistema la tenga habilitada)
     adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
+    admin: AdminSql | None = None  # usuarios, sesiones y auditoría del panel
 
 
 def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
@@ -179,4 +181,5 @@ def construir(settings: Settings) -> Servicios:
         recientes=RecientesSql(sesiones),
         memoria=MemoriaSql(sesiones, settings.memoria_dias_sin_uso),
         web=_fabrica_web(settings),
+        admin=AdminSql(sesiones),
     )

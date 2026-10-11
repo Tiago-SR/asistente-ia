@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     registro: Literal["yaml", "bd"] = _env("ASISTENTE_REGISTRO", "yaml")
     prompts_dir: str = _env("ASISTENTE_PROMPTS_DIR", "prompts")
     admin_token: str | None = _env("ASISTENTE_ADMIN_TOKEN", None)
+    # Panel: la cookie de sesión es `__Host-admin` (solo HTTPS). En dev sobre http://localhost poner
+    # ASISTENTE_ADMIN_COOKIE_SECURE=false (cookie `admin`). `ASISTENTE_ADMIN_ORIGENES` (coma) suma orígenes
+    # válidos para el chequeo CSRF además del host propio (p. ej. el dev server de Vite); vacío en prod.
+    admin_cookie_secure: bool = _env("ASISTENTE_ADMIN_COOKIE_SECURE", True)
+    admin_origenes: str = _env("ASISTENTE_ADMIN_ORIGENES", "")
     precios_path: str = _env("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml")
     log_level: str = _env("ASISTENTE_LOG_LEVEL", "INFO")
 
