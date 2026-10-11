@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     # Memoria por usuario (Fase 1): un recuerdo vence cuando pasan estos días desde la última vez que se usó.
     memoria_dias_sin_uso: int = _env("ASISTENTE_MEMORIA_DIAS_SIN_USO", 30)
 
+    # Búsqueda web (tools `buscar_web` y `leer_pagina`, por sistema con `busqueda_web: true`). Proveedores en orden:
+    # Tavily mientras tenga cupo, luego SearXNG propio. Sin ninguno configurado las tools no se ofrecen.
+    web_tavily_api_key: str | None = _env("WEB_TAVILY_API_KEY", None)
+    web_searxng_url: str | None = _env("WEB_SEARXNG_URL", None)
+    # Lectura directa de páginas desde este servidor (respaldo de Tavily para `leer_pagina`, con defensas de SSRF).
+    web_lector_directo: bool = _env("WEB_LECTOR_DIRECTO", True)
+    web_pausa_cupo_s: float = _env("ASISTENTE_WEB_PAUSA_CUPO_S", 21600.0)
+    web_max_por_min: int = _env("ASISTENTE_WEB_MAX_POR_MIN", 10)
+    web_max_por_dia: int = _env("ASISTENTE_WEB_MAX_POR_DIA", 100)
+    web_max_por_turno: int = _env("ASISTENTE_WEB_MAX_POR_TURNO", 4)
+    web_max_pagina_chars: int = _env("ASISTENTE_WEB_MAX_PAGINA_CHARS", 12000)
+
     # Voz (Fase 4). Sin STT_PROVEEDOR el dictado queda deshabilitado.
     stt_proveedor: str | None = _env("STT_PROVEEDOR", None)
     stt_base_url: str | None = _env("STT_BASE_URL", None)

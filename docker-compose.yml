@@ -87,6 +87,29 @@ services:
           memory: 2G
     networks: [interna, publica]
 
+  # Búsqueda web gratuita (perfil `busqueda`): respaldo de Tavily cuando se le agota el cupo. El asistente lo usa con
+  # WEB_SEARXNG_URL=http://searxng:8080. Sin puertos publicados; necesita egress (red `publica`) para consultar a los
+  # buscadores, que pueden bloquear la IP del servidor: por eso es el respaldo y no el principal.
+  searxng:
+    profiles: ["busqueda"]   # opt-in: COMPOSE_PROFILES=busqueda en .env (o --profile busqueda)
+    logging: *logs
+    image: ${SEARXNG_IMAGEN:-searxng/searxng:2026.9.25-12f8b6515}
+    restart: unless-stopped
+    environment:
+      # obligatorio (openssl rand -hex 32): sin él SearXNG no arranca. No se exige con `:?` para no romper el compose
+      # en los hosts que no usan el perfil.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    networks: [interna, publica]
+
 networks:
   interna:
     internal: true      # postgres sin salida a internet

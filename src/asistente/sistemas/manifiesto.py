@@ -12,6 +12,7 @@ from jsonschema.exceptions import SchemaError
 
 from asistente.core.memoria import NOMBRES as TOOLS_LOCALES_MEMORIA
 from asistente.core.recientes import NOMBRE as TOOL_LOCAL_RECIENTES
+from asistente.core.web.herramientas import NOMBRES as TOOLS_LOCALES_WEB
 from asistente.sistemas.registro import RegistroSistemas, Sistema
 
 log = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def _parsear_tool(t: object) -> Tool:
     nombre = t.get("nombre")
     if not isinstance(nombre, str) or not NOMBRE_RE.match(nombre):
         raise ManifiestoInvalido(f"nombre inválido: {nombre!r}")
-    if nombre == TOOL_LOCAL_RECIENTES or nombre in TOOLS_LOCALES_MEMORIA:
+    if nombre == TOOL_LOCAL_RECIENTES or nombre in TOOLS_LOCALES_MEMORIA or nombre in TOOLS_LOCALES_WEB:
         raise ManifiestoInvalido(f"{nombre}: nombre reservado para una tool local del asistente")
     desc = t.get("descripcion")
     if not isinstance(desc, str) or not desc.strip() or len(desc) > MAX_DESCRIPCION:

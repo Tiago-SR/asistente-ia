@@ -109,6 +109,9 @@ class Sistema(_Modelo):
     # Memoria por usuario (Fase 1): tools locales `recordar` y `olvidar`, sección «lo que pidió recordar» en el prompt
     # y panel en el widget. Apagada por defecto; sin esto no se expone ni se inyecta nada.
     memoria_habilitada: bool = False
+    # Búsqueda web: tools locales `buscar_web` y `leer_pagina` y la capa `prompts/web.md`. Apagada por defecto: la
+    # consulta sale a un proveedor externo (ver `core/web/herramientas.py`). Requiere `WEB_*` configurado.
+    busqueda_web: bool = False
     # Cómo se llama el asistente en el widget (título, avisos, ajustes). Es el valor por defecto: cada usuario puede
     # ponerle otro desde el panel de ajustes. Sin él el widget dice «Asistente».
     nombre_asistente: str | None = Field(default=None, min_length=1, max_length=40)

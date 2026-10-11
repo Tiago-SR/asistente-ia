@@ -8,6 +8,7 @@ VOZ = "voz"  # resumen hablado (solo canal de voz)
 TOOL = "tool"
 UI = "ui"
 CONFIRMACION = "confirmacion"
+WEB = "web"  # qué se buscó o leyó en internet (lo ve el usuario)
 DONE = "done"
 ERROR = "error"
 TOKEN_EXPIRADO = "token_expirado"

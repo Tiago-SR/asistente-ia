@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from asistente.core.llm.base import Capacidades, Mensaje, OnDelta, Respuesta, ToolDef, Uso
+from asistente.core.web.base import Busqueda, PaginaWeb
 
 __all__ = [
     "LLM",
@@ -26,6 +27,7 @@ __all__ = [
     "ResultadoPropuesta",
     "TopeMemoria",
     "TurnoMemoria",
+    "Web",
 ]
 
 
@@ -54,6 +56,8 @@ class Contexto:
     zona_horaria: str = "UTC"
     # Cuánto se conservan sus consultas (la ventana máxima de `consultas_recientes`).
     retencion_dias: int = 30
+    # Idioma del usuario (claim `locale` o `locale_defecto` del sistema); orienta la búsqueda web.
+    locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +167,15 @@ class TTS(Protocol):
     async def disponible(self) -> bool: ...
 
 
+class Web(Protocol):
+    """Búsqueda web y lectura de páginas (tools locales `buscar_web` y `leer_pagina`). Lanza `WebError` si ningún
+    proveedor responde y `UrlNoPermitida` si la URL apunta a un destino prohibido."""
+
+    async def buscar(self, consulta: str, *, max_resultados: int, idioma: str | None = None) -> Busqueda: ...
+
+    async def leer(self, url: str, *, max_chars: int) -> PaginaWeb: ...
+
+
 class Conector(Protocol):
     """Ligado a un usuario y una petición: ya lleva su credencial. `ejecutar` nunca lanza."""
 
@@ -229,6 +242,9 @@ class Limites(Protocol):
     async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int, clave: str = "voz") -> None:
         """Cuenta un dictado (`clave="voz"`) o una síntesis (`clave="tts"`) del usuario, en un contador
         aparte del de mensajes y del otro; lanza `LimiteExcedido("voz_min")` si supera el tope."""
+
+    async def reservar_web(self, sistema_id: str, usuario_ref: str, tope_por_min: int, tope_por_dia: int) -> None:
+        """Cuenta una búsqueda o lectura web del usuario; lanza `LimiteExcedido("web_min")` o `("web_dia")`."""
 
 
 @dataclass(frozen=True)

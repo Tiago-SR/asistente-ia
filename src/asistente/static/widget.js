@@ -115,6 +115,10 @@
     bienvenida: "Hola, ¿en qué te puedo ayudar?",
     pensando: "Pensando…",
     consultando: "Consultando",
+    webBusqueda: "Busqué en la web: «{q}»",
+    webPagina: "Leí la página ",
+    webFallo: " (sin resultados: la búsqueda no está disponible)",
+    webFalloPagina: " (no se pudo leer)",
     dictar: "Dictar",
     adjuntar: "Adjuntar imagen",
     quitarImagen: "Quitar imagen",
@@ -786,6 +790,9 @@
       border-radius: 999px; text-decoration: none; font-size: 13px; background: var(--f);
     }
     .msg .acciones a:hover { background: var(--c); color: var(--ct); }
+    .web { font-size: 12px; color: var(--apagado); margin-bottom: 8px; display: grid; gap: 2px; }
+    .web-fuentes { display: inline; }
+    .msg .web a { color: var(--apagado); margin-left: 6px; }
 
     .msg.confirmacion { align-self: stretch; padding: 12px 14px; border: 1px solid var(--c); border-radius: calc(var(--r) * 1.5); background: var(--f); }
     .msg.confirmacion.cerrada { border-color: var(--b); opacity: .85; }
@@ -2533,8 +2540,8 @@
       const leer = this._leerAuto && !canalVoz && this._hablaPosible();   // lectura automática de la respuesta completa (no en el modo voz)
       const hablarVoz = canalVoz && this._hablaPosible();                 // modo voz: se dice el resumen, aunque la lectura automática esté apagada
       const pintar = () => {
-        const acciones = burbuja.querySelector(".acciones");
-        burbuja.replaceChildren(); markdown(acumulado, burbuja);
+        const acciones = burbuja.querySelector(".acciones"), web = burbuja.querySelector(".web");
+        burbuja.replaceChildren(); if (web) burbuja.append(web); markdown(acumulado, burbuja);
         if (acciones) burbuja.append(acciones);
         this._bajar();
       };
@@ -2551,6 +2558,7 @@
             if (!estado.isConnected) burbuja.append(estado);
             break;
           case "ui": this._acciones(datos.acciones || [], burbuja); break;
+          case "web": this._web(datos, burbuja); break;
           case "confirmacion": this._confirmacion(datos); break;
           case "done":
             if (datos.conversacion_id) { this._convId = datos.conversacion_id; this._recordar(); }
@@ -2987,6 +2995,34 @@
         else if (r.status === 409) this._cerrarTarjeta(t, c.estado in ESTADOS_ACCION ? c.estado : "fallida");
         else this._errorTarjeta(t, c.error);
       } catch { this._errorTarjeta(t); }
+    }
+
+    // Qué se buscó o leyó en internet: siempre a la vista, porque la consulta salió a un proveedor externo.
+    _web(d, burbuja) {
+      if (!d || (d.tipo !== "busqueda" && d.tipo !== "pagina")) return;
+      let caja = burbuja.querySelector(".web");
+      if (!caja) { caja = el("div", { class: "web" }); burbuja.prepend(caja); }
+      const enlace = (url, titulo) => {
+        const u = urlSegura(url);
+        if (!u || !/^https?:/i.test(u)) return null;
+        let host = u; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch { /* queda la URL */ }
+        return el("a", { href: u, target: "_blank", rel: "noopener noreferrer nofollow", textContent: host, title: String(titulo || u) });
+      };
+      const linea = el("div", { class: "web-linea" });
+      if (d.tipo === "busqueda") {
+        linea.append(TEXTOS.webBusqueda.replace("{q}", String(d.consulta || "")) + (d.ok ? "" : TEXTOS.webFallo));
+        const fuentes = el("span", { class: "web-fuentes" });
+        const vistos = new Set();   // un enlace por sitio: el título completo queda en el tooltip
+        for (const f of Array.isArray(d.fuentes) ? d.fuentes : []) {
+          const a = f && enlace(f.url, f.titulo);
+          if (a && !vistos.has(a.textContent)) { vistos.add(a.textContent); fuentes.append(a); }
+        }
+        if (fuentes.childNodes.length) linea.append(fuentes);
+      } else {
+        linea.append(TEXTOS.webPagina, enlace(d.url) || String(d.url || ""), d.ok ? "" : TEXTOS.webFalloPagina);
+      }
+      caja.append(linea);
+      this._bajar();
     }
 
     _acciones(lista, burbuja) {

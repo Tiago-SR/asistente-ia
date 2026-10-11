@@ -1,0 +1,20 @@
+# SearXNG propio para la búsqueda web del asistente (perfil `busqueda` del compose). Solo lo usa el asistente,
+# por la red interna: sin puertos publicados, sin limitador (no hace falta Valkey) y sin proxy de imágenes.
+# La clave secreta va por la variable SEARXNG_SECRET (en .env), no aquí.
+use_default_settings: true
+
+general:
+  instance_name: "asistente-busqueda"
+
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  safe_search: 1
+  default_lang: "es"
+  # `json` viene apagado por defecto: sin él la API responde 403.
+  formats:
+    - html
+    - json

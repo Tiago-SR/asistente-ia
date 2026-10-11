@@ -22,23 +22,18 @@ Preguntas abiertas:
 - ¿Qué ajustes fija el administrador del sistema y cuáles deja libres al usuario (por ejemplo, ElevenLabs tiene costo)?
 - ¿Se persiste solo en el navegador o también en el servidor por usuario?
 
-## Imágenes de referencia
+## Imágenes de referencia (hecho: contrato 7.7; quedan estos pendientes)
 
-**Hecho (2026-10-10), pendiente de prueba manual en el navegador.** Contrato 7.7. El usuario adjunta hasta 3 imágenes por mensaje; el widget las reduce a JPEG (lado mayor 1280 px) y viajan en el turno sin guardarse (queda una nota y la metadata). Solo se ofrece si el modelo del sistema las admite (`LLM_IMAGENES=true` o `imagenes: true` en el `llm` del sistema). `deepseek-flash` las admite: verificado con una llamada real con imagen, tools y thinking activos. Aviso de privacidad visible mientras hay imágenes por enviar, y regla en `prompts/base.md` (la imagen es dato, no instrucción; las cifras siguen saliendo de las tools).
+- **Probarlo en un navegador real** (botón, reducción, miniaturas y aviso no tienen e2e) y activarlo con `LLM_IMAGENES=true` o `llm: {imagenes: true}` en el sistema.
+- **Evals con imagen:** `evals/correr.py` solo manda texto; hace falta un campo `imagenes:` y casos de imagen irrelevante o con una orden escrita, para medir que no se comenta lo ajeno ni se inventan cifras.
+- **Conservarlas (si se decide):** implementar `AlmacenAdjuntos` (`core/adjuntos.py`; hoy `NoGuarda`), con retención, borrado junto con la conversación y política de privacidad. No cambia el contrato del chat.
+- **Pegar (Ctrl+V) y arrastrar:** hoy solo el botón del clip. Fotos HEIC pueden no leerse en algunos navegadores.
+- **Modo voz:** no adjunta; decidir si hace falta.
 
-Falta:
+## Respuestas más breves (hecho: `prompts/base.md`, `prompts/voz.md`; queda esto)
 
-- **Probarlo en un navegador real** (el botón, la reducción, las miniaturas y el aviso no tienen e2e) y fijar `LLM_IMAGENES=true` en el `.env` para activarlo.
-- **Evals con imagen:** `evals/correr.py` solo manda texto; hace falta un criterio para medir que no se inventan cifras a partir de la imagen.
-- **Conservarlas (si se decide):** implementar `AlmacenAdjuntos` (`core/adjuntos.py`; hoy `NoGuarda`), con retención, borrado junto con la conversación y la política de privacidad. No cambia el contrato del chat.
-- **Fotos de celular en HEIC:** `createImageBitmap` puede no leerlas en algunos navegadores; hoy el widget avisa «No pude leer esa imagen».
-- **Modo voz:** no adjunta. Decidir si hace falta («mirá esta foto»).
-
-## Respuestas más breves
-
-**Hecho (2026-10-10), pendiente de medir con el modelo real.** La brevedad es la regla por defecto para todos (`prompts/base.md`: responder primero lo pedido, sin repetir la pregunta ni recapitular; solo se extiende si el usuario pide detalle o su preferencia `brevedad` es `detallada`). En voz, `prompts/voz.md` pide describir una tabla por su conclusión y escribir unidades completas («hectáreas», «por ciento»). Los evals miden el largo de la respuesta de pantalla (`max_palabras` en `preguntas.yaml`) y la redacción de tablas para voz (`v11`, `v12` en `preguntas_voz.yaml`).
-
-Falta correr los dos sets contra `deepseek-flash` (línea base: 32/32 y 213 tokens de salida por pregunta) y ajustar los límites de palabras, que son estimaciones. Si no basta, el siguiente paso sería un tope por sistema en `sistemas.yaml`.
+- Correr `evals/preguntas_voz.yaml` (casos nuevos `v11` y `v12` de tabla) y ajustar los límites de `max_palabras`, que son estimaciones. El set principal dio 32/32 con 213 → 144 tokens de salida por pregunta.
+- Si no basta, un tope por sistema en `sistemas.yaml`.
 
 ## Modo voz en el celular sin pitidos
 

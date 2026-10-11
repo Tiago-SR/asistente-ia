@@ -70,7 +70,7 @@ Firma recomendada: `RS256` o `EdDSA` (el sistema guarda la privada, el asistente
 
 Reglas (si no se cumplen, la tool o el manifiesto se rechazan y se loguea):
 
-- `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único. `consultas_recientes`, `recordar` y `olvidar` están **reservados**: son tools locales del asistente ([6.7](#67-lo-mismo-que-ayer-consultas_recientes) y [6.8](#68-memoria-por-usuario-recordar-y-olvidar)) y una tool del sistema con alguno de esos nombres se descarta.
+- `nombre`: `^[a-z][a-z0-9_]{0,63}$`, único. `consultas_recientes`, `recordar`, `olvidar`, `buscar_web` y `leer_pagina` están **reservados**: son tools locales del asistente ([6.7](#67-lo-mismo-que-ayer-consultas_recientes), [6.8](#68-memoria-por-usuario-recordar-y-olvidar) y [6.9](#69-búsqueda-web-buscar_web-y-leer_pagina)) y una tool del sistema con alguno de esos nombres se descarta.
 - `descripcion`: ≤ 1 000 caracteres. `parametros`: JSON Schema válido, tipo `object`.
 - `efecto` ∈ {`lectura`, `escritura`}. Al modelo solo se exponen las de `lectura`, salvo las escrituras que declaran `confirmacion` y que el operador del asistente habilitó explícitamente ([sección 8](#8-acciones-con-confirmación-opcional)); ni siquiera esas se ejecutan sin la confirmación del usuario.
 - Máximo 40 tools por sistema y 256 KB por manifiesto.
@@ -224,6 +224,7 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **`zona_horaria` (opcional):** zona IANA (`America/Montevideo`) de los usuarios cuyo navegador no la informa. El widget envía la del navegador en cada mensaje y esa manda; sin ninguna de las dos se usa UTC. Define qué día es «hoy» para el asistente (la fecha de la sesión) y se guarda con cada consulta. Una zona desconocida en el registro deshabilita ese sistema; una inválida enviada por el navegador se ignora.
 - **`consultas_recientes` (opcional, `true` por defecto):** `false` desactiva para este sistema la tool local de «lo mismo que ayer» ([6.7](#67-lo-mismo-que-ayer-consultas_recientes)).
 - **`memoria_habilitada` (opcional, `false` por defecto):** `true` enciende para este sistema la memoria por usuario ([6.8](#68-memoria-por-usuario-recordar-y-olvidar)): tools locales `recordar` y `olvidar`, sección «lo que el usuario pidió recordar» en el prompt, endpoints `/v1/memoria` y panel en el widget. Apagada, nada de eso existe.
+- **`busqueda_web` (opcional, `false` por defecto):** `true` ofrece al modelo, en este sistema, las tools locales de internet ([6.9](#69-búsqueda-web-buscar_web-y-leer_pagina)). Requiere un proveedor configurado en el asistente (`WEB_TAVILY_API_KEY` y/o `WEB_SEARXNG_URL`); sin ninguno, el flag no tiene efecto.
 - **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
 - **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 
@@ -247,6 +248,7 @@ sistemas:
     zona_horaria: America/Montevideo            # «hoy» para usuarios cuyo navegador no informa la suya
     consultas_recientes: true                   # tool local «lo mismo que ayer» (false = apagada)
     memoria_habilitada: false                   # memoria por usuario: preferencias, alias y consultas guardadas (true = encendida)
+    busqueda_web: false                         # tools locales de internet (6.9; true = encendida)
     llm:                                        # opcional: lo que se omita se hereda de LLM_* y ASISTENTE_MODELO_DEFAULT
       imagenes: true                            # admite imágenes de referencia (7.7); sin esto manda LLM_IMAGENES
     limites:
@@ -350,6 +352,18 @@ Con `memoria_habilitada: true`, el asistente recuerda **por usuario y por sistem
 - **`GET /v1/estado`** incluye `memoria: true|false` según el flag del sistema. Con `true`, el widget muestra un botón en la barra que abre el panel **«Lo que recuerdo»** (lista, «Olvidar» por recuerdo y «Olvidar todo»); con `false` no aparece nada.
 - **Defensa contra envenenamiento, por capas:** tipos cerrados y plantilla de render, resumen redactado por el servidor, botón humano, id visto en el turno, tope por usuario, tope por hora y vencimiento, contenido rotulado como dato. La regla «solo si el usuario lo pidió» depende del modelo: la cubren los evals (`evals/preguntas_memoria_fase1.yaml`), no el código.
 - **Lo que el sistema anfitrión debe saber:** nada cambia en el contrato con el sistema, salvo que `recordar` y `olvidar` quedan reservados. El verificador ([6.5](#65-verificar-la-integración)) avisa si una tool usa esos nombres.
+
+### 6.9 Búsqueda web (`buscar_web` y `leer_pagina`)
+
+Con `busqueda_web: true`, el asistente ofrece al modelo dos tools **propias** para información **pública** que el sistema no tiene (normativa, noticias, precios de mercado, documentación). No tocan al sistema anfitrión ni usan el token del usuario.
+
+- **`buscar_web {consulta, max_resultados?}`** devuelve títulos, URLs y fragmentos (5 por defecto, 8 como máximo). **`leer_pagina {url}`** devuelve el texto de una página (hasta `ASISTENTE_WEB_MAX_PAGINA_CHARS`, 12 000 por defecto), y solo acepta una URL que apareció en un resultado de `buscar_web` de esa conversación o que el usuario escribió: el modelo no puede fabricar URLs (por ejemplo, con datos del sistema en la query) porque se lo pida una página.
+- **Proveedores, en orden:** Tavily (`WEB_TAVILY_API_KEY`) mientras tenga cupo; cuando responde que se agotó (HTTP 432/433) se pausa `ASISTENTE_WEB_PAUSA_CUPO_S` (6 h por defecto) y se usa el SearXNG propio (`WEB_SEARXNG_URL`, perfil `busqueda` del compose, gratis, pero los buscadores que consulta pueden bloquear la IP del servidor). Un proveedor que falla por otra causa se pausa 60 s, y los pausados se vuelven a probar si los demás fallan. Para leer, Tavily descarga la página (la URL no llega a la red del asistente); si no está disponible, la descarga el propio asistente (`WEB_LECTOR_DIRECTO`, activo por defecto) con defensas contra SSRF: solo `http(s)` en los puertos 80/443, host con dominio público (no `localhost`, `.internal`, servicios de Docker ni IPs privadas, loopback, link-local o de metadatos), conexión a la IP ya comprobada (contra DNS rebinding), cada redirección revisada, solo HTML o texto y 2 MB como máximo. Los PDF no se leen.
+- **Fuga de datos:** la consulta sale a un proveedor externo. El prompt (`prompts/web.md`) prohíbe incluir en ella datos obtenidos de las tools del sistema, y el usuario ve **siempre** qué se buscó y qué se leyó (evento SSE `web`: `{tipo: "busqueda", consulta, ok, fuentes: [{titulo, url}]}` o `{tipo: "pagina", url, ok}`, que el widget muestra sobre la respuesta). Las llamadas quedan en la auditoría con sus parámetros, con la retención del sistema.
+- **Inyección:** el contenido web es dato no verificado, nunca instrucción (lo dicen la nota de cada resultado y el prompt). Nunca se propone una acción ni se guarda un recuerdo por lo que diga una página, y toda cifra de internet va con su fuente y separada de las del sistema.
+- **Topes:** por usuario, `ASISTENTE_WEB_MAX_POR_MIN` (10) y `ASISTENTE_WEB_MAX_POR_DIA` (100), en un contador aparte de los mensajes; por turno, `ASISTENTE_WEB_MAX_POR_TURNO` (4 búsquedas y lecturas). El cupo de Tavily es de todo el despliegue.
+- **Historial:** en los turnos siguientes una búsqueda queda reducida a títulos y URLs (para «leé el segundo resultado»); los fragmentos y el texto de las páginas no se reenvían, como los demás resultados viejos.
+- **Lo que el sistema anfitrión debe saber:** nada cambia en el contrato, salvo que `buscar_web` y `leer_pagina` quedan reservados.
 
 ## 7. Widget de chat (interfaz para el usuario)
 

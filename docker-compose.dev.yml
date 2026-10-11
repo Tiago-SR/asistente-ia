@@ -13,6 +13,8 @@ services:
       ASISTENTE_DOCS: "1"   # /docs y /openapi.json
       # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
+      # Búsqueda web: el SearXNG del perfil `busqueda` (si no está arriba, la búsqueda responde «no disponible»).
+      WEB_SEARXNG_URL: ${WEB_SEARXNG_URL:-http://searxng:8080}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # llegar al host desde el contenedor en Linux
     volumes:
@@ -98,6 +100,17 @@ services:
       - whisper-cache:/home/ubuntu/.cache/huggingface/hub   # modelos descargados
     ports:
       - "127.0.0.1:8300:8000"   # solo para depurar desde el host
+
+  # Búsqueda web gratuita (respaldo de Tavily). El asistente lo usa con WEB_SEARXNG_URL=http://searxng:8080.
+  searxng:
+    profiles: ["busqueda"]
+    image: ${SEARXNG_IMAGEN:-searxng/searxng:2026.9.25-12f8b6515}
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-secreto-searxng-solo-desarrollo-0123456789}
+    volumes:
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8280:8080"   # solo para depurar desde el host
 
 volumes:
   pgdata-dev:

@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.llm.base import Adjunto, LlamadaTool, Mensaje, Uso
+from asistente.core.web.herramientas import compactar as compactar_busqueda
 from asistente.store.models import Conversacion
 from asistente.store.models import Mensaje as FilaMensaje
 
@@ -39,7 +40,7 @@ def recortar(mensajes: list[Mensaje], max_turnos: int) -> list[Mensaje]:
     """Últimos `max_turnos` turnos (un turno empieza en un mensaje `user`, así nunca se separa
     una llamada de su resultado). Es el historial previo al turno en curso, así que todos sus
     resultados de tools son viejos y se reemplazan por una nota: contienen datos de clientes
-    y ocupan contexto."""
+    y ocupan contexto. Una búsqueda web queda reducida a títulos y URLs (ver `compactar`)."""
     inicios = [i for i, m in enumerate(mensajes) if m.rol == "user"]
     if not inicios:
         return []
@@ -47,7 +48,7 @@ def recortar(mensajes: list[Mensaje], max_turnos: int) -> list[Mensaje]:
     salida = []
     for m in mensajes[desde:]:
         if m.rol == "tool":
-            m = Mensaje("tool", _RESULTADO_ANTIGUO, llamada_id=m.llamada_id)
+            m = Mensaje("tool", compactar_busqueda(m.texto) or _RESULTADO_ANTIGUO, llamada_id=m.llamada_id)
         salida.append(m)
     return salida
 

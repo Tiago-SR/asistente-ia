@@ -15,6 +15,10 @@ from asistente.core.voz import catalogo
 from asistente.core.voz.elevenlabs import TtsElevenLabs
 from asistente.core.voz.elevenlabs_stt import SttElevenLabs
 from asistente.core.voz.openai_compat import SttOpenAICompat
+from asistente.core.web.directo import LectorDirecto
+from asistente.core.web.respaldo import WebConRespaldo
+from asistente.core.web.searxng import WebSearxng
+from asistente.core.web.tavily import WebTavily
 from asistente.limits import LimitesPostgres
 from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.conector_http import ConectorHttp
@@ -52,6 +56,7 @@ class Servicios:
     acciones: AccionesSql | None = None  # None = sin acciones con confirmación
     recientes: RecientesSql | None = None  # None = sin la tool `consultas_recientes`
     memoria: MemoriaSql | None = None  # None = sin memoria por usuario
+    web: WebConRespaldo | None = None  # None = sin búsqueda web (aunque el sistema la tenga habilitada)
     adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
 
 
@@ -109,6 +114,23 @@ def _fabrica_tts(settings: Settings, voces: catalogo.CatalogoVoces | None = None
     return TtsElevenLabs(settings.tts_api_key, voz.voz_id, settings.tts_modelo)
 
 
+def _fabrica_web(settings: Settings) -> WebConRespaldo | None:
+    """Tavily primero (mientras tenga cupo), después SearXNG; para leer páginas, el lector directo al final."""
+    cliente = httpx.AsyncClient(follow_redirects=False)
+    proveedores: list = []
+    if settings.web_tavily_api_key:
+        proveedores.append(WebTavily(settings.web_tavily_api_key, cliente=cliente))
+    if settings.web_searxng_url:
+        if not settings.web_searxng_url.startswith(("http://", "https://")):
+            raise ValueError("WEB_SEARXNG_URL debe ser http(s)")
+        proveedores.append(WebSearxng(settings.web_searxng_url, cliente=cliente))
+    if not proveedores:
+        return None  # el lector directo solo no alcanza: sin búsqueda no hay URLs que leer
+    if settings.web_lector_directo:
+        proveedores.append(LectorDirecto(cliente=httpx.AsyncClient(follow_redirects=False)))
+    return WebConRespaldo(proveedores, pausa_cupo_s=settings.web_pausa_cupo_s)
+
+
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
@@ -134,4 +156,5 @@ def construir(settings: Settings) -> Servicios:
         acciones=AccionesSql(sesiones, settings.acciones_max_por_hora),
         recientes=RecientesSql(sesiones),
         memoria=MemoriaSql(sesiones, settings.memoria_dias_sin_uso),
+        web=_fabrica_web(settings),
     )

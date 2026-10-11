@@ -28,6 +28,9 @@ class Prompts:
         # Capa del canal de voz (opcional): cómo pedir el resumen hablado. Ver core/voz_resumen.py.
         archivo_voz = self._dir / "voz.md"
         self._voz = archivo_voz.read_text(encoding="utf-8").strip() if archivo_voz.is_file() else ""
+        # Capa de la búsqueda web (solo en los sistemas que la tienen): cómo separar internet de los datos del sistema.
+        archivo_web = self._dir / "web.md"
+        self._web = archivo_web.read_text(encoding="utf-8").strip() if archivo_web.is_file() else ""
 
     def _dominio(self, ruta: str | None) -> str:
         if not ruta:
@@ -56,6 +59,7 @@ class Prompts:
         hoy: date,
         canal: str = "texto",
         memoria: Sequence[Recuerdo] | None = None,
+        web: bool = False,
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -67,6 +71,9 @@ class Prompts:
         if dominio:
             partes.append("## Dominio del sistema\n" + dominio)
         version = f"{_hash(self._base)}+{_hash(dominio)}"
+        if web and self._web:
+            partes.append("## Búsqueda web\n" + self._web)
+            version += f"+w{_hash(self._web)}"
         if canal == "voz" and self._voz:
             partes.append("## Canal de voz\n" + self._voz)
             version += f"+v{_hash(self._voz)}"

@@ -27,14 +27,17 @@ from asistente.core.ports import (
     Recientes,
     ResultadoTool,
     TurnoMemoria,
+    Web,
 )
 from asistente.core.voz_resumen import FiltroVoz, limpiar
+from asistente.core.web import herramientas as webtools
 
 log = logging.getLogger(__name__)
 
 # Descripción legible para el evento `tool`; sin parámetros, que pueden ser datos de negocio.
 _LEGIBLE = "Consultando {nombre}"
 _LEGIBLE_ACCION = "Preparando {nombre}"
+_LEGIBLE_WEB = {webtools.BUSCAR: "Buscando en la web", webtools.LEER: "Leyendo una página web"}
 _AVISO_CORTADA = "\n\n_(La respuesta se cortó por ser demasiado larga. Pedime que siga o que sea más breve.)_"
 
 # Lo que ve el modelo tras proponer una acción: no se ejecutó y no debe decir que sí.
@@ -55,6 +58,11 @@ class ConfigTurno:
     max_llamadas_por_iteracion: int = 8
     # Canal de voz: el modelo abre su respuesta con un bloque `<voz>` que se emite aparte (evento `voz`).
     resumen_voz: bool = False
+    # Búsqueda web (tools locales `buscar_web` y `leer_pagina`): topes por usuario y texto máximo de una página.
+    web_max_por_min: int = 10
+    web_max_por_dia: int = 100
+    web_max_pagina_chars: int = 12_000
+    web_max_por_turno: int = 4  # búsquedas + lecturas: el cupo del proveedor es chico y compartido
 
 
 @dataclass
@@ -86,6 +94,7 @@ async def run_turn(
     recientes: Recientes | None = None,
     memoria: Memoria | None = None,
     adjuntos: tuple[Adjunto, ...] = (),
+    web: Web | None = None,
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
@@ -98,7 +107,7 @@ async def run_turn(
     try:
         async with asyncio.timeout(config.timeout_turno_s):
             await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                        conversacion_id, config, estado, acciones, recientes, memoria, adjuntos)
+                        conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web)
     except TimeoutError:
         estado.motivo, estado.nuevos = "error", []
         await emit(events.ERROR, "timeout_turno")
@@ -107,7 +116,7 @@ async def run_turn(
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 conversacion_id, config, estado, acciones=None, recientes=None, memoria=None,
-                adjuntos=()) -> None:
+                adjuntos=(), web=None) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
     lectura = {t.nombre for t in tools if not t.escritura}
@@ -115,7 +124,10 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         tools = [*tools, consultas.TOOL]  # tool local del asistente: no existe en el sistema
     if memoria is not None:
         tools = [*tools, *memorias.TOOLS]  # `recordar` y `olvidar`: locales, siempre con botón
+    if web is not None:
+        tools = [*tools, *webtools.TOOLS]  # `buscar_web` y `leer_pagina`: internet, aparte de los datos del sistema
     propuesta_hecha = False  # una sola propuesta por turno
+    web_usadas = 0  # búsquedas y lecturas web de este turno
     reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
     nuevos = [Mensaje("user", texto, adjuntos=adjuntos)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
@@ -191,8 +203,9 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         # Se reenvía solo lo atendido: todo tool_call enviado debe tener su resultado.
         nuevos.append(Mensaje("assistant", resp.texto, llamadas))
         await emit(events.TOOL, [
-            (_LEGIBLE_ACCION if c.nombre in escrituras or (memoria is not None and c.nombre in memorias.NOMBRES)
-             else _LEGIBLE).format(nombre=c.nombre)
+            _LEGIBLE_WEB[c.nombre] if web is not None and c.nombre in webtools.NOMBRES
+            else (_LEGIBLE_ACCION if c.nombre in escrituras or (memoria is not None and c.nombre in memorias.NOMBRES)
+                  else _LEGIBLE).format(nombre=c.nombre)
             for c in llamadas
         ])
         atenciones = []
@@ -207,6 +220,13 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 turno = TurnoMemoria(tuple(nuevos), frozenset(lectura), conector) if local else None
                 atenciones.append(_proponer(ctx, conector, acciones, auditoria, conversacion_id,
                                             c, config, emit, memoria if local else None, turno))
+            elif web is not None and c.nombre in webtools.NOMBRES:
+                web_usadas += 1
+                if web_usadas > config.web_max_por_turno:
+                    atenciones.append(_tope_web(config))
+                    continue
+                atenciones.append(_web(ctx, web, limites, auditoria, conversacion_id, c, config, emit,
+                                       [*historial, *nuevos]))
             elif recientes is not None and c.nombre == consultas.NOMBRE:
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
@@ -267,6 +287,48 @@ async def _consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_
     except Exception:
         log.exception("[%s] no se pudo auditar %s", ctx.request_id, c.nombre)
     return r
+
+
+async def _web(ctx, web, limites, auditoria, conversacion_id, c: LlamadaTool, config, emit, vistos) -> ResultadoTool:
+    """Tools locales de internet. Lo buscado o leído se muestra al usuario (evento `web`) y se audita con sus
+    parámetros: así una fuga de datos del sistema en la consulta queda a la vista."""
+    inicio = time.monotonic()
+    salio = False  # solo se muestra lo que llegó a salir hacia internet
+    if c.argumentos_invalidos:
+        r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
+    elif (r := webtools.validar(c.nombre, c.parametros)) is None:
+        try:
+            await limites.reservar_web(ctx.sistema_id, ctx.usuario_ref, config.web_max_por_min, config.web_max_por_dia)
+        except LimiteExcedido as e:
+            r = ResultadoTool(False, error=e.cual, detalle="demasiadas búsquedas web; intenta más tarde")
+        else:
+            try:
+                if c.nombre == webtools.BUSCAR:
+                    trabajo = webtools.buscar(web, c.parametros, webtools.idioma_de(ctx.locale))
+                else:
+                    trabajo = webtools.leer(web, c.parametros, webtools.urls_permitidas(vistos),
+                                            config.web_max_pagina_chars)
+                salio = True
+                r = await asyncio.wait_for(trabajo, config.timeout_tool_s)
+            except TimeoutError:
+                r = ResultadoTool(False, error="timeout", detalle="la web tardó demasiado")
+            except Exception:
+                log.exception("[%s] falló %s", ctx.request_id, c.nombre)
+                r = ResultadoTool(False, error="web_no_disponible", detalle="falla interna de la búsqueda web")
+    if salio and r.error != "url_no_permitida":
+        await emit(events.WEB, webtools.evento(c.nombre, c.parametros, r))
+    ms = int((time.monotonic() - inicio) * 1000)
+    try:
+        await auditoria.registrar_tool(ctx, conversacion_id, c.nombre, c.parametros, r, ms)
+    except Exception:
+        log.exception("[%s] no se pudo auditar %s", ctx.request_id, c.nombre)
+    return r
+
+
+async def _tope_web(config) -> ResultadoTool:
+    return ResultadoTool(False, error="tope_web_turno",
+                         detalle=f"ya se hicieron {config.web_max_por_turno} búsquedas o lecturas web en este turno: "
+                                 "responde con lo que tienes")
 
 
 async def _rechazar_extra(c: LlamadaTool) -> ResultadoTool:
