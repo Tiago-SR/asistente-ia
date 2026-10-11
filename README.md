@@ -43,6 +43,25 @@ curl localhost:8100/salud
 
 La documentación interactiva de la API está en <http://localhost:8100/docs> (solo dev: en prod `/docs` está apagado).
 
+### Panel de administración
+
+El panel (React + Vite + shadcn/ui, carpeta `panel/`) gestiona sistemas, secretos, tools y usuarios admin. Habla con
+la API en `/admin/api` por sesión (cookie HttpOnly + CSRF); el token `ASISTENTE_ADMIN_TOKEN` queda solo para
+automatización (recargar, leer) y **no** puede escribir.
+
+```sh
+# Requisitos en .env: ASISTENTE_REGISTRO=bd y ASISTENTE_CLAVES_MAESTRAS (ver .env.example)
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml   # una vez
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli crear-admin tu@correo.com --rol admin   # primer usuario
+# Panel con HMR (perfil `panel`): http://localhost:5173/panel/
+docker compose -f docker-compose.dev.yml --profile panel up panel
+```
+
+Sin Docker: `cd panel && npm install && npm run dev` (Vite reenvía `/admin/api` a `PANEL_API`, por defecto
+`http://localhost:8100`). En prod el `Dockerfile` compila el panel en una etapa Node y lo copia a la imagen final
+(sin Node); se sirve en `/panel` con CSP estricta. Los proxies de `deploy/` cierran `/admin*` hacia fuera: el panel
+se usa por red interna o túnel hasta decidir abrir solo `/admin/api` y `/panel`.
+
 ### LLM local
 
 El servicio habla con cualquier endpoint OpenAI-compatible (`/v1/chat/completions` con streaming y tool calling). Para usar un `llama-server` en el host:
@@ -126,7 +145,7 @@ Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md
 ## Registro de sistemas en base de datos
 
 Por defecto el registro sale de `config/sistemas.yaml` (`ASISTENTE_REGISTRO=yaml`) y los secretos de las variables
-`*_env`, que se resuelven **al cargar** (hay que `POST /admin/recargar` tras cambiar una variable). Con
+`*_env`, que se resuelven **al cargar** (hay que `POST /admin/api/recargar` tras cambiar una variable). Con
 `ASISTENTE_REGISTRO=bd` el registro sale de Postgres y los secretos van cifrados (AES-256-GCM) con
 `ASISTENTE_CLAVES_MAESTRAS="k1:<base64 de 32 bytes>"`; ambas fuentes nunca conviven y en modo BD no se lee el
 entorno para secretos de sistema. Cada réplica sondea `registro_version` cada 5 s.
@@ -223,5 +242,5 @@ Lo que define el contrato HTTP está en [`contrato/CONTRATO.md`](contrato/CONTRA
   10. Auditoría de sistema, usuario, `jti`, tool, parámetros, estado, duración, tokens y zona horaria, sin guardar resultados completos; se purga con la retención del sistema (30 días por defecto; antes `llamadas_tool` no se purgaba).
   11. Secretos solo por variables de entorno; nunca se loguean cabeceras `Authorization` ni tokens. Si la infraestructura lo permite, restringir el egress a la API del LLM y a las `base_url` registradas (con la búsqueda web encendida, también a Tavily y SearXNG; el lector directo de páginas necesita salida general a internet en los puertos 80/443, o se apaga con `WEB_LECTOR_DIRECTO=false`).
 - **Decisiones menores:** manifiesto global por sistema, `HS256` solo para sistemas legados (lo demás, firma asimétrica), widget como vista de chat a pantalla completa y solo con la conversación actual (historial oculto tras `MOSTRAR_HISTORIAL`).
-- **Costo por sistema:** cada llamada al LLM suma a `uso_modelo` (sistema, mes y modelo; entrada, caché de entrada y salida por separado; no se purga). `GET /admin/uso?mes=YYYY-MM` lo traduce a USD con `config/precios.yaml`, con una cota `valle` y otra `pico` porque el servicio no sabe en qué horario del proveedor cayó cada llamada. Un modelo sin tarifa figura en `sin_tarifa` y no entra en el total. La voz del servidor (ElevenLabs) suma sus caracteres a `uso_voz` (sistema, mes y motor) y `/admin/uso` la informa en `voz` con un costo por carácter (precio de lista en `config/precios.yaml`, clave `proveedor:modelo`), que entra en el total del sistema.
+- **Costo por sistema:** cada llamada al LLM suma a `uso_modelo` (sistema, mes y modelo; entrada, caché de entrada y salida por separado; no se purga). `GET /admin/api/uso?mes=YYYY-MM` lo traduce a USD con `config/precios.yaml`, con una cota `valle` y otra `pico` porque el servicio no sabe en qué horario del proveedor cayó cada llamada. Un modelo sin tarifa figura en `sin_tarifa` y no entra en el total. La voz del servidor (ElevenLabs) suma sus caracteres a `uso_voz` (sistema, mes y motor) y `/admin/api/uso` la informa en `voz` con un costo por carácter (precio de lista en `config/precios.yaml`, clave `proveedor:modelo`), que entra en el total del sistema.
 - **Voz:** Web Speech del navegador como camino principal. Whisper `small` y Kokoro locales se descartaron por calidad en pruebas manuales (resultados en `PROVEEDORES_VOZ.md`); el servicio Whisper sigue en el compose como opcional (perfil `voz`) y como STT del servidor (`voz-motor="servidor"`).

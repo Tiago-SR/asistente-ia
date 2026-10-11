@@ -19,6 +19,7 @@ from asistente.sistemas.registro import (
     CAMPOS_SECRETOS,
     EntradaRegistro,
     RegistroSistemas,
+    Sistema,
     entradas_desde_yaml,
     validar_sistema,
 )
@@ -29,6 +30,11 @@ log = logging.getLogger(__name__)
 # Columnas propias: no se repiten dentro de `config` (JSONB), así hay una sola fuente para cada dato.
 _FUERA_DE_CONFIG = {"id", "nombre", "habilitado", "acciones_habilitadas", "tool_estado"}
 INTERVALO_SONDEO_S = 5.0
+
+
+def config_json(sistema: Sistema) -> dict:
+    """Lo que va al JSONB `config` de un sistema: todo menos lo que tiene columna o tabla propia."""
+    return sistema.model_dump(mode="json", exclude=_FUERA_DE_CONFIG, exclude_none=True)
 
 
 class ErrorRegistro(Exception):
@@ -152,7 +158,7 @@ async def importar_yaml(
         if existentes:
             await s.execute(delete(SistemaRegistro))  # secretos y tool_estado caen en cascada
         for sistema, secretos in listos:
-            config = sistema.model_dump(mode="json", exclude=_FUERA_DE_CONFIG, exclude_none=True)
+            config = config_json(sistema)
             s.add(SistemaRegistro(id=sistema.id, nombre=sistema.nombre, habilitado=sistema.habilitado,
                                   config=config, actualizado_por=por))
             estados = {n: True for n in sistema.acciones_habilitadas} | sistema.tool_estado

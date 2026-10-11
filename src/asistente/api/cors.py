@@ -13,7 +13,7 @@ _PERMITE = {
     b"access-control-max-age": b"600",
 }
 
-_SIN_CORS = ("/admin", "/panel")
+_SIN_CORS = ("/admin", "/panel")  # "/admin" cubre /admin/api (startswith)
 
 
 class CorsSistemas:

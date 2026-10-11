@@ -29,7 +29,7 @@ async def limpio(sesiones):  # noqa: F811
 
 
 async def entrar(c, email="ana@ejemplo.com", clave=CLAVE):
-    r = await c.post("/admin/login", json={"email": email, "clave": clave}, headers=ORIGEN)
+    r = await c.post("/admin/api/login", json={"email": email, "clave": clave}, headers=ORIGEN)
     cookie = r.cookies.get("__Host-admin") if r.status_code == 200 else None
     return r, ({"Cookie": f"__Host-admin={cookie}"} if cookie else {})
 
@@ -41,17 +41,17 @@ async def test_login_y_sesion_leen_pero_no_escriben_sin_csrf(construir_app, limp
         assert r.status_code == 200 and r.json()["rol"] == "operador"
         assert "httponly" in r.headers["set-cookie"].lower() and "samesite=strict" in r.headers["set-cookie"].lower()
         csrf = r.json()["csrf"]
-        assert (await c.get("/admin/yo", headers=h)).json()["email"] == "ana@ejemplo.com"
-        assert (await c.get("/admin/sistemas", headers=h)).status_code == 200
+        assert (await c.get("/admin/api/yo", headers=h)).json()["email"] == "ana@ejemplo.com"
+        assert (await c.get("/admin/api/sistemas", headers=h)).status_code == 200
         # POST sin CSRF, con CSRF pero sin Origin, y con Origin ajeno: rechazados
-        assert (await c.post("/admin/recargar", headers=h)).status_code == 403
-        assert (await c.post("/admin/recargar", headers={**h, "X-CSRF": csrf})).status_code == 403
+        assert (await c.post("/admin/api/recargar", headers=h)).status_code == 403
+        assert (await c.post("/admin/api/recargar", headers={**h, "X-CSRF": csrf})).status_code == 403
         ajeno = {**h, "X-CSRF": csrf, "Origin": "http://malo.example"}
-        assert (await c.post("/admin/recargar", headers=ajeno)).status_code == 403
+        assert (await c.post("/admin/api/recargar", headers=ajeno)).status_code == 403
         ok = {**h, "X-CSRF": csrf, **ORIGEN}
-        assert (await c.post("/admin/recargar", headers=ok)).status_code == 200
-        assert (await c.post("/admin/logout", headers=ok)).status_code == 200
-        assert (await c.get("/admin/yo", headers=h)).status_code == 401
+        assert (await c.post("/admin/api/recargar", headers=ok)).status_code == 200
+        assert (await c.post("/admin/api/logout", headers=ok)).status_code == 200
+        assert (await c.get("/admin/api/yo", headers=h)).status_code == 401
 
 
 async def test_login_fallido_es_indistinguible(construir_app, limpio):  # noqa: F811
@@ -61,7 +61,7 @@ async def test_login_fallido_es_indistinguible(construir_app, limpio):  # noqa: 
         b, _ = await entrar(c, email="nadie@ejemplo.com")
         assert (a.status_code, a.json()) == (b.status_code, b.json()) == (401, {"error": "credenciales_invalidas"})
         # sin Origin propio ni siquiera se intenta
-        r = await c.post("/admin/login", json={"email": "ana@ejemplo.com", "clave": CLAVE})
+        r = await c.post("/admin/api/login", json={"email": "ana@ejemplo.com", "clave": CLAVE})
         assert r.status_code == 403
 
 
@@ -105,7 +105,7 @@ async def test_alta_valida_y_no_guarda_la_clave_en_claro(limpio):
 
 async def test_token_estatico_sigue_valiendo_sin_csrf_y_se_audita(construir_app, limpio):  # noqa: F811
     async with construir_app(admin_token="adm1n") as c:
-        r = await c.post("/admin/recargar", headers={"Authorization": "Bearer adm1n"})
+        r = await c.post("/admin/api/recargar", headers={"Authorization": "Bearer adm1n"})
         assert r.status_code == 200
     async with limpio() as s:
         fila = (await s.execute(select(AdminAuditoria))).scalar_one()
@@ -114,5 +114,5 @@ async def test_token_estatico_sigue_valiendo_sin_csrf_y_se_audita(construir_app,
 
 async def test_el_cors_de_los_sistemas_no_aplica_al_panel(construir_app):  # noqa: F811
     async with construir_app() as c:
-        r = await c.get("/admin/yo", headers={"Origin": ORIGEN_A})
+        r = await c.get("/admin/api/yo", headers={"Origin": ORIGEN_A})
         assert "access-control-allow-origin" not in r.headers

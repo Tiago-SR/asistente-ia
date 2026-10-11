@@ -225,7 +225,21 @@ COPY --from=panel-build /panel/dist /app/src/asistente/static/panel
   `rol == admin` a los endpoints de escritura de la Fase 3 (base_url, auth, llm) y gestión de usuarios;
   retención de `admin_auditoria` sin decidir; el bloqueo por IP es por réplica (en memoria).
 
-### Fase 3 — Panel (frontend)
+### Fase 3 — Panel (frontend)  *(en curso, 2026-10-11)*
+**Hecho**: API bajo `/admin/api`; `sistemas/escritura.py` (una transacción por operación: `FOR UPDATE` → validar →
+`version` → secretos/tools → `registro_version` → auditoría); `PERMISOS` por rol (`requiere(...)`: escritura solo
+`admin` y solo con **sesión**, el token estático no escribe); 409 `registro_en_yaml` en modo YAML; endpoints
+`POST/GET/PUT /sistemas[/{id}]`, `PUT|DELETE /sistemas/{id}/secretos/{campo}`, `GET /sistemas/{id}/tools`,
+`PUT /sistemas/{id}/tools/{tool}`, `GET|POST /usuarios`, `PATCH /usuarios/{id}`, `POST /usuarios/{id}/clave`
+(último admin protegido, sesiones revocadas). Seguridad (asesor): la clave global del LLM ya no viaja a un
+`llm.base_url` propio; URLs sin credenciales/query/fragmento; cambiar `base_url`/`llm.base_url` borra su secreto
+(sin token nuevo y habilitado → 409 `base_url_requiere_token`, no se apaga en silencio); errores de validación de
+`/admin/api` no repiten el cuerpo. Frontend en `panel/` (shadcn/ui base-nova, Tailwind v4, enrutado por hash),
+servido en `/panel` con CSP; Dockerfile multi-stage; servicio `panel` (perfil) en compose dev.
+**Pendiente**: prueba manual en navegador (login, crear/editar, tools con un manifiesto real); decidir exposición
+en los proxies de `deploy/` (hoy `/admin*` cerrado hacia fuera); SSRF a nivel de conector (loopback/privadas con
+lista de permitidos para dev); retención de `admin_auditoria`; cambio de contraseña propia desde el panel;
+eliminar el modo YAML.
 - [ ] Andamiaje `panel/` (Vite + React + TS), `Dockerfile` multi-stage y servicio `panel` con HMR (sección 6).
 - [ ] Pantallas: login; lista y estado de sistemas (usa `GET /admin/sistemas`); alta/edición; carga de secretos
       (solo escritura); tools del manifiesto en vivo con interruptores; usuarios admin (solo `admin`).
@@ -258,8 +272,8 @@ desde el panel.
 - Evals (`evals/correr.py`) para confirmar que el comportamiento del agente no cambia.
 
 ## 10. Preguntas aún abiertas (decidir al llegar)
-- Librería de componentes del panel (shadcn/ui vs Mantine) y de gráficos.
-- Ruta final del panel (`/panel`) y si la API del panel se reorganiza bajo `/admin/api` o conserva `/admin/*`.
+- Librería de gráficos para la Fase 4 (la de componentes ya es shadcn/ui).
+- ~~Ruta del panel y API~~: decidido — panel en `/panel`, API en `/admin/api`; librería: shadcn/ui.
 - Si `operador` puede recargar manifiestos y editar `limites`, o solo `admin`.
 - Política de retención de `admin_auditoria` y de `evento_uso`.
 - Qué hacer con `config/sistemas.yaml` tras migrar: ¿se conserva para dev como semilla (`importar-yaml` al

@@ -115,7 +115,7 @@ class ContadorUso(Base):
 class UsoModelo(Base):
     """Consumo por sistema, mes y modelo, con la caché de entrada aparte (cuesta distinto).
 
-    Es la base del informe de costo (`GET /admin/uso`). No se purga con la retención de las
+    Es la base del informe de costo (`GET /admin/api/uso`). No se purga con la retención de las
     conversaciones: son pocas filas y sirven para facturar meses atrás.
     """
 
@@ -135,7 +135,7 @@ class UsoModelo(Base):
 class UsoVoz(Base):
     """Caracteres sintetizados por sistema, mes y motor de voz del servidor (ElevenLabs u otro).
 
-    Base del costo de TTS en `GET /admin/uso`: lo que se factura es por carácter, no por token.
+    Base del costo de TTS en `GET /admin/api/uso`: lo que se factura es por carácter, no por token.
     Solo cuenta la voz del servidor (la del navegador no cuesta). Como `uso_modelo`, no se purga.
     """
 

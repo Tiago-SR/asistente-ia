@@ -106,7 +106,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
 
         svc = Servicios(
             settings=Settings(database_url=URL, heartbeat_s=heartbeat_s, admin_token=admin_token,
-                              precios_path=precios_path),
+                              precios_path=precios_path, registro="yaml"),
             registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
@@ -330,17 +330,17 @@ async def test_heartbeat_en_turnos_lentos(construir_app):
 
 
 async def test_admin_deshabilitado_sin_token_configurado(api):
-    assert (await api.post("/admin/recargar")).status_code == 503
+    assert (await api.post("/admin/api/recargar")).status_code == 503
 
 
 async def test_admin_exige_token_y_reporta_sistemas(construir_app):
     async with construir_app(admin_token="adm1n") as c:
-        assert (await c.get("/admin/sistemas", headers={"Authorization": "Bearer mal"})).status_code == 401
-        assert (await c.get("/admin/sistemas")).status_code == 401
+        assert (await c.get("/admin/api/sistemas", headers={"Authorization": "Bearer mal"})).status_code == 401
+        assert (await c.get("/admin/api/sistemas")).status_code == 401
         h = {"Authorization": "Bearer adm1n"}
-        r = (await c.get("/admin/sistemas", headers=h)).json()
+        r = (await c.get("/admin/api/sistemas", headers=h)).json()
         assert {s["id"]: s["manifiesto_ok"] for s in r["sistemas"]} == {"mock-a": True, "mock-b": True}
-        assert (await c.post("/admin/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
+        assert (await c.post("/admin/api/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
 
 
 async def test_admin_uso_calcula_el_costo_por_sistema_y_modelo(construir_app, sesiones, tmp_path):
@@ -362,9 +362,9 @@ m-caro:
         ])
     async with construir_app(admin_token="adm1n", precios_path=str(precios)) as c:
         h = {"Authorization": "Bearer adm1n"}
-        assert (await c.get("/admin/uso")).status_code == 401
-        assert (await c.get("/admin/uso?mes=2026-13", headers=h)).status_code == 422
-        r = (await c.get("/admin/uso?mes=2019-03", headers=h)).json()
+        assert (await c.get("/admin/api/uso")).status_code == 401
+        assert (await c.get("/admin/api/uso?mes=2026-13", headers=h)).status_code == 422
+        r = (await c.get("/admin/api/uso?mes=2019-03", headers=h)).json()
         assert r["mes"] == "2019-03"
         a = next(s for s in r["sistemas"] if s["id"] == "mock-a")
         assert a["nombre"] == "MOCK-A"
@@ -374,8 +374,8 @@ m-caro:
         assert caro["costo_usd"]["pico"] == pytest.approx(14.8)
         assert next(m for m in a["modelos"] if m["modelo"] == "m-local")["costo_usd"] is None
         assert a["sin_tarifa"] == ["m-local"] and a["costo_usd"]["valle"] == pytest.approx(7.4)
-        assert (await c.get("/admin/uso?mes=2019-04", headers=h)).json()["sistemas"] == []
-        assert (await c.get("/admin/uso", headers=h)).status_code == 200  # mes en curso
+        assert (await c.get("/admin/api/uso?mes=2019-04", headers=h)).json()["sistemas"] == []
+        assert (await c.get("/admin/api/uso", headers=h)).status_code == 200  # mes en curso
 
 
 async def test_admin_uso_suma_el_costo_de_la_voz_del_servidor(construir_app, sesiones, tmp_path):
@@ -402,7 +402,7 @@ m-caro:
                    caracteres=1_000),   # un sistema que solo usó voz también aparece
         ])
     async with construir_app(admin_token="adm1n", precios_path=str(precios)) as c:
-        r = (await c.get("/admin/uso?mes=2019-05", headers={"Authorization": "Bearer adm1n"})).json()
+        r = (await c.get("/admin/api/uso?mes=2019-05", headers={"Authorization": "Bearer adm1n"})).json()
     a = next(s for s in r["sistemas"] if s["id"] == "mock-a")
     voz = {v["modelo"]: v for v in a["voz"]}
     assert voz["con-tarifa"]["caracteres"] == 50_000 and voz["con-tarifa"]["llamadas"] == 40

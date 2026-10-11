@@ -5,3 +5,6 @@
 .venv
 .pytest_cache
 .ruff_cache
+**/node_modules
+panel/dist
+src/asistente/static/panel

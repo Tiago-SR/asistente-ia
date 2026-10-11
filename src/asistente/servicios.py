@@ -65,6 +65,7 @@ class Servicios:
     web: WebConRespaldo | None = None  # None = sin búsqueda web (aunque el sistema la tenga habilitada)
     adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
     admin: AdminSql | None = None  # usuarios, sesiones y auditoría del panel
+    cifrador: Cifrador | None = None  # secretos de sistema (solo registro en BD); None = sin claves maestras
 
 
 def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
@@ -76,7 +77,11 @@ def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Si
         proveedor = (cfg.proveedor if cfg else None) or settings.llm_proveedor
         modelo = (cfg.modelo if cfg else None) or settings.modelo_default
         base_url = (cfg.base_url if cfg else None) or settings.llm_base_url
-        api_key = registro.secreto(sistema.id, "llm_api_key") or settings.llm_api_key
+        api_key = registro.secreto(sistema.id, "llm_api_key")
+        if not (cfg and cfg.base_url):
+            # La clave global solo acompaña a la URL global: con una URL propia del sistema saldría hacia
+            # un servidor que no controla el operador.
+            api_key = api_key or settings.llm_api_key
         if proveedor != "openai_compat":
             raise LLMNoConfigurado(f"proveedor no soportado: {proveedor}")
         if not base_url or not modelo:
@@ -141,6 +146,7 @@ def _fabrica_web(settings: Settings) -> WebConRespaldo | None:
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
+    cifrador: Cifrador | None = None
     if settings.registro == "bd":
         registro = RegistroSistemas()
         try:
@@ -182,4 +188,5 @@ def construir(settings: Settings) -> Servicios:
         memoria=MemoriaSql(sesiones, settings.memoria_dias_sin_uso),
         web=_fabrica_web(settings),
         admin=AdminSql(sesiones),
+        cifrador=cifrador,
     )

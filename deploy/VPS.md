@@ -54,9 +54,9 @@ Los ejemplos devuelven 404 para `/admin`, `/docs` y `/openapi.json` desde fuera,
 ```sh
 curl https://asistente.<dominio>/salud                  # {"ok":true,"bd":true,"sistemas":N}
 curl https://asistente.<dominio>/widget.js | head -3
-curl -o /dev/null -w '%{http_code}\n' https://asistente.<dominio>/admin/sistemas   # 404 desde fuera
+curl -o /dev/null -w '%{http_code}\n' https://asistente.<dominio>/admin/api/sistemas   # 404 desde fuera
 # Desde el host, con el token de admin:
-curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" http://127.0.0.1:8000/admin/sistemas
+curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" http://127.0.0.1:8000/admin/api/sistemas
 ```
 
 Antes de habilitar un sistema, pasarle `herramientas/verificar_sistema.py` (ver el README).
@@ -67,8 +67,8 @@ Antes de habilitar un sistema, pasarle `herramientas/verificar_sistema.py` (ver 
 |---|---|
 | Actualizar | `deploy/deploy.sh` (hace backup antes de migrar) |
 | Volver atrás | `docker images asistente` → `deploy/deploy.sh rollback <tag>`. Si el esquema cambió, hace backup y baja las migraciones con la imagen actual (pregunta antes; `YES=1` lo salta). Si el asistente actual no corre, restaurar el backup |
-| Cambiar `sistemas.yaml` | editar y `POST /admin/recargar` desde el host (sin reiniciar) |
-| Costo del mes por sistema | `curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" "http://127.0.0.1:8000/admin/uso?mes=2026-10"` (tokens, caché y USD por sistema y modelo, y los caracteres y USD de la voz del servidor; las tarifas están en `config/precios.yaml`, a revisar contra el proveedor) |
+| Cambiar `sistemas.yaml` | editar y `POST /admin/api/recargar` desde el host (sin reiniciar) |
+| Costo del mes por sistema | `curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" "http://127.0.0.1:8000/admin/api/uso?mes=2026-10"` (tokens, caché y USD por sistema y modelo, y los caracteres y USD de la voz del servidor; las tarifas están en `config/precios.yaml`, a revisar contra el proveedor) |
 | Logs | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f asistente` (rotan a 5 × 10 MB) |
 | Backup | `deploy/backup.sh` (guarda los últimos 14 en `backups/`) |
 | Restaurar | `deploy/backup.sh restore backups/<archivo>.sql.gz` |

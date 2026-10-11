@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import (
@@ -42,6 +43,23 @@ class _Modelo(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+def _url_http(valor: str | None, campo: str) -> str | None:
+    """URL saliente editable desde el panel: http(s), con host, y sin credenciales, query ni fragmento (no deben
+    colarse secretos en la config, que se audita)."""
+    if valor is None:
+        return None
+    try:
+        u = urlsplit(valor)
+        host = u.hostname
+    except ValueError as e:
+        raise ValueError(f"{campo} no es una URL válida") from e
+    if u.scheme not in ("http", "https") or not host:
+        raise ValueError(f"{campo} debe ser http(s)")
+    if u.username is not None or u.password is not None or u.query or u.fragment:
+        raise ValueError(f"{campo}: sin usuario, contraseña, query ni fragmento")
+    return valor
+
+
 class AuthConfig(_Modelo):
     """Cómo se verifican los tokens del sistema. La clave HS256 es un secreto (campo `auth_hs256`); la clave
     pública y la URL JWKS no lo son."""
@@ -51,6 +69,11 @@ class AuthConfig(_Modelo):
     jwks_url: str | None = None
     audiencia: str = "asistente"
     tolerancia_reloj_s: int = Field(default=30, ge=0, le=300)
+
+    @field_validator("jwks_url")
+    @classmethod
+    def _jwks_url(cls, valor: str | None) -> str | None:
+        return _url_http(valor, "jwks_url")
 
     @model_validator(mode="after")
     def _fuente_de_clave(self) -> Self:
@@ -90,6 +113,11 @@ class LLMConfig(_Modelo):
     base_url: str | None = None  # la clave va aparte, como secreto `llm_api_key`
     # ¿el modelo admite imágenes? None = lo que diga `LLM_IMAGENES`
     imagenes: bool | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def _base_url(cls, valor: str | None) -> str | None:
+        return _url_http(valor, "llm.base_url")
 
 
 class LimitesConfig(_Modelo):
@@ -148,8 +176,7 @@ class Sistema(_Modelo):
 
     @model_validator(mode="after")
     def _base_url(self) -> Self:
-        if not self.base_url.startswith(("http://", "https://")):
-            raise ValueError("base_url debe ser http(s)")
+        _url_http(self.base_url, "base_url")
         return self
 
 

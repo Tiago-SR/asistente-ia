@@ -33,7 +33,9 @@ _HASH_FALSO = _hasher.hash("clave-que-no-existe-" + secrets.token_hex(8))  # igu
 
 
 class ErrorAdmin(Exception):
-    pass
+    def __init__(self, mensaje: str, codigo: str = "invalido") -> None:
+        super().__init__(mensaje)
+        self.codigo = codigo
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,43 @@ class AdminSql:
             if uid is None:
                 raise ErrorAdmin("usuario inexistente")
             await s.execute(delete(AdminSesion).where(AdminSesion.usuario_id == uid))
+
+    async def listar_usuarios(self) -> list[dict]:
+        async with self._sesiones() as s:
+            filas = (await s.execute(select(AdminUsuario).order_by(AdminUsuario.email))).scalars().all()
+        ahora = self._ahora()
+        return [{"id": str(u.id), "email": u.email, "rol": u.rol, "activo": u.activo,
+                 "bloqueado": bool(u.bloqueado_hasta and u.bloqueado_hasta > ahora),
+                 "ultimo_login": u.ultimo_login.isoformat() if u.ultimo_login else None} for u in filas]
+
+    async def modificar_usuario(self, usuario_id: uuid.UUID, *, rol: str | None = None,
+                                activo: bool | None = None, actor: str) -> dict:
+        """Cambia rol y/o estado. Nunca deja al sistema sin un admin activo ni deja que alguien se quite a sí
+        mismo el acceso. Revoca las sesiones del usuario (un rol o estado nuevo exige volver a entrar)."""
+        if rol is not None and rol not in ROLES:
+            raise ErrorAdmin(f"rol inválido (use {' o '.join(ROLES)})")
+        async with self._sesiones.begin() as s:
+            # Se bloquean todos los admin: dos cambios simultáneos no pueden dejar cero entre los dos.
+            admins = (await s.execute(
+                select(AdminUsuario).where(AdminUsuario.rol == "admin", AdminUsuario.activo.is_(True))
+                .with_for_update())).scalars().all()
+            u = (await s.execute(
+                select(AdminUsuario).where(AdminUsuario.id == usuario_id).with_for_update()
+            )).scalar_one_or_none()
+            if u is None:
+                raise ErrorAdmin("usuario inexistente", "usuario_inexistente")
+            nuevo_rol = u.rol if rol is None else rol
+            nuevo_activo = u.activo if activo is None else activo
+            pierde_acceso_admin = u.rol == "admin" and u.activo and not (nuevo_rol == "admin" and nuevo_activo)
+            if pierde_acceso_admin:
+                if u.email == actor:
+                    raise ErrorAdmin("no puede quitarse su propio acceso de admin", "auto_cambio")
+                if len(admins) <= 1:
+                    raise ErrorAdmin("debe quedar al menos un admin activo", "ultimo_admin")
+            if (nuevo_rol, nuevo_activo) != (u.rol, u.activo):
+                u.rol, u.activo = nuevo_rol, nuevo_activo
+                await s.execute(delete(AdminSesion).where(AdminSesion.usuario_id == u.id))
+            return {"id": str(u.id), "email": u.email, "rol": u.rol, "activo": u.activo}
 
     # --- login y sesiones ---
 

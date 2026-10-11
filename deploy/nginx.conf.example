@@ -7,7 +7,7 @@ server {
 
     client_max_body_size 4m;   # dictado: audio crudo
 
-    # Operación solo por el host (ssh + curl http://127.0.0.1:8000/admin/...) o una red interna.
+    # Operación solo por el host (ssh + curl http://127.0.0.1:8000/admin/api/...) o una red interna.
     location ~ ^/(admin|docs|openapi\.json) {
         return 404;
     }

@@ -18,12 +18,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ENV PYTHONPATH=/app/src
 CMD ["uvicorn", "asistente.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
 
+# ---------- panel-build: compila el panel (React + Vite). Node no llega a la imagen final ----------
+FROM node:22-alpine AS panel-build
+WORKDIR /panel
+COPY panel/package.json panel/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY panel/ ./
+RUN npm run build
+
 # ---------- build-prod: solo dependencias de ejecución ----------
 FROM base AS build-prod
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 COPY src ./src
+# Antes del segundo `uv sync`: el wheel empaqueta `static/`, y el contenedor prod es `read_only`.
+COPY --from=panel-build /panel/dist ./src/asistente/static/panel
 COPY README.md* ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable

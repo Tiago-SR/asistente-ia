@@ -3,11 +3,23 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from asistente.api import admin, chat, confirmaciones, conversaciones, estado, memoria, voz, widget
+from asistente.api import (
+    admin,
+    chat,
+    confirmaciones,
+    conversaciones,
+    estado,
+    memoria,
+    panel,
+    voz,
+    widget,
+)
 from asistente.api.cors import CorsSistemas
 from asistente.api.errores import ErrorApi, manejar_error_api
 from asistente.config import Settings
@@ -65,11 +77,22 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
     )
     app.state.servicios = servicios
     app.add_exception_handler(ErrorApi, manejar_error_api)
+
+    async def validacion(request: Request, e: RequestValidationError):
+        if not request.url.path.startswith("/admin/api"):
+            return await request_validation_exception_handler(request, e)
+        # El cuerpo del panel puede llevar secretos: el error por defecto de FastAPI repite el valor recibido.
+        detalle = [{"campo": ".".join(str(x) for x in d["loc"] if x != "body"), "mensaje": d["msg"]}
+                   for d in e.errors()]
+        return JSONResponse({"error": "solicitud_invalida", "detalle": detalle}, status_code=422)
+
+    app.add_exception_handler(RequestValidationError, validacion)
     app.add_middleware(CorsSistemas)
     routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
                voz.router, admin.router, widget.router)
     for r in routers:
         app.include_router(r)
+    panel.montar(app)  # solo si la imagen trae el panel compilado (prod); en dev lo sirve Vite
 
     @app.get("/salud")
     async def salud():
