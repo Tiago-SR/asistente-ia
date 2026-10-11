@@ -94,3 +94,12 @@ def test_ejemplo_del_repo_carga():
     from conftest import RAIZ
 
     assert RegistroSistemas(RAIZ / "config" / "sistemas.example.yaml").todos() == []
+
+
+def test_los_secretos_de_sistema_no_se_leen_del_entorno_fuera_del_registro():
+    """Una sola fuente: auth, manifiesto y fábrica de LLM piden el secreto al registro, nunca a os.environ."""
+    from conftest import RAIZ
+
+    for archivo in ("sistemas/auth.py", "sistemas/manifiesto.py", "servicios.py", "sistemas/conector_http.py"):
+        texto = (RAIZ / "src" / "asistente" / archivo).read_text()
+        assert "os.environ" not in texto and "getenv" not in texto, archivo

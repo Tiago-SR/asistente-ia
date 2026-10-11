@@ -35,11 +35,20 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
             purga = asyncio.create_task(
                 bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s, svc.acciones,
                             svc.auditoria, svc.memoria))
+        sondeo = None
+        fuente = app.state.servicios.registro.fuente_bd
+        if propio and fuente is not None:
+            try:
+                await fuente.cargar()
+            except Exception as e:  # noqa: BLE001 readiness en falso (no un registro vacío); el sondeo reintenta
+                log.error("registro de sistemas no disponible al arrancar: %s", type(e).__name__)
+            sondeo = asyncio.create_task(fuente.bucle())
         try:
             yield
         finally:
-            if purga:
-                purga.cancel()
+            for tarea in (purga, sondeo):
+                if tarea:
+                    tarea.cancel()
             svc = app.state.servicios
             if propio and svc.cierre:
                 await svc.cierre()
@@ -75,8 +84,13 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
             except Exception:
                 log.exception("healthcheck: la BD no responde")
                 bd = False
-        cuerpo = {"ok": bd, "bd": bd, "sistemas": len(svc.registro.todos())}
-        return JSONResponse(cuerpo, status_code=200 if bd else 503)
+        fuente = svc.registro.fuente_bd
+        registro_listo = fuente is None or fuente.listo
+        ok = bd and registro_listo
+        cuerpo = {"ok": ok, "bd": bd, "sistemas": len(svc.registro.todos())}
+        if not registro_listo:
+            cuerpo["registro"] = "sin_cargar"
+        return JSONResponse(cuerpo, status_code=200 if ok else 503)
 
     return app
 

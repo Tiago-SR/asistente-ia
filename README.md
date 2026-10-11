@@ -123,6 +123,27 @@ V_MANIFIESTO=... V_SECRETO=... python herramientas/verificar_sistema.py \
 
 Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md#65-verificar-la-integración). Los tests (`tests/test_verificador.py`) comprueban que detecta una variante rota del mock por cada comprobación.
 
+## Registro de sistemas en base de datos
+
+Por defecto el registro sale de `config/sistemas.yaml` (`ASISTENTE_REGISTRO=yaml`) y los secretos de las variables
+`*_env`, que se resuelven **al cargar** (hay que `POST /admin/recargar` tras cambiar una variable). Con
+`ASISTENTE_REGISTRO=bd` el registro sale de Postgres y los secretos van cifrados (AES-256-GCM) con
+`ASISTENTE_CLAVES_MAESTRAS="k1:<base64 de 32 bytes>"`; ambas fuentes nunca conviven y en modo BD no se lee el
+entorno para secretos de sistema. Cada réplica sondea `registro_version` cada 5 s.
+
+```sh
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli generar-clave
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml [ruta] [--reemplazar]
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli exportar-yaml [salida]   # sin secretos
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli rotar-clave
+```
+
+- **Rotar la clave:** anteponer la nueva (`k2:...,k1:...`), `rotar-clave`, y recién entonces retirar `k1`.
+- **Respaldar `ASISTENTE_CLAVES_MAESTRAS` fuera del backup de la BD.** Si se pierde no hay recuperación: hay que
+  re-emitir los secretos con cada sistema cliente.
+- `acciones_habilitadas` se importa como filas de `tool_estado` (solo excepciones: lectura habilitada salvo que se
+  apague, escritura apagada salvo que se encienda). Plan completo del panel en `PLAN_PANEL_ADMIN.md`.
+
 ## Producción
 
 Guía completa para una VPS nueva (host, DNS, proxy con TLS, backups, rollback): [`deploy/VPS.md`](deploy/VPS.md). Resumen:

@@ -1,5 +1,6 @@
 """Cableado de dependencias. La API solo ve esta estructura, así los tests inyectan fakes."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -21,14 +22,18 @@ from asistente.core.web.searxng import WebSearxng
 from asistente.core.web.tavily import WebTavily
 from asistente.limits import LimitesPostgres
 from asistente.sistemas.auth import Autenticador
+from asistente.sistemas.cifrado import Cifrador, ErrorCifrado
 from asistente.sistemas.conector_http import ConectorHttp
 from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas, Sistema
+from asistente.sistemas.registro_bd import FuenteBD
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo
+
+log = logging.getLogger(__name__)
 
 
 class LLMNoConfigurado(Exception):
@@ -68,8 +73,8 @@ def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Si
         cfg = sistema.llm
         proveedor = (cfg.proveedor if cfg else None) or settings.llm_proveedor
         modelo = (cfg.modelo if cfg else None) or settings.modelo_default
-        base_url = (sistema.secreto(cfg.base_url_env, registro.env) if cfg else None) or settings.llm_base_url
-        api_key = (sistema.secreto(cfg.api_key_env, registro.env) if cfg else None) or settings.llm_api_key
+        base_url = (cfg.base_url if cfg else None) or settings.llm_base_url
+        api_key = registro.secreto(sistema.id, "llm_api_key") or settings.llm_api_key
         if proveedor != "openai_compat":
             raise LLMNoConfigurado(f"proveedor no soportado: {proveedor}")
         if not base_url or not modelo:
@@ -134,13 +139,30 @@ def _fabrica_web(settings: Settings) -> WebConRespaldo | None:
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
-    registro = RegistroSistemas(settings.sistemas_path)
+    if settings.registro == "bd":
+        registro = RegistroSistemas()
+        try:
+            cifrador = Cifrador.desde_entorno()
+        except ErrorCifrado as e:  # sin clave los sistemas con secretos quedan en `errores`
+            log.error("claves maestras no utilizables: %s", e)
+            cifrador = None
+        FuenteBD(registro, sesiones, cifrador)
+    else:
+        registro = RegistroSistemas(settings.sistemas_path)
     voces = _fabrica_voces(settings)
     manifiestos = CacheManifiestos(registro)
+    autenticador = Autenticador(registro)
+
+    def _descartar_cachés(ids: set[str]) -> None:
+        for i in ids:
+            manifiestos.invalidar(i)
+            autenticador.invalidar_jwks(i)
+
+    registro.suscribir(_descartar_cachés)
     return Servicios(
         settings=settings,
         registro=registro,
-        autenticador=Autenticador(registro),
+        autenticador=autenticador,
         manifiestos=manifiestos,
         conector=ConectorHttp(registro, manifiestos),
         repo=Repo(sesiones),

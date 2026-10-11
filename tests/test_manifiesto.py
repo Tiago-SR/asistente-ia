@@ -115,6 +115,7 @@ async def test_ttl_y_recarga(registro_dos, cliente_mocks):
 
 async def test_credencial_de_manifiesto_incorrecta(registro_dos, cliente_mocks, monkeypatch):
     monkeypatch.setitem(registro_dos._env, "mock-a_MANIFEST", "otra-cosa")
+    registro_dos.recargar()  # el entorno se resuelve al cargar
     with pytest.raises(ManifiestoInvalido, match="401"):
         await CacheManifiestos(registro_dos, cliente_mocks).obtener("mock-a")
 

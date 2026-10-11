@@ -196,7 +196,7 @@ class CacheManifiestos:
             self._cache.pop(sistema_id, None)
 
     async def _descargar(self, s: Sistema) -> Manifiesto:
-        token = s.secreto(s.conector.token_manifiesto_env, self._registro.env)
+        token = self._registro.secreto(s.id, "token_manifiesto")
         url = s.base_url.rstrip("/") + s.conector.ruta_manifiesto
         try:
             async with self._cliente.stream(

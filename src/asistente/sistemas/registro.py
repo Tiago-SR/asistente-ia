@@ -1,18 +1,35 @@
-"""Registro de sistemas: carga y valida `config/sistemas.yaml` (sección 6 del contrato).
+"""Registro de sistemas (sección 6 del contrato).
 
-Un sistema inválido queda deshabilitado (con el error registrado en `errores`) y el
-resto sigue funcionando. Los secretos nunca están en el archivo: se referencian por
-nombre de variable de entorno y se resuelven con `Sistema.secreto`.
+El modelo `Sistema` es el canónico: lo que se guarda en la BD (JSONB) y lo que valida el panel. Los secretos
+no forman parte de él: viajan aparte (`EntradaRegistro.secretos`), con los campos de `CAMPOS_SECRETOS`, y se
+leen con `RegistroSistemas.secreto`.
+
+Hay dos fuentes y nunca conviven en un mismo registro:
+- YAML (`config/sistemas.yaml`): un adaptador traduce las referencias `*_env` y resuelve el entorno AL CARGAR.
+- BD (`registro_bd.py`): lee las filas cifradas y nunca consulta `os.environ` para secretos de sistema.
+Ambas pasan por `validar_sistema`: una sola regla de validación.
+
+Un sistema inválido queda deshabilitado (con el error registrado en `errores`) y el resto sigue funcionando.
 """
 
+import copy
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from asistente.core import zona
 
@@ -26,25 +43,22 @@ class _Modelo(BaseModel):
 
 
 class AuthConfig(_Modelo):
+    """Cómo se verifican los tokens del sistema. La clave HS256 es un secreto (campo `auth_hs256`); la clave
+    pública y la URL JWKS no lo son."""
+
     algoritmo: Literal["RS256", "EdDSA", "HS256"]
-    clave_publica_env: str | None = None
+    clave_publica: str | None = None  # PEM
     jwks_url: str | None = None
-    secreto_env: str | None = None
     audiencia: str = "asistente"
     tolerancia_reloj_s: int = Field(default=30, ge=0, le=300)
 
     @model_validator(mode="after")
     def _fuente_de_clave(self) -> Self:
-        fuentes = [self.clave_publica_env, self.jwks_url, self.secreto_env]
-        if sum(f is not None for f in fuentes) != 1:
-            raise ValueError(
-                "indicar exactamente una fuente de clave: "
-                "clave_publica_env, jwks_url o secreto_env"
-            )
-        if self.algoritmo == "HS256" and self.secreto_env is None:
-            raise ValueError("HS256 requiere secreto_env")
-        if self.algoritmo != "HS256" and self.secreto_env is not None:
-            raise ValueError("secreto_env solo es válido con HS256")
+        if self.algoritmo == "HS256":
+            if self.clave_publica is not None or self.jwks_url is not None:
+                raise ValueError("HS256 usa un secreto compartido: sin clave_publica ni jwks_url")
+        elif (self.clave_publica is None) == (self.jwks_url is None):
+            raise ValueError("indicar exactamente una fuente de clave: clave_publica o jwks_url")
         return self
 
 
@@ -53,7 +67,6 @@ class ConectorConfig(_Modelo):
     ruta_manifiesto: str = "/asistente/tools"
     ruta_ejecucion: str = "/asistente/tools/{nombre}"
     ruta_propuesta: str = "/asistente/tools/{nombre}/propuesta"
-    token_manifiesto_env: str
     timeout_s: float = Field(default=20, gt=0, le=120)
     manifiesto_ttl_s: int = Field(default=3600, ge=0)
     max_respuesta_bytes: int = Field(default=50_000, gt=0)
@@ -74,8 +87,7 @@ class LLMConfig(_Modelo):
     # así que `llm: {imagenes: true}` basta para encender solo las imágenes de ese sistema.
     proveedor: str | None = None
     modelo: str | None = None
-    base_url_env: str | None = None
-    api_key_env: str | None = None
+    base_url: str | None = None  # la clave va aparte, como secreto `llm_api_key`
     # ¿el modelo admite imágenes? None = lo que diga `LLM_IMAGENES`
     imagenes: bool | None = None
 
@@ -102,6 +114,10 @@ class Sistema(_Modelo):
     locale_defecto: str | None = Field(default=None, pattern=r"^[a-z]{2}(-[A-Z]{2})?$")
     # Fase 5: escrituras que el modelo puede proponer (con confirmación del usuario). Vacío = solo lectura.
     acciones_habilitadas: tuple[str, ...] = ()
+    # Excepciones por tool (nombre → habilitada). Solo se guarda lo que se aparta del valor por defecto: la lectura
+    # está habilitada salvo que aquí diga `false`; la escritura, deshabilitada salvo `true` (o `acciones_habilitadas`).
+    # Ver `sistemas/permisos.py`; es el hueco donde la tabla `tool_estado` entrega sus filas.
+    tool_estado: dict[str, bool] = Field(default_factory=dict)
     # Zona (IANA, p. ej. `America/Montevideo`) de los usuarios cuyo navegador no la informa: fija qué día es «hoy».
     zona_horaria: str | None = None
     # Tool local `consultas_recientes` («lo mismo que ayer»): lee las consultas que ya se auditan, sin guardar nada nuevo.
@@ -136,30 +152,115 @@ class Sistema(_Modelo):
             raise ValueError("base_url debe ser http(s)")
         return self
 
-    def secreto(self, nombre_env: str | None, env: Mapping[str, str] | None = None) -> str | None:
-        """Valor de una variable de entorno referenciada por el registro (o None)."""
-        if not nombre_env:
-            return None
-        return (env if env is not None else os.environ).get(nombre_env) or None
+
+# Secretos canónicos de un sistema. Se escriben, nunca se devuelven en claro.
+CAMPOS_SECRETOS = ("auth_hs256", "token_manifiesto", "llm_api_key")
+
+
+@dataclass(frozen=True)
+class EntradaRegistro:
+    """Un sistema tal como lo entrega una fuente, antes de validar. `error` = la fuente ya no pudo leerlo
+    (p. ej. un secreto que no descifra): queda en `errores` sin intentar validarlo."""
+
+    clave: str  # id (o una etiqueta si ni siquiera lo tiene), para los mensajes de error
+    config: Mapping | None = None
+    secretos: Mapping[str, str] = field(default_factory=dict, repr=False)
+    error: str | None = None
+
+
+def validar_sistema(config: Mapping, secretos: Mapping[str, str]) -> Sistema:
+    """La única validación: el modelo, más los secretos que exige un sistema habilitado."""
+    sistema = Sistema.model_validate(config)
+    if sistema.habilitado:
+        faltan = []
+        if sistema.auth.algoritmo == "HS256" and not secretos.get("auth_hs256"):
+            faltan.append("auth_hs256")
+        if not secretos.get("token_manifiesto"):
+            faltan.append("token_manifiesto")
+        if faltan:
+            raise ValueError(f"faltan secretos: {', '.join(faltan)}")
+    return sistema
+
+
+def desde_yaml(entrada: Mapping, env: Mapping[str, str]) -> tuple[dict, dict[str, str]]:
+    """Adaptador del YAML: traduce `*_env` a (config canónica, secretos). Las variables que faltan se
+    reportan por nombre (nunca su valor)."""
+    cfg = copy.deepcopy(dict(entrada))
+    secretos: dict[str, str] = {}
+    faltan: list[str] = []
+
+    def valor(nombre: object) -> str | None:
+        return env.get(nombre) or None if isinstance(nombre, str) else None
+
+    auth = cfg.get("auth")
+    if isinstance(auth, dict):
+        if "secreto_env" in auth:
+            if auth.get("algoritmo") != "HS256":
+                raise ValueError("secreto_env solo es válido con HS256")
+            nombre = auth.pop("secreto_env")
+            if v := valor(nombre):
+                secretos["auth_hs256"] = v
+            else:
+                faltan.append(str(nombre))
+        if "clave_publica_env" in auth:
+            nombre = auth.pop("clave_publica_env")
+            if v := valor(nombre):
+                auth["clave_publica"] = v
+            else:
+                faltan.append(str(nombre))
+    conector = cfg.get("conector")
+    if isinstance(conector, dict) and "token_manifiesto_env" in conector:
+        nombre = conector.pop("token_manifiesto_env")
+        if v := valor(nombre):
+            secretos["token_manifiesto"] = v
+        else:
+            faltan.append(str(nombre))
+    llm = cfg.get("llm")
+    if isinstance(llm, dict):
+        # Opcionales: sin variable se hereda de la configuración global.
+        if "base_url_env" in llm and (v := valor(llm.pop("base_url_env"))):
+            llm["base_url"] = v
+        else:
+            llm.pop("base_url_env", None)
+        if "api_key_env" in llm and (v := valor(llm.pop("api_key_env"))):
+            secretos["llm_api_key"] = v
+        else:
+            llm.pop("api_key_env", None)
+    if faltan and cfg.get("habilitado", True):
+        raise ValueError(f"faltan variables de entorno: {', '.join(faltan)}")
+    return cfg, secretos
 
 
 class RegistroSistemas:
-    """Sistemas habilitados y válidos, indexados por id (= claim `iss`)."""
+    """Sistemas habilitados y válidos, indexados por id (= claim `iss`), y sus secretos."""
 
-    def __init__(self, ruta: str | Path, env: Mapping[str, str] | None = None) -> None:
-        self._ruta = Path(ruta)
+    def __init__(self, ruta: str | Path | None = None, env: Mapping[str, str] | None = None) -> None:
+        """Con `ruta`, fuente YAML. Sin ella el registro empieza vacío y lo llena `aplicar` (fuente BD)."""
+        self._ruta = Path(ruta) if ruta is not None else None
         self._env = env
         self._sistemas: dict[str, Sistema] = {}
+        self._secretos: dict[str, dict[str, SecretStr]] = {}
+        self._suscriptores: list[Callable[[set[str]], None]] = []
         self.errores: dict[str, str] = {}
-        self.recargar()
-
-    @property
-    def env(self) -> Mapping[str, str]:
-        return self._env if self._env is not None else os.environ
+        self.fuente_bd = None  # `registro_bd.FuenteBD`, si el registro se alimenta de la BD
+        if self._ruta is not None:
+            self.recargar()
 
     def recargar(self) -> None:
-        sistemas, errores = self._leer()
-        self._sistemas, self.errores = sistemas, errores
+        """Relee la fuente YAML (la de BD se recarga con `recargar_async`)."""
+        if self._ruta is not None:
+            self.aplicar(entradas_desde_yaml(self._ruta, self._env))
+
+    async def recargar_async(self) -> None:
+        if self.fuente_bd is not None:
+            await self.fuente_bd.cargar()
+        else:
+            self.recargar()
+
+    def suscribir(self, callback: Callable[[set[str]], None]) -> None:
+        """`callback(ids)` se llama tras una recarga con los sistemas que cambiaron (o se quitaron):
+        las cachés derivadas (manifiestos, JWKS) los descartan."""
+        self._suscriptores.append(callback)
 
     def obtener(self, sistema_id: str) -> Sistema | None:
         return self._sistemas.get(sistema_id)
@@ -167,47 +268,76 @@ class RegistroSistemas:
     def todos(self) -> list[Sistema]:
         return list(self._sistemas.values())
 
-    def _leer(self) -> tuple[dict[str, Sistema], dict[str, str]]:
-        sistemas: dict[str, Sistema] = {}
-        errores: dict[str, str] = {}
-        try:
-            crudo = yaml.safe_load(self._ruta.read_text(encoding="utf-8")) or {}
-            entradas = crudo.get("sistemas") or []
-            if not isinstance(entradas, list):
-                raise TypeError("`sistemas` debe ser una lista")
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
-            log.error("registro de sistemas ilegible (%s): %s", self._ruta, e)
-            return {}, {"<archivo>": str(e)}
+    def secreto(self, sistema_id: str, campo: str) -> str | None:
+        """Valor en claro de un secreto del sistema. Solo se llama en el punto de uso."""
+        valor = self._secretos.get(sistema_id, {}).get(campo)
+        return valor.get_secret_value() if valor is not None else None
 
-        for i, entrada in enumerate(entradas):
-            clave = entrada.get("id") if isinstance(entrada, dict) else None
-            clave = str(clave) if clave else f"<entrada {i}>"
+    def aplicar(self, entradas: Iterable[EntradaRegistro]) -> set[str]:
+        """Valida las entradas y reemplaza el registro de golpe. Devuelve los ids que cambiaron."""
+        sistemas: dict[str, Sistema] = {}
+        secretos: dict[str, dict[str, SecretStr]] = {}
+        errores: dict[str, str] = {}
+        for e in entradas:
+            if e.error is not None:
+                errores[e.clave] = e.error
+                log.error("sistema %s deshabilitado: %s", e.clave, e.error)
+                continue
             try:
-                sistema = Sistema.model_validate(entrada)
-                self._validar_entorno(sistema)
-            except (ValidationError, ValueError) as e:
-                errores[clave] = str(e)
-                log.error("sistema %s deshabilitado por configuración inválida: %s", clave, e)
+                sistema = validar_sistema(e.config or {}, e.secretos)
+            except (ValidationError, ValueError) as ex:
+                errores[e.clave] = str(ex)
+                log.error("sistema %s deshabilitado por configuración inválida: %s", e.clave, ex)
                 continue
             if sistema.id in sistemas or sistema.id in errores:
-                errores[clave] = "id duplicado"
+                errores[e.clave] = "id duplicado"
                 sistemas.pop(sistema.id, None)
+                secretos.pop(sistema.id, None)
                 log.error("id de sistema duplicado: %s; se deshabilitan ambos", sistema.id)
                 continue
             if sistema.habilitado:
                 sistemas[sistema.id] = sistema
-        return sistemas, errores
+                secretos[sistema.id] = {k: SecretStr(v) for k, v in e.secretos.items() if v}
 
-    def _validar_entorno(self, s: Sistema) -> None:
-        """Las variables de entorno obligatorias deben existir si el sistema está habilitado."""
-        if not s.habilitado:
-            return
-        faltan = []
-        if s.auth.clave_publica_env and not s.secreto(s.auth.clave_publica_env, self.env):
-            faltan.append(s.auth.clave_publica_env)
-        if s.auth.secreto_env and not s.secreto(s.auth.secreto_env, self.env):
-            faltan.append(s.auth.secreto_env)
-        if not s.secreto(s.conector.token_manifiesto_env, self.env):
-            faltan.append(s.conector.token_manifiesto_env)
-        if faltan:
-            raise ValueError(f"faltan variables de entorno: {', '.join(faltan)}")
+        def plano(d: dict[str, dict[str, SecretStr]]) -> dict[str, dict[str, str]]:
+            return {i: {k: v.get_secret_value() for k, v in m.items()} for i, m in d.items()}
+
+        antes, despues = (self._sistemas, plano(self._secretos)), (sistemas, plano(secretos))
+        cambiados = {
+            i for i in set(antes[0]) | set(despues[0])
+            if antes[0].get(i) != despues[0].get(i) or antes[1].get(i) != despues[1].get(i)
+        }
+        self._sistemas, self._secretos, self.errores = sistemas, secretos, errores
+        if cambiados:
+            for cb in self._suscriptores:
+                cb(cambiados)
+        return cambiados
+
+
+def entradas_desde_yaml(ruta: str | Path, env: Mapping[str, str] | None = None) -> list[EntradaRegistro]:
+    """Lee el YAML y lo traduce con `desde_yaml`. Un archivo ilegible es una entrada con error."""
+    ruta = Path(ruta)
+    env = env if env is not None else os.environ
+    try:
+        crudo = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
+        entradas = crudo.get("sistemas") or []
+        if not isinstance(entradas, list):
+            raise TypeError("`sistemas` debe ser una lista")
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
+        log.error("registro de sistemas ilegible (%s): %s", ruta, e)
+        return [EntradaRegistro("<archivo>", error=str(e))]
+
+    salida = []
+    for i, entrada in enumerate(entradas):
+        clave = entrada.get("id") if isinstance(entrada, dict) else None
+        clave = str(clave) if clave else f"<entrada {i}>"
+        if not isinstance(entrada, dict):
+            salida.append(EntradaRegistro(clave, error="la entrada debe ser un mapa"))
+            continue
+        try:
+            config, secretos = desde_yaml(entrada, env)
+        except ValueError as e:
+            salida.append(EntradaRegistro(clave, error=str(e)))
+            continue
+        salida.append(EntradaRegistro(clave, config, secretos))
+    return salida

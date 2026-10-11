@@ -1,5 +1,7 @@
 """Configuración del servicio por variables de entorno."""
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,6 +15,9 @@ class Settings(BaseSettings):
 
     database_url: str = _env("ASISTENTE_DATABASE_URL")
     sistemas_path: str = _env("ASISTENTE_SISTEMAS_PATH", "/config/sistemas.yaml")
+    # De dónde sale el registro de sistemas: `yaml` (archivo) o `bd` (Postgres, secretos cifrados con
+    # ASISTENTE_CLAVES_MAESTRAS). Nunca conviven: ver `sistemas/registro.py`.
+    registro: Literal["yaml", "bd"] = _env("ASISTENTE_REGISTRO", "yaml")
     prompts_dir: str = _env("ASISTENTE_PROMPTS_DIR", "prompts")
     admin_token: str | None = _env("ASISTENTE_ADMIN_TOKEN", None)
     precios_path: str = _env("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml")

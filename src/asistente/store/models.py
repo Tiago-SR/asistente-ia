@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -198,3 +199,60 @@ class MemoriaUsuario(Base):
     creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
     actualizada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
     ultimo_uso: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+
+
+class SistemaRegistro(Base):
+    """Fuente de verdad del registro de sistemas (empresa = sistema). `config` es todo lo no secreto y se valida
+    con el modelo `Sistema` al cargarlo; los secretos van cifrados en `SistemaSecreto`."""
+
+    __tablename__ = "sistema"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # = `iss` de los tokens
+    nombre: Mapped[str] = mapped_column(String(200))
+    habilitado: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    config: Mapped[dict] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer, server_default="1")  # concurrencia optimista
+    actualizado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    actualizado_por: Mapped[str | None] = mapped_column(String(200))
+
+
+class SistemaSecreto(Base):
+    """Un secreto cifrado (AES-256-GCM, AAD `sistema_id:campo`). Se escribe, nunca se devuelve en claro."""
+
+    __tablename__ = "sistema_secreto"
+
+    sistema_id: Mapped[str] = mapped_column(
+        ForeignKey("sistema.id", ondelete="CASCADE"), primary_key=True
+    )
+    campo: Mapped[str] = mapped_column(String(64), primary_key=True)  # auth_hs256, token_manifiesto, llm_api_key…
+    kid: Mapped[str] = mapped_column(String(32))
+    nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    cifrado: Mapped[bytes] = mapped_column(LargeBinary)
+    huella: Mapped[str] = mapped_column(String(8))  # 4 caracteres de SHA-256, para reconocerlo sin exponerlo
+    actualizado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    actualizado_por: Mapped[str | None] = mapped_column(String(200))
+
+
+class ToolEstado(Base):
+    """Solo excepciones al valor por defecto (lectura sí, escritura no): una tool nueva del manifiesto no se
+    enciende sola."""
+
+    __tablename__ = "tool_estado"
+
+    sistema_id: Mapped[str] = mapped_column(
+        ForeignKey("sistema.id", ondelete="CASCADE"), primary_key=True
+    )
+    tool: Mapped[str] = mapped_column(String(128), primary_key=True)
+    habilitada: Mapped[bool] = mapped_column(Boolean)
+    actualizado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    actualizado_por: Mapped[str | None] = mapped_column(String(200))
+
+
+class RegistroVersion(Base):
+    """Una sola fila. Cada cambio al registro la incrementa en la misma transacción; las réplicas la sondean."""
+
+    __tablename__ = "registro_version"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_registro_version_unica"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    version: Mapped[int] = mapped_column(BigInteger, server_default="0")

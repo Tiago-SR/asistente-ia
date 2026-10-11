@@ -11,6 +11,7 @@ from asistente.core.llm.base import ToolDef
 from asistente.core.ports import ResultadoPropuesta, ResultadoTool
 from asistente.sistemas.auth import Usuario
 from asistente.sistemas.manifiesto import CacheManifiestos, ManifiestoInvalido, Tool
+from asistente.sistemas.permisos import tool_permitida
 from asistente.sistemas.registro import RegistroSistemas
 
 log = logging.getLogger(__name__)
@@ -130,11 +131,13 @@ class ConectorHttp:
             log.error("sin manifiesto utilizable para %s: %s", sistema_id, e)
             return []
         sistema = self._registro.obtener(sistema_id)
-        habilitadas = sistema.acciones_habilitadas if sistema else ()
+        if sistema is None:
+            return []
+        permitidas = [t for t in manifiesto.tools.values() if tool_permitida(sistema, t)]
         return [
-            *(ToolDef(t.nombre, t.descripcion, t.parametros) for t in manifiesto.tools_lectura()),
+            *(ToolDef(t.nombre, t.descripcion, t.parametros) for t in permitidas if t.efecto == "lectura"),
             *(ToolDef(t.nombre, t.descripcion, t.parametros, escritura=True)
-              for t in manifiesto.tools_accion(habilitadas)),
+              for t in permitidas if t.efecto != "lectura"),
         ]
 
     async def _tool(self, sistema, nombre: str, escritura: bool) -> Tool | None:
@@ -146,12 +149,10 @@ class ConectorHttp:
         tool = manifiesto.tools.get(nombre)
         if tool is None:
             return None
-        if not escritura:
-            # Por esta vía solo se ejecuta lectura: el agente nunca ejecuta una escritura.
-            return tool if tool.efecto == "lectura" else None
-        # Una escritura solo existe si el operador la habilitó y el sistema declara la confirmación.
-        habilitada = nombre in sistema.acciones_habilitadas
-        return tool if tool.accionable and habilitada else None
+        # Por la vía de lectura solo se ejecuta lectura: el agente nunca ejecuta una escritura.
+        if (tool.efecto == "lectura") != (not escritura):
+            return None
+        return tool if tool_permitida(sistema, tool) else None
 
     def _interpretar(self, r: httpx.Response, max_bytes: int) -> ResultadoTool:
         try:

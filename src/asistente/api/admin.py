@@ -31,8 +31,9 @@ async def admin(request: Request, svc: Servicios = Depends(servicios)) -> Servic
 
 @router.post("/recargar")
 async def recargar(svc: Servicios = Depends(admin)) -> dict:
-    svc.registro.recargar()
+    await svc.registro.recargar_async()
     svc.manifiestos.invalidar()
+    svc.autenticador.invalidar_jwks()
     return {"sistemas": len(svc.registro.todos()), "errores": svc.registro.errores}
 
 

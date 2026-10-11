@@ -55,7 +55,23 @@ class Usuario:
 class Autenticador:
     def __init__(self, registro: RegistroSistemas) -> None:
         self._registro = registro
-        self._jwks: dict[str, PyJWKClient] = {}
+        # sistema_id → (jwks_url con la que se creó, cliente). La URL va en el valor para que un cambio
+        # de `jwks_url` no siga usando el cliente (y las claves) del emisor anterior.
+        self._jwks: dict[str, tuple[str, PyJWKClient]] = {}
+
+    def invalidar_jwks(self, sistema_id: str | None = None) -> None:
+        """Descarta las claves JWKS en caché (de un sistema o de todos), p. ej. tras recargar el registro."""
+        if sistema_id is None:
+            self._jwks.clear()
+        else:
+            self._jwks.pop(sistema_id, None)
+
+    def _cliente_jwks(self, sistema_id: str, url: str) -> PyJWKClient:
+        hit = self._jwks.get(sistema_id)
+        if hit is None or hit[0] != url:
+            hit = (url, PyJWKClient(url, timeout=5))
+            self._jwks[sistema_id] = hit
+        return hit[1]
 
     async def validar(self, token: str, scope: str = SCOPE_LECTURA) -> Usuario:
         sistema = self._sistema_del_token(token)
@@ -110,13 +126,12 @@ class Autenticador:
 
     async def _clave(self, sistema: Sistema, token: str):
         auth = sistema.auth
-        env = self._registro.env
-        if auth.secreto_env:
-            return sistema.secreto(auth.secreto_env, env)
-        if auth.clave_publica_env:
-            return sistema.secreto(auth.clave_publica_env, env)
+        if auth.algoritmo == "HS256":
+            return self._registro.secreto(sistema.id, "auth_hs256")
+        if auth.clave_publica:
+            return auth.clave_publica
         assert auth.jwks_url
-        cliente = self._jwks.setdefault(sistema.id, PyJWKClient(auth.jwks_url, timeout=5))
+        cliente = self._cliente_jwks(sistema.id, auth.jwks_url)
         try:
             return (await asyncio.to_thread(cliente.get_signing_key_from_jwt, token)).key
         except jwt.PyJWTError as e:
