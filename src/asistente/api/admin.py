@@ -108,13 +108,11 @@ PERMISOS: dict[str, frozenset[str]] = {
 }
 
 
-def requiere(permiso: str, *, registro_bd: bool = True):
+def requiere(permiso: str):
     async def dependencia(request: Request, svc: Servicios = Depends(servicios)) -> Servicios:
         a = await actor(request, svc)
         if a.nombre == "token" or permiso not in PERMISOS.get(a.rol, frozenset()):
             raise ErrorApi(403, "permiso_insuficiente")
-        if registro_bd and svc.settings.registro != "bd":
-            raise ErrorApi(409, "registro_en_yaml")
         if svc.sesiones is None:
             raise ErrorApi(503, "sin_base_de_datos")
         return svc
@@ -136,7 +134,7 @@ def _fallo(e: ErrorEscritura) -> ErrorApi:
 
 _ESCRIBIR = Depends(requiere("sistemas.escribir"))
 _ESPERA_MANIFIESTO_S = 3.0  # tope por sistema al listar
-_USUARIOS = Depends(requiere("usuarios.gestionar", registro_bd=False))
+_USUARIOS = Depends(requiere("usuarios.gestionar"))
 
 
 class _Secretos(BaseModel):
@@ -257,7 +255,7 @@ async def recargar(request: Request, a: Actor = Depends(actor), svc: Servicios =
 
 @router.get("/sistemas")
 async def sistemas(svc: Servicios = Depends(admin)) -> dict:
-    if svc.settings.registro == "bd" and svc.sesiones is not None:
+    if svc.sesiones is not None:
         return await _sistemas_bd(svc)
     estado = []
     for s in svc.registro.todos():
@@ -314,8 +312,8 @@ async def crear_sistema(request: Request, datos: _Crear,
 
 @router.get("/sistemas/{sistema_id}")
 async def sistema(sistema_id: str, svc: Servicios = Depends(admin)) -> dict:
-    if svc.settings.registro != "bd" or svc.sesiones is None:
-        raise ErrorApi(409, "registro_en_yaml")
+    if svc.sesiones is None:
+        raise ErrorApi(503, "sin_base_de_datos")
     try:
         vista = await escritura.leer(svc.sesiones, sistema_id)
     except ErrorEscritura as e:
@@ -425,8 +423,8 @@ def _defecto(efecto: str) -> bool:
 async def tools(sistema_id: str, refrescar: bool = False, svc: Servicios = Depends(admin)) -> dict:
     """Tools del manifiesto en vivo y su estado. Los nombres y descripciones los escribe un tercero: el panel
     los muestra como texto, nunca como HTML."""
-    if svc.settings.registro != "bd" or svc.sesiones is None:
-        raise ErrorApi(409, "registro_en_yaml")
+    if svc.sesiones is None:
+        raise ErrorApi(503, "sin_base_de_datos")
     try:
         vista = await escritura.leer(svc.sesiones, sistema_id)
     except ErrorEscritura as e:

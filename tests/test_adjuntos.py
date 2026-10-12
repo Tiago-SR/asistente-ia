@@ -13,6 +13,7 @@ from asistente.core.llm.base import Adjunto, Mensaje
 from asistente.core.llm.falso import texto
 from asistente.core.llm.openai_compat import NOTA_IMAGEN, _traducir
 from asistente.store.models import Mensaje as FilaMensaje
+from conftest import registro_desde_yaml
 from test_api import (  # noqa: F401  (fixtures y helpers)
     api,
     auth,
@@ -157,11 +158,10 @@ async def test_sin_texto_ni_imagen_es_invalido(api, llm):
 def _fabrica(tmp_path, monkeypatch, global_imagenes: bool, **llm):
     from asistente.config import Settings
     from asistente.servicios import _fabrica_llm
-    from asistente.sistemas.registro import RegistroSistemas
     from conftest import entorno, entrada_sistema, escribir_registro
 
     cambios = {"llm": llm} if llm else {}
-    reg = RegistroSistemas(escribir_registro(tmp_path / "s.yaml", [entrada_sistema("a", **cambios)]), env=entorno("a"))
+    reg = registro_desde_yaml(escribir_registro(tmp_path / "s.yaml", [entrada_sistema("a", **cambios)]), env=entorno("a"))
     assert reg.errores == {}
     monkeypatch.setenv("ASISTENTE_DATABASE_URL", "postgresql+asyncpg://x/y")
     ajustes = Settings(LLM_BASE_URL="http://llm/v1", ASISTENTE_MODELO_DEFAULT="modelo-global", LLM_IMAGENES=global_imagenes)

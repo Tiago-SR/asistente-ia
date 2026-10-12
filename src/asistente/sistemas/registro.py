@@ -261,28 +261,18 @@ def desde_yaml(entrada: Mapping, env: Mapping[str, str]) -> tuple[dict, dict[str
 class RegistroSistemas:
     """Sistemas habilitados y válidos, indexados por id (= claim `iss`), y sus secretos."""
 
-    def __init__(self, ruta: str | Path | None = None, env: Mapping[str, str] | None = None) -> None:
-        """Con `ruta`, fuente YAML. Sin ella el registro empieza vacío y lo llena `aplicar` (fuente BD)."""
-        self._ruta = Path(ruta) if ruta is not None else None
-        self._env = env
+    def __init__(self) -> None:
+        """Empieza vacío: lo llena `aplicar`, alimentado por la fuente BD (`registro_bd.FuenteBD`)."""
         self._sistemas: dict[str, Sistema] = {}
         self._secretos: dict[str, dict[str, SecretStr]] = {}
         self._suscriptores: list[Callable[[set[str]], None]] = []
         self.errores: dict[str, str] = {}
-        self.fuente_bd = None  # `registro_bd.FuenteBD`, si el registro se alimenta de la BD
-        if self._ruta is not None:
-            self.recargar()
-
-    def recargar(self) -> None:
-        """Relee la fuente YAML (la de BD se recarga con `recargar_async`)."""
-        if self._ruta is not None:
-            self.aplicar(entradas_desde_yaml(self._ruta, self._env))
+        self.fuente_bd = None  # `registro_bd.FuenteBD` que alimenta el registro
 
     async def recargar_async(self) -> None:
+        """Relee el registro desde la BD (sin fuente, p. ej. en tests en memoria, no hace nada)."""
         if self.fuente_bd is not None:
             await self.fuente_bd.cargar()
-        else:
-            self.recargar()
 
     def suscribir(self, callback: Callable[[set[str]], None]) -> None:
         """`callback(ids)` se llama tras una recarga con los sistemas que cambiaron (o se quitaron):

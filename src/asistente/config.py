@@ -1,8 +1,6 @@
 """Configuración del servicio por variables de entorno."""
 
-from typing import Literal
-
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,10 +12,21 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     database_url: str = _env("ASISTENTE_DATABASE_URL")
-    sistemas_path: str = _env("ASISTENTE_SISTEMAS_PATH", "/config/sistemas.yaml")
-    # De dónde sale el registro de sistemas: `yaml` (archivo) o `bd` (Postgres, secretos cifrados con
-    # ASISTENTE_CLAVES_MAESTRAS). Nunca conviven: ver `sistemas/registro.py`.
-    registro: Literal["yaml", "bd"] = _env("ASISTENTE_REGISTRO", "yaml")
+    # El registro de sistemas vive siempre en Postgres (secretos cifrados con ASISTENTE_CLAVES_MAESTRAS); el YAML
+    # solo se importa con `python -m asistente.sistemas.cli importar-yaml`. La variable ya no elige nada: se
+    # acepta ausente o `bd` (deprecada) y cualquier otro valor aborta el arranque, para que un `yaml` olvidado
+    # en el .env no deje el servicio sirviendo 0 sistemas en silencio.
+    registro: str = _env("ASISTENTE_REGISTRO", "bd")
+
+    @field_validator("registro")
+    @classmethod
+    def _registro_solo_bd(cls, v: str) -> str:
+        if v != "bd":
+            raise ValueError(
+                f"ASISTENTE_REGISTRO={v!r} ya no existe: el registro se lee de la BD. Importa el YAML con "
+                "`python -m asistente.sistemas.cli importar-yaml` y quita la variable (o ponla en `bd`)."
+            )
+        return v
     prompts_dir: str = _env("ASISTENTE_PROMPTS_DIR", "prompts")
     admin_token: str | None = _env("ASISTENTE_ADMIN_TOKEN", None)
     # Panel: la cookie de sesión es `__Host-admin` (solo HTTPS). En dev sobre http://localhost poner

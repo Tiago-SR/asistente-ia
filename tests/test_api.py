@@ -21,7 +21,6 @@ from asistente.servicios import LLMNoConfigurado, Servicios
 from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.conector_http import ConectorHttp
 from asistente.sistemas.manifiesto import CacheManifiestos
-from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
@@ -29,7 +28,7 @@ from asistente.store.models import Base, UsoModelo, UsoVoz
 from asistente.store.models import LlamadaTool as FilaLlamada
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo, recortar
-from conftest import entorno, entrada_sistema, escribir_registro, firmar
+from conftest import entorno, entrada_sistema, escribir_registro, firmar, registro_desde_yaml
 
 URL = os.environ.get("ASISTENTE_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="sin ASISTENTE_DATABASE_URL")
@@ -96,7 +95,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes,
                             memoria_habilitada=memoria_habilitada),
         ])
-        registro = RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
+        registro = registro_desde_yaml(ruta, env=entorno("mock-a", "mock-b"))
         manifiestos = CacheManifiestos(registro, cliente_mocks)
 
         def llm_para(sistema):
@@ -106,7 +105,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
 
         svc = Servicios(
             settings=Settings(database_url=URL, heartbeat_s=heartbeat_s, admin_token=admin_token,
-                              precios_path=precios_path, registro="yaml"),
+                              precios_path=precios_path),
             registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
             conector=ConectorHttp(registro, manifiestos, cliente_mocks), repo=Repo(sesiones),
             limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
@@ -338,8 +337,10 @@ async def test_admin_exige_token_y_reporta_sistemas(construir_app):
         assert (await c.get("/admin/api/sistemas", headers={"Authorization": "Bearer mal"})).status_code == 401
         assert (await c.get("/admin/api/sistemas")).status_code == 401
         h = {"Authorization": "Bearer adm1n"}
+        # El listado sale de la BD (filas de `sistema`): aquí el registro es en memoria, así que no hay filas.
+        # El detalle con manifiestos está en test_admin_sistemas_api.py.
         r = (await c.get("/admin/api/sistemas", headers=h)).json()
-        assert {s["id"]: s["manifiesto_ok"] for s in r["sistemas"]} == {"mock-a": True, "mock-b": True}
+        assert r == {"sistemas": [], "invalidos": {}}
         assert (await c.post("/admin/api/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
 
 

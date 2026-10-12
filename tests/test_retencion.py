@@ -2,7 +2,7 @@ import asyncio
 
 from asistente.retencion import bucle_purga, purgar_todos
 from asistente.sistemas.registro import RegistroSistemas
-from conftest import entorno, entrada_sistema, escribir_registro
+from conftest import entorno, entrada_sistema, escribir_registro, registro_desde_yaml
 
 
 class RepoFalso:
@@ -34,7 +34,7 @@ def registro(tmp_path) -> RegistroSistemas:
         tmp_path / "s.yaml",
         [entrada_sistema("ret-a", retencion_dias=7), entrada_sistema("ret-b"), entrada_sistema("ret-c", retencion_dias=90)],
     )
-    return RegistroSistemas(ruta, env=entorno("ret-a", "ret-b", "ret-c"))
+    return registro_desde_yaml(ruta, env=entorno("ret-a", "ret-b", "ret-c"))
 
 
 async def test_cada_sistema_se_purga_con_su_retencion(tmp_path):

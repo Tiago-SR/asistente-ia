@@ -22,7 +22,7 @@ from asistente.store.models import (
     SistemaSecreto,
     ToolEstado,
 )
-from conftest import entorno, entrada_sistema, escribir_registro, firmar
+from conftest import entorno, entrada_sistema, escribir_registro, firmar, registro_desde_yaml
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("ASISTENTE_DATABASE_URL"), reason="requiere Postgres (ASISTENTE_DATABASE_URL)"
@@ -78,7 +78,7 @@ async def test_importar_y_cargar_equivale_al_yaml(sesiones, yaml_dos):
     ruta, env = yaml_dos
     assert await registro_bd.importar_yaml(sesiones, K1, ruta, env) == 2
     desde_bd, _ = await _registro(sesiones)
-    desde_yaml = RegistroSistemas(ruta, env=env)
+    desde_yaml = registro_desde_yaml(ruta, env=env)
     assert desde_bd.errores == {} and {s.id for s in desde_bd.todos()} == {"a", "b"}
     for sid in ("a", "b"):
         for campo in ("auth_hs256", "token_manifiesto", "llm_api_key"):
@@ -112,8 +112,8 @@ async def test_exportar_no_incluye_secretos_y_reimporta_igual(sesiones, yaml_dos
     nuevo_env = {"A_AUTH_HS256": env["a_SECRETO"], "A_TOKEN_MANIFIESTO": env["a_MANIFEST"],
                  "B_AUTH_HS256": env["b_SECRETO"], "B_TOKEN_MANIFIESTO": env["b_MANIFEST"],
                  "B_LLM_API_KEY": env["b_LLM"]}
-    r2 = RegistroSistemas(salida, env=nuevo_env)
-    r1 = RegistroSistemas(ruta, env=env)
+    r2 = registro_desde_yaml(salida, env=nuevo_env)
+    r1 = registro_desde_yaml(ruta, env=env)
     assert r2.errores == {}
     for sid in ("a", "b"):
         for tool in (ESCRITURA, LECTURA):

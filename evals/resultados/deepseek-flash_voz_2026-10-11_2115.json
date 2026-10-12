@@ -1,0 +1,460 @@
+{
+ "modelo": "deepseek-flash",
+ "fecha": "2026-10-11T21:15:15+00:00",
+ "nota": "registro=bd, antes de eliminar modo YAML",
+ "resumen": {
+  "preguntas": 12,
+  "aciertos": 9,
+  "tasa_acierto": 0.75,
+  "por_categoria": {
+   "voz-agregado": "1/2",
+   "voz-comparacion": "0/1",
+   "voz-consulta": "2/2",
+   "voz-largo": "1/1",
+   "voz-no-disponible": "1/1",
+   "voz-pregunta": "1/1",
+   "voz-sin-datos": "1/1",
+   "voz-tabla": "2/3"
+  },
+  "cifras_no_respaldadas": 0,
+  "errores_servicio": 0,
+  "iteraciones_media": 2.08,
+  "latencia_s": {
+   "mediana": 2.69,
+   "p95": 5.1
+  },
+  "tokens_por_pregunta": {
+   "tokens_in": 9210,
+   "tokens_out": 246,
+   "tokens_in_cache": 8640
+  },
+  "cache_hit_pct": 93.8,
+  "hasta_el_resumen_hablado_s": {
+   "mediana": 2.42,
+   "p95": 4.35
+  },
+  "costo_usd_por_pregunta": {
+   "valle": 0.000259,
+   "pico": 0.000518
+  }
+ },
+ "resultados": [
+  {
+   "id": "v01",
+   "categoria": "voz-consulta",
+   "usuario": "ana",
+   "turnos": [
+    "¿Qué establecimientos tengo?"
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "Tenés 3 establecimientos:\n\n| Establecimiento | Superficie (ha) | Cultivo |\n|---|---|---|\n| El Matorral | 540,5 | soja |\n| La Esperanza | 210 | maíz |\n| San Pedro | 120 | soja |",
+   "voz": "Tenés tres establecimientos: El Matorral, La Esperanza y San Pedro. El Matorral es el más grande, con unas 540 hectáreas, y el detalle de cada uno está en pantalla.",
+   "voz_s": 2.23,
+   "tiempos_ms": {
+    "voz": 2224,
+    "primer_delta": 2224,
+    "total": 2584
+   },
+   "tools": [
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.59,
+   "primer_token_s": 2.23,
+   "uso": {
+    "tokens_in": 8781,
+    "tokens_out": 144,
+    "tokens_in_cache": 7040
+   },
+   "costo_usd": {
+    "valle": 0.00036867,
+    "pico": 0.00073734
+   }
+  },
+  {
+   "id": "v02",
+   "categoria": "voz-consulta",
+   "usuario": "ana",
+   "turnos": [
+    "¿Cuántas hectáreas tiene El Matorral?"
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "**El Matorral** (id 1): **540,5 ha**, cultivo **soja**.\n\nUnidad: hectáreas. Dato del sistema, sin período asociado.",
+   "voz": "El Matorral tiene 540,5 hectáreas, y su cultivo es soja.",
+   "voz_s": 2.42,
+   "tiempos_ms": {
+    "voz": 2421,
+    "primer_delta": 2421,
+    "total": 2679
+   },
+   "tools": [
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.69,
+   "primer_token_s": 2.42,
+   "uso": {
+    "tokens_in": 8814,
+    "tokens_out": 242,
+    "tokens_in_cache": 8448
+   },
+   "costo_usd": {
+    "valle": 0.000225444,
+    "pico": 0.000450888
+   }
+  },
+  {
+   "id": "v03",
+   "categoria": "voz-agregado",
+   "usuario": "ana",
+   "turnos": [
+    "Dame un resumen de mi superficie por cultivo."
+   ],
+   "ok": false,
+   "fallos": [
+    "el resumen hablado no es más corto que la respuesta (la lee entera)",
+    "el resumen hablado lee demasiadas cifras: [870.0, 660.0, 210.0]"
+   ],
+   "respuesta": "| Cultivo | Superficie (ha) | Establecimientos |\n|---|---|---|\n| Soja | 660,5 | 2 |\n| Maíz | 210 | 1 |\n| **Total** | **870,5** | **3** |",
+   "voz": "Tenés 870 hectáreas y media en total: la soja es el cultivo principal, con casi 660 hectáreas en dos establecimientos, y el maíz suma 210 en uno. El detalle está en pantalla.",
+   "voz_s": 2.05,
+   "tiempos_ms": {
+    "voz": 2046,
+    "primer_delta": 2046,
+    "total": 2220
+   },
+   "tools": [
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.23,
+   "primer_token_s": 2.05,
+   "uso": {
+    "tokens_in": 8790,
+    "tokens_out": 174,
+    "tokens_in_cache": 8320
+   },
+   "costo_usd": {
+    "valle": 0.00019986,
+    "pico": 0.00039972
+   }
+  },
+  {
+   "id": "v04",
+   "categoria": "voz-agregado",
+   "usuario": "ana",
+   "turnos": [
+    "¿Cuántas hectáreas de soja tengo?"
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "**Soja: 660,5 ha** en 2 establecimientos.\n\nTotal de tus establecimientos: 870,5 ha (soja 660,5 ha + maíz 210 ha en 1 establecimiento).",
+   "voz": "Tenés 660,5 hectáreas de soja, repartidas en dos establecimientos. En pantalla está también el total de tus hectáreas.",
+   "voz_s": 2.34,
+   "tiempos_ms": {
+    "voz": 2335,
+    "primer_delta": 2335,
+    "total": 2429
+   },
+   "tools": [
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.44,
+   "primer_token_s": 2.34,
+   "uso": {
+    "tokens_in": 8772,
+    "tokens_out": 146,
+    "tokens_in_cache": 8320
+   },
+   "costo_usd": {
+    "valle": 0.00018036,
+    "pico": 0.00036072
+   }
+  },
+  {
+   "id": "v05",
+   "categoria": "voz-tabla",
+   "usuario": "ana",
+   "turnos": [
+    "Armame una tabla con cada establecimiento, su cultivo y sus hectáreas."
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "| Establecimiento | Cultivo | Superficie (ha) |\n|---|---|---|\n| El Matorral | soja | 540,5 |\n| La Esperanza | maíz | 210 |\n| San Pedro | soja | 120 |",
+   "voz": "Tenés tres establecimientos. El Matorral es el mayor, con unas 540 hectáreas de soja; el detalle de los otros dos está en pantalla.",
+   "voz_s": 2.01,
+   "tiempos_ms": {
+    "voz": 2009,
+    "primer_delta": 2009,
+    "total": 2163
+   },
+   "tools": [
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.17,
+   "primer_token_s": 2.01,
+   "uso": {
+    "tokens_in": 8806,
+    "tokens_out": 139,
+    "tokens_in_cache": 8320
+   },
+   "costo_usd": {
+    "valle": 0.00018125999999999998,
+    "pico": 0.00036251999999999996
+   }
+  },
+  {
+   "id": "v06",
+   "categoria": "voz-comparacion",
+   "usuario": "ana",
+   "turnos": [
+    "Compará El Matorral con San Pedro."
+   ],
+   "ok": false,
+   "fallos": [
+    "el resumen hablado lee demasiadas cifras: [540.5, 120.0, 420.0]"
+   ],
+   "respuesta": "| Establecimiento | Superficie (ha) | Cultivo |\n|---|---|---|\n| El Matorral | 540,5 | soja |\n| San Pedro | 120 | soja |\n\nDiferencia: 420,5 ha más en El Matorral (unas 4,5 veces la superficie de San Pedro). Unidades en hectáreas, datos actuales del sistema.",
+   "voz": "El Matorral tiene 540,5 hectáreas y San Pedro 120, ambos de soja. El Matorral es el mayor por unos 420 hectáreas; la comparación está en pantalla.",
+   "voz_s": 2.51,
+   "tiempos_ms": {
+    "voz": 2511,
+    "primer_delta": 2511,
+    "total": 2808
+   },
+   "tools": [
+    "listar_establecimientos",
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.82,
+   "primer_token_s": 2.51,
+   "uso": {
+    "tokens_in": 8871,
+    "tokens_out": 311,
+    "tokens_in_cache": 8448
+   },
+   "costo_usd": {
+    "valle": 0.000275394,
+    "pico": 0.000550788
+   }
+  },
+  {
+   "id": "v07",
+   "categoria": "voz-sin-datos",
+   "usuario": "ana",
+   "turnos": [
+    "¿Cuántas hectáreas tengo de girasol?"
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "No tenés hectáreas de girasol. Tus cultivos registrados son soja (660,5 ha, 2 establecimientos) y maíz (210 ha, 1 establecimiento); total 870,5 ha.",
+   "voz": "No tenés hectáreas de girasol: tus establecimientos solo tienen soja y maíz. El detalle está en pantalla.",
+   "voz_s": 2.19,
+   "tiempos_ms": {
+    "voz": 2192,
+    "primer_delta": 2192,
+    "total": 2373
+   },
+   "tools": [
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.38,
+   "primer_token_s": 2.19,
+   "uso": {
+    "tokens_in": 8763,
+    "tokens_out": 135,
+    "tokens_in_cache": 8320
+   },
+   "costo_usd": {
+    "valle": 0.00017240999999999998,
+    "pico": 0.00034481999999999997
+   }
+  },
+  {
+   "id": "v08",
+   "categoria": "voz-pregunta",
+   "usuario": "ana",
+   "turnos": [
+    "Mostrame los datos de Los Ceibos"
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "No hay ningún establecimiento llamado «Los Ceibos» entre los que podés ver. Estos son los que tenés:\n\n| Establecimiento | Superficie (ha) | Cultivo |\n|---|---|---|\n| El Matorral | 540,5 | soja |\n| La Esperanza | 210 | maíz |\n| San Pedro | 120 | soja |\n\nSi «Los Ceibos» es un alias con el que conocés alguno de estos, decime cuál y te muestro sus datos.",
+   "voz": "No encontré ningún establecimiento con el nombre Los Ceibos. En el sistema tenés tres: El Matorral, La Esperanza y San Pedro, y el detalle está en pantalla.",
+   "voz_s": 4.35,
+   "tiempos_ms": {
+    "voz": 4353,
+    "primer_delta": 4353,
+    "total": 5088
+   },
+   "tools": [
+    "listar_establecimientos",
+    "listar_establecimientos",
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 4,
+   "latencia_s": 5.1,
+   "primer_token_s": 4.35,
+   "uso": {
+    "tokens_in": 17976,
+    "tokens_out": 345,
+    "tokens_in_cache": 17152
+   },
+   "costo_usd": {
+    "valle": 0.000382056,
+    "pico": 0.000764112
+   }
+  },
+  {
+   "id": "v09",
+   "categoria": "voz-no-disponible",
+   "usuario": "ana",
+   "turnos": [
+    "Borrá el establecimiento San Pedro"
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "No tengo ninguna herramienta para eliminar establecimientos; solo puedo consultar datos y ver o proponer notas. La baja de San Pedro hay que hacerla desde la pantalla del sistema.",
+   "voz": "No puedo borrar establecimientos: solo hago consultas y notas. Para dar de baja San Pedro tenés que hacerlo desde la pantalla del sistema.",
+   "voz_s": 1.64,
+   "tiempos_ms": {
+    "voz": 1639,
+    "primer_delta": 1639,
+    "total": 1842
+   },
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 1.85,
+   "primer_token_s": 1.64,
+   "uso": {
+    "tokens_in": 4304,
+    "tokens_out": 219,
+    "tokens_in_cache": 4096
+   },
+   "costo_usd": {
+    "valle": 0.000174888,
+    "pico": 0.000349776
+   }
+  },
+  {
+   "id": "v10",
+   "categoria": "voz-largo",
+   "usuario": "ana",
+   "turnos": [
+    "Explicame con detalle cómo está repartida mi superficie entre cultivos y establecimientos."
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "**Total: 870,5 ha** en 3 establecimientos.\n\nPor cultivo:\n\n| Cultivo | Superficie | Establecimientos | % del total |\n|---|---|---|---|\n| Soja | 660,5 ha | 2 | 75,9 % |\n| Maíz | 210 ha | 1 | 24,1 % |\n| **Total** | **870,5 ha** | **3** | 100 % |\n\nPor establecimiento:\n\n| Establecimiento | Superficie | Cultivo |\n|---|---|---|\n| El Matorral | 540,5 ha | soja |\n| La Esperanza | 210 ha | maíz |\n| San Pedro | 120 ha | soja |\n\nLa soja se reparte entre El Matorral (540,5 ha) y San Pedro (120 ha); el maíz está todo en La Esperanza. Los porcentajes son cálculo mío sobre las cifras anteriores.",
+   "voz": "Tenés 870,5 hectáreas en total repartidas en tres establecimientos y dos cultivos. Casi las tres cuartas partes son de soja, con El Matorral como el más grande, y el resto es maíz en La Esperanza. En pantalla está el desglose por cultivo y por campo.",
+   "voz_s": 2.88,
+   "tiempos_ms": {
+    "voz": 2883,
+    "primer_delta": 2883,
+    "total": 3546
+   },
+   "tools": [
+    "resumen_por_cultivo",
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 3.55,
+   "primer_token_s": 2.88,
+   "uso": {
+    "tokens_in": 8981,
+    "tokens_out": 469,
+    "tokens_in_cache": 8448
+   },
+   "costo_usd": {
+    "valle": 0.000386694,
+    "pico": 0.000773388
+   }
+  },
+  {
+   "id": "v11",
+   "categoria": "voz-tabla",
+   "usuario": "ana",
+   "turnos": [
+    "Hacé una tabla con cada establecimiento, su cultivo, sus hectáreas y el porcentaje del total."
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "Total: 870,5 ha\n\n| Establecimiento | Cultivo | Hectáreas | % del total |\n|---|---|---|---|\n| El Matorral | soja | 540,5 | 62,1 % |\n| La Esperanza | maíz | 210 | 24,1 % |\n| San Pedro | soja | 120 | 13,8 % |",
+   "voz": "Tenés tres establecimientos. El mayor es El Matorral, con unas 541 hectáreas de soja, que es casi dos tercios del total. En pantalla está la tabla con el cultivo, las hectáreas y el porcentaje de cada uno.",
+   "voz_s": 3.04,
+   "tiempos_ms": {
+    "voz": 3039,
+    "primer_delta": 3039,
+    "total": 3066
+   },
+   "tools": [
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 3.07,
+   "primer_token_s": 3.04,
+   "uso": {
+    "tokens_in": 8893,
+    "tokens_out": 374,
+    "tokens_in_cache": 8448
+   },
+   "costo_usd": {
+    "valle": 0.000316494,
+    "pico": 0.000632988
+   }
+  },
+  {
+   "id": "v12",
+   "categoria": "voz-tabla",
+   "usuario": "ana",
+   "turnos": [
+    "Dame en una tabla las hectáreas por cultivo con su porcentaje."
+   ],
+   "ok": false,
+   "fallos": [
+    "el resumen hablado lee demasiadas cifras: [660.0, 76.0, 210.0, 24.0, 870.0]"
+   ],
+   "respuesta": "| Cultivo | Hectáreas | % del total |\n|---|---|---|\n| Soja | 660,5 | 75,9 % |\n| Maíz | 210 | 24,1 % |\n| **Total** | **870,5** | **100 %** |\n\nSuperficie total: 870,5 ha (2 establecimientos de soja, 1 de maíz).",
+   "voz": "Tenés dos cultivos: la soja ocupa la mayor parte, unas 660 hectáreas, casi el 76 por ciento, y el maíz unas 210, cerca del 24 por ciento. El total es de 870 hectáreas y media; el detalle está en pantalla.",
+   "voz_s": 2.45,
+   "tiempos_ms": {
+    "voz": 2445,
+    "primer_delta": 2445,
+    "total": 2729
+   },
+   "tools": [
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 2.74,
+   "primer_token_s": 2.45,
+   "uso": {
+    "tokens_in": 8775,
+    "tokens_out": 253,
+    "tokens_in_cache": 8320
+   },
+   "costo_usd": {
+    "valle": 0.00024501,
+    "pico": 0.00049002
+   }
+  }
+ ]
+}

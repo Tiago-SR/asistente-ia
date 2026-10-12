@@ -69,7 +69,6 @@ const MENSAJES: Record<string, string> = {
   credenciales_invalidas: 'Email o contraseña incorrectos.',
   demasiados_intentos: 'Demasiados intentos. Espere unos minutos.',
   permiso_insuficiente: 'Su rol no permite esta acción.',
-  registro_en_yaml: 'El registro está en modo YAML: las escrituras requieren ASISTENTE_REGISTRO=bd.',
   version_obsoleta: 'Alguien cambió este sistema mientras lo editaba. Se recargó la versión actual.',
   sistema_existente: 'Ya existe un sistema con ese id.',
   sistema_inexistente: 'El sistema no existe.',

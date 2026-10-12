@@ -1,0 +1,439 @@
+{
+ "modelo": "deepseek-flash",
+ "fecha": "2026-10-11T21:08:19+00:00",
+ "nota": "registro=bd, antes de eliminar modo YAML",
+ "resumen": {
+  "preguntas": 12,
+  "aciertos": 0,
+  "tasa_acierto": 0.0,
+  "por_categoria": {
+   "voz-agregado": "0/2",
+   "voz-comparacion": "0/1",
+   "voz-consulta": "0/2",
+   "voz-largo": "0/1",
+   "voz-no-disponible": "0/1",
+   "voz-pregunta": "0/1",
+   "voz-sin-datos": "0/1",
+   "voz-tabla": "0/3"
+  },
+  "cifras_no_respaldadas": 0,
+  "errores_servicio": 12,
+  "iteraciones_media": 1,
+  "latencia_s": {
+   "mediana": 0.0,
+   "p95": 0.0
+  },
+  "tokens_por_pregunta": {
+   "tokens_in": 0,
+   "tokens_out": 0,
+   "tokens_in_cache": 0
+  },
+  "cache_hit_pct": 0,
+  "costo_usd_por_pregunta": {
+   "valle": 0.0,
+   "pico": 0.0
+  }
+ },
+ "resultados": [
+  {
+   "id": "v01",
+   "categoria": "voz-consulta",
+   "usuario": "ana",
+   "turnos": [
+    "¿Qué establecimientos tengo?"
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool listar_establecimientos",
+    "no menciona ninguno de ['El Matorral']",
+    "no menciona ninguno de ['La Esperanza']",
+    "no menciona ninguno de ['San Pedro']"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v02",
+   "categoria": "voz-consulta",
+   "usuario": "ana",
+   "turnos": [
+    "¿Cuántas hectáreas tiene El Matorral?"
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "falta la cifra 540.5"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v03",
+   "categoria": "voz-agregado",
+   "usuario": "ana",
+   "turnos": [
+    "Dame un resumen de mi superficie por cultivo."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool resumen_por_cultivo",
+    "falta la cifra 660.5",
+    "falta la cifra 210",
+    "falta la cifra 870.5"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v04",
+   "categoria": "voz-agregado",
+   "usuario": "ana",
+   "turnos": [
+    "¿Cuántas hectáreas de soja tengo?"
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool resumen_por_cultivo",
+    "falta la cifra 660.5"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v05",
+   "categoria": "voz-tabla",
+   "usuario": "ana",
+   "turnos": [
+    "Armame una tabla con cada establecimiento, su cultivo y sus hectáreas."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool listar_establecimientos",
+    "falta la cifra 540.5",
+    "falta la cifra 210",
+    "falta la cifra 120"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v06",
+   "categoria": "voz-comparacion",
+   "usuario": "ana",
+   "turnos": [
+    "Compará El Matorral con San Pedro."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "falta la cifra 540.5",
+    "falta la cifra 120"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v07",
+   "categoria": "voz-sin-datos",
+   "usuario": "ana",
+   "turnos": [
+    "¿Cuántas hectáreas tengo de girasol?"
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v08",
+   "categoria": "voz-pregunta",
+   "usuario": "ana",
+   "turnos": [
+    "Mostrame los datos de Los Ceibos"
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v09",
+   "categoria": "voz-no-disponible",
+   "usuario": "ana",
+   "turnos": [
+    "Borrá el establecimiento San Pedro"
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v10",
+   "categoria": "voz-largo",
+   "usuario": "ana",
+   "turnos": [
+    "Explicame con detalle cómo está repartida mi superficie entre cultivos y establecimientos."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool resumen_por_cultivo",
+    "falta la cifra 660.5",
+    "falta la cifra 210"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v11",
+   "categoria": "voz-tabla",
+   "usuario": "ana",
+   "turnos": [
+    "Hacé una tabla con cada establecimiento, su cultivo, sus hectáreas y el porcentaje del total."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool listar_establecimientos",
+    "falta la cifra 540.5",
+    "falta la cifra 210",
+    "falta la cifra 120"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "v12",
+   "categoria": "voz-tabla",
+   "usuario": "ana",
+   "turnos": [
+    "Dame en una tabla las hectáreas por cultivo con su porcentaje."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool resumen_por_cultivo",
+    "falta la cifra 660.5",
+    "falta la cifra 210",
+    "falta la cifra 870.5"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  }
+ ]
+}

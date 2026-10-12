@@ -1,4 +1,4 @@
-"""API de escritura del panel (/admin/api/sistemas...): permisos, CSRF, modo YAML y sin eco de secretos."""
+"""API de escritura del panel (/admin/api/sistemas...): permisos, CSRF y sin eco de secretos."""
 
 import base64
 import os
@@ -52,27 +52,26 @@ async def limpio(sesiones):  # noqa: F811
     await _limpiar()
 
 
-def _app(sesiones, tmp_path, modo: str):  # noqa: F811
+def _app(sesiones, tmp_path):  # noqa: F811
     (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
     (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
     registro = RegistroSistemas()
-    if modo == "bd":
-        FuenteBD(registro, sesiones, CIFRADOR)
+    FuenteBD(registro, sesiones, CIFRADOR)
     manifiestos = CacheManifiestos(registro)
     svc = Servicios(
-        settings=Settings(database_url=URL, registro=modo, admin_token="adm1n"),
+        settings=Settings(database_url=URL, admin_token="adm1n"),
         registro=registro, autenticador=Autenticador(registro), manifiestos=manifiestos,
         conector=ConectorHttp(registro, manifiestos), repo=Repo(sesiones),
         limites=LimitesPostgres(sesiones), auditoria=AuditoriaSql(sesiones),
         prompts=Prompts(tmp_path), llm_para=lambda s: None, sesiones=sesiones,
-        admin=AdminSql(sesiones), cifrador=CIFRADOR if modo == "bd" else None,
+        admin=AdminSql(sesiones), cifrador=CIFRADOR,
     )
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(svc)), base_url="http://asistente")
 
 
 @pytest.fixture
 def cliente(limpio, tmp_path):
-    return lambda modo="bd": _app(limpio, tmp_path, modo)
+    return lambda: _app(limpio, tmp_path)
 
 
 async def _sesion(c, limpio, rol):
@@ -133,15 +132,6 @@ async def test_el_error_de_validacion_no_repite_el_secreto(cliente, limpio):
         r = await c.put("/admin/api/sistemas/acme/secretos/token_manifiesto", headers=h,
                         json={"version": "x", "valor": SECRETO})
         assert r.status_code == 422 and SECRETO not in r.text
-
-
-async def test_en_modo_yaml_toda_escritura_es_409(cliente, limpio):
-    async with cliente("yaml") as c:
-        h = await _sesion(c, limpio, "admin")
-        r = await c.post("/admin/api/sistemas", json={"config": CONFIG}, headers=h)
-        assert (r.status_code, r.json()["error"]) == (409, "registro_en_yaml")
-        assert (await c.put("/admin/api/sistemas/acme/tools/x", json={"habilitada": True},
-                            headers=h)).status_code == 409
 
 
 async def test_tool_y_auditoria_con_el_actor(cliente, limpio):

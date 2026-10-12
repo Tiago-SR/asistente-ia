@@ -4,8 +4,7 @@ import json
 import pytest
 
 from asistente.sistemas.auth import Autenticador, TokenInvalido
-from asistente.sistemas.registro import RegistroSistemas
-from conftest import entorno, entrada_sistema, escribir_registro, firmar
+from conftest import entorno, entrada_sistema, escribir_registro, firmar, registro_desde_yaml
 
 
 @pytest.fixture
@@ -23,7 +22,7 @@ async def test_token_valido(auth):
 async def test_locale_del_token_o_el_defecto_del_sistema(tmp_path):
     ruta = escribir_registro(tmp_path / "s.yaml", [
         entrada_sistema("mock-a", locale_defecto="es-AR"), entrada_sistema("mock-b")])
-    a = Autenticador(RegistroSistemas(ruta, env=entorno("mock-a", "mock-b")))
+    a = Autenticador(registro_desde_yaml(ruta, env=entorno("mock-a", "mock-b")))
     assert (await a.validar(firmar("mock-a"))).locale == "es-AR"                    # el token no lo trae
     assert (await a.validar(firmar("mock-a", locale="pt-BR"))).locale == "pt-BR"    # el token manda
     assert (await a.validar(firmar("mock-b"))).locale is None                       # sin defecto
@@ -42,10 +41,9 @@ async def test_iss_desconocido(auth):
 
 
 async def test_sistema_deshabilitado_igual_que_desconocido(tmp_path):
-    from asistente.sistemas.registro import RegistroSistemas
     from conftest import entorno, entrada_sistema, escribir_registro
 
-    r = RegistroSistemas(
+    r = registro_desde_yaml(
         escribir_registro(tmp_path / "s.yaml", [entrada_sistema("a", habilitado=False)]),
         env=entorno("a"),
     )

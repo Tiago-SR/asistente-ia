@@ -10,10 +10,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from asistente.sistemas.manifiesto import ManifiestoInvalido, parsear_manifiesto
-from asistente.sistemas.registro import RegistroSistemas, Sistema
+from asistente.sistemas.registro import Sistema
 from asistente.store.acciones import AccionesSql
 from asistente.store.models import Accion, Base
-from conftest import entorno, entrada_sistema, escribir_registro
+from conftest import entorno, entrada_sistema, escribir_registro, registro_desde_yaml
 
 PARAMS = {"type": "object", "properties": {}}
 
@@ -69,7 +69,7 @@ def test_registro_acciones_habilitadas_por_defecto_vacio_y_ruta_de_propuesta(tmp
         entrada_sistema("a"),
         entrada_sistema("b", acciones_habilitadas=["agregar_nota"]),
     ])
-    reg = RegistroSistemas(ruta, env=entorno("a", "b"))
+    reg = registro_desde_yaml(ruta, env=entorno("a", "b"))
     assert reg.obtener("a").acciones_habilitadas == ()
     assert reg.obtener("b").acciones_habilitadas == ("agregar_nota",)
     assert reg.obtener("a").conector.ruta_propuesta == "/asistente/tools/{nombre}/propuesta"

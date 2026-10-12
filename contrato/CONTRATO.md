@@ -202,7 +202,7 @@ El mismo secreto está en el sistema y en el asistente. Quien lo conozca puede e
        conector:
          token_manifiesto_env: STMGIS_MANIFEST_TOKEN
    ```
-5. Reiniciar el asistente (las variables de entorno se leen al arrancar; `POST /admin/api/recargar` relee el YAML pero **no** cambia variables de entorno).
+5. Cargar el sistema en el registro: `python -m asistente.sistemas.cli importar-yaml` (resuelve las variables de entorno **en ese momento** y las guarda cifradas; con `--reemplazar` sustituye todo el registro) o darlo de alta desde el panel. El asistente lo toma solo en unos 5 s (o con `POST /admin/api/recargar`).
 
 ### 6.2 Opción B: `RS256` o `EdDSA` (recomendada fuera de pruebas)
 

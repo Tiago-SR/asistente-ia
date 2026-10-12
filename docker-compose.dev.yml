@@ -34,7 +34,7 @@ services:
 
   # Panel de administración con HMR: http://localhost:5173/panel/  (perfil `panel`, no arranca por defecto)
   #   docker compose -f docker-compose.dev.yml --profile panel up panel
-  # Para escribir sistemas hace falta ASISTENTE_REGISTRO=bd y ASISTENTE_CLAVES_MAESTRAS en .env. Si el navegador
+  # Para escribir sistemas hace falta ASISTENTE_CLAVES_MAESTRAS en .env. Si el navegador
   # rechaza la cookie `__Host-admin` por http, poner ASISTENTE_ADMIN_COOKIE_SECURE=false en .env (solo dev).
   panel:
     profiles: [panel]

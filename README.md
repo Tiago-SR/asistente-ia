@@ -50,7 +50,7 @@ la API en `/admin/api` por sesión (cookie HttpOnly + CSRF); el token `ASISTENTE
 automatización (recargar, leer) y **no** puede escribir.
 
 ```sh
-# Requisitos en .env: ASISTENTE_REGISTRO=bd y ASISTENTE_CLAVES_MAESTRAS (ver .env.example)
+# Requisito en .env: ASISTENTE_CLAVES_MAESTRAS (ver .env.example)
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml   # una vez
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli crear-admin tu@correo.com --rol admin   # primer usuario
 # Panel con HMR (perfil `panel`): http://localhost:5173/panel/
@@ -144,11 +144,12 @@ Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md
 
 ## Registro de sistemas en base de datos
 
-Por defecto el registro sale de `config/sistemas.yaml` (`ASISTENTE_REGISTRO=yaml`) y los secretos de las variables
-`*_env`, que se resuelven **al cargar** (hay que `POST /admin/api/recargar` tras cambiar una variable). Con
-`ASISTENTE_REGISTRO=bd` el registro sale de Postgres y los secretos van cifrados (AES-256-GCM) con
-`ASISTENTE_CLAVES_MAESTRAS="k1:<base64 de 32 bytes>"`; ambas fuentes nunca conviven y en modo BD no se lee el
-entorno para secretos de sistema. Cada réplica sondea `registro_version` cada 5 s.
+El registro sale siempre de Postgres y los secretos van cifrados (AES-256-GCM) con
+`ASISTENTE_CLAVES_MAESTRAS="k1:<base64 de 32 bytes>"`; no se lee el entorno para secretos de sistema. Cada réplica
+sondea `registro_version` cada 5 s y `POST /admin/api/recargar` fuerza la relectura. `config/sistemas.yaml` ya no se
+lee en runtime: es solo la entrada de `importar-yaml` (que resuelve las variables `*_env` en ese momento y las cifra)
+y el formato de `exportar-yaml`. `ASISTENTE_REGISTRO` está retirada: ausente o `bd` se acepta, cualquier otro valor
+aborta el arranque.
 
 ```sh
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli generar-clave

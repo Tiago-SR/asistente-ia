@@ -41,6 +41,39 @@ deploy/deploy.sh
 
 Construye la imagen etiquetada con el hash del repo, levanta todo y espera a que `asistente` esté `healthy`. Las migraciones se aplican solas al arrancar. El servicio queda en `127.0.0.1:8000` (cambiable con `ASISTENTE_PUERTO`).
 
+### Primer arranque: cargar el registro
+
+El registro vive en Postgres y arranca vacío (`/salud` responde `"sistemas":0`). Una vez levantado:
+
+```sh
+dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+$dc run --rm asistente python -m asistente.sistemas.cli generar-clave   # copiar a ASISTENTE_CLAVES_MAESTRAS en .env
+# ¡Respaldar la clave FUERA del servidor (gestor de contraseñas) antes de seguir: sin ella los secretos de la BD
+# y de sus backups no se recuperan!
+$dc up -d                                                               # el contenedor lee la clave
+$dc exec asistente python -m asistente.sistemas.cli importar-yaml       # lee /config/sistemas.yaml y cifra los *_env
+$dc exec asistente python -m asistente.sistemas.cli crear-admin tu@correo.com --rol admin
+curl -s http://127.0.0.1:8000/salud                                     # "sistemas": N
+```
+
+### Migrar desde el modo YAML (VPS existente)
+
+El modo YAML se eliminó: con `ASISTENTE_REGISTRO=yaml` en `.env`, `deploy/deploy.sh` aborta y el contenedor no arranca.
+Orden seguro (todo reversible hasta el paso 6):
+
+1. `deploy/backup.sh` y copia de `.env` y `config/sistemas.yaml`.
+2. Con la imagen **actual** (aún con modo YAML): `generar-clave`, ponerla en `.env` como `ASISTENTE_CLAVES_MAESTRAS`
+   y **respaldarla fuera del servidor**; `dc up -d`.
+3. `importar-yaml` y `crear-admin` (como arriba). Las variables `*_env` deben seguir en `.env`: se resuelven al importar.
+4. `exportar-yaml /tmp/s.yaml` y compararlo con `config/sistemas.yaml` (mismos ids y flags, `*_env` esperados).
+5. Poner `ASISTENTE_REGISTRO=bd` en `.env`, `dc up -d`, y comprobar `/salud` (`sistemas` = N), `/admin/api/sistemas`
+   sin `invalidos`, un login real del widget y una tool de lectura por sistema (prueba que `token_manifiesto` descifra).
+6. Dejarlo varios días y recién entonces desplegar la versión sin modo YAML con `deploy/deploy.sh`. Mantener
+   `ASISTENTE_REGISTRO=bd` (o ausente) en `.env`: así un `deploy.sh rollback` a una imagen anterior sigue en modo BD.
+   Solo se puede volver a imágenes que ya tengan modo BD; para anteriores hay que restaurar el modo YAML a mano.
+7. **Irreversible, al final:** quitar de `.env` los secretos de sistema en claro (`*_env`). Hasta entonces son la vía
+   de recuperación con `importar-yaml --reemplazar`.
+
 ## 4. Proxy con TLS
 
 - **Caddy en el host** (lo más simple): `deploy/Caddyfile.example` → `/etc/caddy/Caddyfile`, ajustar el dominio, `systemctl reload caddy`. El TLS es automático.
@@ -67,7 +100,7 @@ Antes de habilitar un sistema, pasarle `herramientas/verificar_sistema.py` (ver 
 |---|---|
 | Actualizar | `deploy/deploy.sh` (hace backup antes de migrar) |
 | Volver atrás | `docker images asistente` → `deploy/deploy.sh rollback <tag>`. Si el esquema cambió, hace backup y baja las migraciones con la imagen actual (pregunta antes; `YES=1` lo salta). Si el asistente actual no corre, restaurar el backup |
-| Cambiar `sistemas.yaml` | editar y `POST /admin/api/recargar` desde el host (sin reiniciar) |
+| Cambiar un sistema | desde el panel (`/panel`), o `importar-yaml --reemplazar` con las variables `*_env` en el entorno del contenedor. Se toma solo en ~5 s (`POST /admin/api/recargar` lo fuerza). Sin reiniciar |
 | Costo del mes por sistema | `curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" "http://127.0.0.1:8000/admin/api/uso?mes=2026-10"` (tokens, caché y USD por sistema y modelo, y los caracteres y USD de la voz del servidor; las tarifas están en `config/precios.yaml`, a revisar contra el proveedor) |
 | Logs | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f asistente` (rotan a 5 × 10 MB) |
 | Backup | `deploy/backup.sh` (guarda los últimos 14 en `backups/`) |

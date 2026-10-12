@@ -146,17 +146,13 @@ def _fabrica_web(settings: Settings) -> WebConRespaldo | None:
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
-    cifrador: Cifrador | None = None
-    if settings.registro == "bd":
-        registro = RegistroSistemas()
-        try:
-            cifrador = Cifrador.desde_entorno()
-        except ErrorCifrado as e:  # sin clave los sistemas con secretos quedan en `errores`
-            log.error("claves maestras no utilizables: %s", e)
-            cifrador = None
-        FuenteBD(registro, sesiones, cifrador)
-    else:
-        registro = RegistroSistemas(settings.sistemas_path)
+    registro = RegistroSistemas()
+    try:
+        cifrador: Cifrador | None = Cifrador.desde_entorno()
+    except ErrorCifrado as e:  # sin clave los sistemas con secretos quedan en `errores`
+        log.error("claves maestras no utilizables: %s", e)
+        cifrador = None
+    FuenteBD(registro, sesiones, cifrador)
     voces = _fabrica_voces(settings)
     manifiestos = CacheManifiestos(registro)
     autenticador = Autenticador(registro)

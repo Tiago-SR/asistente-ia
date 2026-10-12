@@ -1,7 +1,7 @@
 # Plan: panel de administración de sistemas (Jarvis)
 
-> Documento de traspaso entre sesiones. Estado al 2026-10-11: **Fase 1 implementada** (ver la lista de la sección 7; quedan sus dos
-> verificaciones de salida); fases 2-4 sin empezar. Origen de la charla:
+> Documento de traspaso entre sesiones. Estado al 2026-10-11: **Fases 1 y 2 cerradas** (modo YAML eliminado), **Fase 3 en curso**
+> (pendiente la prueba manual y lo de su lista); fase 4 sin empezar. Origen de la charla:
 > `PlataformaJarvisArquitectura.md`. Copia del plan corto: `~/.claude/plans/estoy-interesado-en-darle-quiet-music.md`.
 >
 > Reglas del proyecto para quien continúe: responder en español, **no hacer `git commit`** (sugerir el mensaje),
@@ -208,9 +208,12 @@ COPY --from=panel-build /panel/dist /app/src/asistente/static/panel
   `*_env` (adaptador `desde_yaml` resuelve el entorno al cargar; un solo validador `validar_sistema`); API única
   `registro.secreto(sistema, campo)`; módulos `sistemas/{cifrado,permisos,registro_bd,cli}.py`; lectura en una
   transacción REPEATABLE READ; `/salud` en 503 hasta cargar el registro en modo BD.
-- **Pendiente para cerrar la fase** (lo exige la salida): correr `tests_e2e/` y `evals/correr.py` con
-  `ASISTENTE_REGISTRO=bd`; y que el modo YAML responda 409 a escrituras del admin cuando existan (Fase 2/3).
-  Eliminar el modo YAML antes de la Fase 3.
+- **Cerrada (2026-10-11)**: e2e (`acciones` 20/20, `widget` 9/9, `memoria` 20/21: el fallo es de UI del widget, no del
+  registro) y evals con el registro en BD sin regresiones atribuibles al registro (30/32, 20/21, 3/6, 9/12; ver
+  `pytest-vacia-registro-dev` en la memoria). **Modo YAML eliminado**: `ASISTENTE_REGISTRO` ausente o `bd`; otro valor
+  aborta el arranque; sin `RegistroSistemas(ruta)` ni `recargar()` síncrono; `registro_en_yaml` y `sistemas_path` fuera.
+  `importar-yaml`/`exportar-yaml` se quedan. Tests con BD aparte `<bd>_test` recreada por sesión (antes vaciaban la
+  BD dev). Migración de la VPS: `deploy/VPS.md` («Migrar desde el modo YAML»), **antes** de desplegar este código.
 - **Salida**: todos los tests y e2e actuales pasan leyendo el registro desde BD; importar el YAML actual y
   exportarlo da un resultado equivalente.
 
@@ -239,7 +242,7 @@ servido en `/panel` con CSP; Dockerfile multi-stage; servicio `panel` (perfil) e
 **Pendiente**: prueba manual en navegador (login, crear/editar, tools con un manifiesto real); decidir exposición
 en los proxies de `deploy/` (hoy `/admin*` cerrado hacia fuera); SSRF a nivel de conector (loopback/privadas con
 lista de permitidos para dev); retención de `admin_auditoria`; cambio de contraseña propia desde el panel;
-eliminar el modo YAML.
+(modo YAML ya eliminado).
 - [ ] Andamiaje `panel/` (Vite + React + TS), `Dockerfile` multi-stage y servicio `panel` con HMR (sección 6).
 - [ ] Pantallas: login; lista y estado de sistemas (usa `GET /admin/sistemas`); alta/edición; carga de secretos
       (solo escritura); tools del manifiesto en vivo con interruptores; usuarios admin (solo `admin`).
