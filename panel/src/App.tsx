@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { api, setCsrf, type Yo } from '@/lib/api'
 import { useHash } from '@/lib/hash'
+import { Auditoria } from '@/pages/Auditoria'
 import { Cuenta } from '@/pages/Cuenta'
 import { Login } from '@/pages/Login'
 import { Sistema } from '@/pages/Sistema'
@@ -36,6 +37,7 @@ export default function App() {
         <nav className="flex gap-2">
           <Button variant="ghost" onClick={() => ir('/sistemas')}>Sistemas</Button>
           {yo.rol === 'admin' && <Button variant="ghost" onClick={() => ir('/usuarios')}>Usuarios</Button>}
+          {yo.rol === 'admin' && <Button variant="ghost" onClick={() => ir('/auditoria')}>Auditoría</Button>}
         </nav>
         <Button variant="ghost" size="sm" className="ml-auto" onClick={() => ir('/cuenta')}>
           {yo.email} · {yo.rol}
@@ -46,6 +48,8 @@ export default function App() {
         <Cuenta yo={yo} />
       ) : partes[0] === 'usuarios' && yo.rol === 'admin' ? (
         <Usuarios yo={yo} />
+      ) : partes[0] === 'auditoria' && yo.rol === 'admin' ? (
+        <Auditoria />
       ) : partes[0] === 'sistemas' && partes[1] ? (
         <Sistema key={partes[1]} id={partes[1]} yo={yo} ir={ir} />
       ) : (

@@ -106,7 +106,7 @@ async def admin(request: Request, svc: Servicios = Depends(servicios)) -> Servic
 # Permisos por rol. Las escrituras exigen una sesión de usuario (el token estático es solo automatización:
 # recargar y leer). Abrir algo al operador es cambiar esta tabla, no cada endpoint.
 PERMISOS: dict[str, frozenset[str]] = {
-    "admin": frozenset({"sistemas.escribir", "usuarios.gestionar"}),
+    "admin": frozenset({"sistemas.escribir", "usuarios.gestionar", "auditoria.leer"}),
     "operador": frozenset(),
 }
 
@@ -138,6 +138,7 @@ def _fallo(e: ErrorEscritura) -> ErrorApi:
 _ESCRIBIR = Depends(requiere("sistemas.escribir"))
 _ESPERA_MANIFIESTO_S = 3.0  # tope por sistema al listar
 _USUARIOS = Depends(requiere("usuarios.gestionar"))
+_AUDITORIA = Depends(requiere("auditoria.leer"))
 
 
 class _Secretos(BaseModel):
@@ -488,6 +489,15 @@ async def cambiar_clave(usuario_id: uuid.UUID, datos: _Clave, request: Request,
         raise _falla_admin(e) from None
     await store.auditar(a.nombre, "usuario_clave", email, ip=_ip(request))
     return {"ok": True}
+
+
+@router.get("/auditoria")
+async def auditoria(limite: int = Query(50, ge=1, le=200), antes_id: int | None = Query(None, ge=1),
+                    actor: str | None = Query(None, max_length=320), accion: str | None = Query(None, max_length=64),
+                    svc: Servicios = _AUDITORIA) -> dict:
+    """Bitácora del panel, más reciente primero. `antes_id` es el cursor (`siguiente` de la página previa).
+    Solo `admin` y solo con sesión; `antes`/`despues` nunca llevan secretos (se guardan ya filtrados)."""
+    return await _store(svc).listar_auditoria(limite=limite, antes_id=antes_id, actor=actor, accion=accion)
 
 
 def _defecto(efecto: str) -> bool:

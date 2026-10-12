@@ -64,6 +64,16 @@ export type ToolVista = {
   habilitada: boolean
 }
 export type Usuario = { id: string; email: string; rol: string; activo: boolean; bloqueado: boolean; ultimo_login: string | null }
+export type EventoAuditoria = {
+  id: number
+  fecha: string
+  actor: string
+  accion: string
+  objetivo: string | null
+  antes: Config | null
+  despues: Config | null
+  ip: string | null
+}
 
 const MENSAJES: Record<string, string> = {
   credenciales_invalidas: 'Email o contraseña incorrectos.',

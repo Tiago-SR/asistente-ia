@@ -232,6 +232,29 @@ class AdminSql:
             r = await s.execute(delete(AdminAuditoria).where(AdminAuditoria.fecha < corte))
         return r.rowcount or 0
 
+    async def listar_auditoria(self, *, limite: int = 50, antes_id: int | None = None,
+                               actor: str | None = None, accion: str | None = None) -> dict:
+        """Más recientes primero, paginado por cursor (`antes_id`: solo filas con id menor). Pide una fila de
+        más para saber si hay página siguiente sin contar toda la tabla."""
+        limite = max(1, min(limite, 200))
+        q = select(AdminAuditoria).order_by(AdminAuditoria.id.desc()).limit(limite + 1)
+        if antes_id is not None:
+            q = q.where(AdminAuditoria.id < antes_id)
+        if actor:
+            q = q.where(AdminAuditoria.actor == actor)
+        if accion:
+            q = q.where(AdminAuditoria.accion == accion)
+        async with self._sesiones() as s:
+            filas = list((await s.execute(q)).scalars().all())
+        hay_mas = len(filas) > limite
+        filas = filas[:limite]
+        return {
+            "eventos": [{"id": f.id, "fecha": f.fecha.isoformat(), "actor": f.actor, "accion": f.accion,
+                         "objetivo": f.objetivo, "antes": f.antes, "despues": f.despues, "ip": f.ip}
+                        for f in filas],
+            "siguiente": filas[-1].id if hay_mas and filas else None,
+        }
+
     async def auditar(self, actor: str, accion: str, objetivo: str | None = None, *,
                       antes: dict | None = None, despues: dict | None = None, ip: str | None = None) -> None:
         async with self._sesiones.begin() as s:

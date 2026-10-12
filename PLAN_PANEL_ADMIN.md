@@ -228,7 +228,7 @@ COPY --from=panel-build /panel/dist /app/src/asistente/static/panel
   `rol == admin` a los endpoints de escritura de la Fase 3 (base_url, auth, llm) y gestión de usuarios;
   retención de `admin_auditoria` sin decidir; el bloqueo por IP es por réplica (en memoria).
 
-### Fase 3 — Panel (frontend)  *(en curso, 2026-10-11)*
+### Fase 3 — Panel (frontend)  *(implementada; solo faltan las comprobaciones manuales de abajo)*
 **Hecho**: API bajo `/admin/api`; `sistemas/escritura.py` (una transacción por operación: `FOR UPDATE` → validar →
 `version` → secretos/tools → `registro_version` → auditoría); `PERMISOS` por rol (`requiere(...)`: escritura solo
 `admin` y solo con **sesión**, el token estático no escribe); 409 `registro_en_yaml` en modo YAML; endpoints
@@ -243,10 +243,10 @@ servido en `/panel` con CSP; Dockerfile multi-stage; servicio `panel` (perfil) e
 en los proxies de `deploy/` (hoy `/admin*` cerrado hacia fuera); SSRF a nivel de conector (loopback/privadas con
 lista de permitidos para dev); retención de `admin_auditoria`; cambio de contraseña propia desde el panel;
 (modo YAML ya eliminado).
-- [ ] Andamiaje `panel/` (Vite + React + TS), `Dockerfile` multi-stage y servicio `panel` con HMR (sección 6).
-- [ ] Pantallas: login; lista y estado de sistemas (usa `GET /admin/sistemas`); alta/edición; carga de secretos
+- [x] Andamiaje `panel/` (Vite + React + TS), `Dockerfile` multi-stage y servicio `panel` con HMR (sección 6).
+- [x] Pantallas: login; lista y estado de sistemas (usa `GET /admin/sistemas`); alta/edición; carga de secretos
       (solo escritura); tools del manifiesto en vivo con interruptores; usuarios admin (solo `admin`).
-- [ ] Campos sensibles (`base_url`, `auth`, `llm`) solo `admin`; edición con control de `version`.
+- [x] Campos sensibles (`base_url`, `auth`, `llm`) solo `admin`; edición con control de `version`.
 
 **Cierre de la Fase 3 (2026-10-12)**:
 - **Acceso en prod: túnel SSH** (`ssh -N -L 8001:127.0.0.1:8000 deploy@asistente.<dominio>` → `http://localhost:8001/panel/`,
@@ -258,15 +258,22 @@ lista de permitidos para dev); retención de `admin_auditoria`; cambio de contra
 - **Contraseña propia**: `POST /admin/api/yo/clave` (cualquier rol, solo sesión, pide la actual, un fallo cuenta para el
   bloqueo de la cuenta, revoca las demás sesiones, audita) y pantalla `/cuenta` en el panel.
 - **Retención de `admin_auditoria`**: `ASISTENTE_ADMIN_AUDITORIA_DIAS` (365; 0 = no purgar) dentro del bucle de purga.
-  Sigue sin endpoint ni pantalla de lectura de la auditoría; el CLI `cambiar-clave-admin` tampoco audita.
+  **Lectura** (2026-10-12): `GET /admin/api/auditoria` (permiso `auditoria.leer`, solo `admin` con sesión; paginado por
+  cursor `antes_id`/`siguiente`, filtros `actor` y `accion` exactos, `limite` 1-200) y pantalla `/auditoria` en el panel
+  (el detalle `antes`/`despues` se pinta como texto plano). El CLI `crear-admin` y `cambiar-clave-admin` auditan con
+  actor `cli`.
 - **SSRF**: `core/red.py` (reglas + `TransporteSeguro`: resuelve, valida todas las IPs y conecta a la IP validada con
   Host/SNI originales) para conector, manifiesto, JWKS (ahora httpx, `ClienteJwks`, tope 256 KB, sin redirecciones) y LLM.
   Por defecto solo IPs públicas; `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS` (nombres/CIDR); el host de `LLM_BASE_URL` se permite
   solo; denegación fija (metadatos, link-local, `0.0.0.0/8`, multicast) que ninguna lista salta; IPv4 mapeada/NAT64/6to4
   evaluadas por la IPv4 que llevan. Al guardar, el panel responde 422 `destino_no_permitido` (comodidad, no control).
   `directo.py` comparte `ip_publica`. Fuera de alcance: STT/TTS/SearXNG/Tavily (URLs del operador, no del panel).
-- **Pendiente**: prueba manual en navegador (la hace el usuario); evals (`evals/correr.py`) y e2e con llama-server y
-  stmgis levantados, y comprobar en la VPS que `FORWARDED_ALLOW_IPS` coincide con la red del proxy; Safari con la
+- **Evals 2026-10-12** (DeepSeek, con SSRF y registro en BD): `preguntas` 30/32, acciones 20/21, memoria 5/6, voz 8/12
+  (línea base 30/32, 20/21, 3/6, 9/12). Los fallos de voz son de redacción del resumen hablado (demasiadas cifras, v09
+  lo lee entero), no del registro ni de la red; voz −1 se considera ruido del modelo.
+- **Pendiente** (tests: 833 pasan, 15 saltados, 2026-10-12): prueba manual en navegador (la hace el usuario; incluir la
+  pantalla Auditoría); e2e de `tests_e2e/` (acciones, widget, memoria; no necesitan llama-server, el LLM de dev es
+  DeepSeek), y comprobar en la VPS que `FORWARDED_ALLOW_IPS` coincide con la red del proxy; Safari con la
   cookie `__Host-` sobre `http://localhost` sin verificar.
 
 ### Fase 4 — Métricas

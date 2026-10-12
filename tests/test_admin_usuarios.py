@@ -177,3 +177,35 @@ async def test_purgar_auditoria_borra_solo_lo_vencido(limpio):
     async with limpio() as s:
         acciones = [f.accion for f in (await s.execute(select(AdminAuditoria))).scalars()]
     assert acciones == ["login"]
+
+
+async def test_listar_auditoria_pagina_por_cursor_y_filtra(limpio):
+    a = AdminSql(limpio)
+    for i in range(5):
+        await a.auditar("ana@ejemplo.com" if i % 2 == 0 else "luis@ejemplo.com", f"accion_{i}", f"obj{i}")
+    p1 = await a.listar_auditoria(limite=2)
+    assert [e["accion"] for e in p1["eventos"]] == ["accion_4", "accion_3"]  # más reciente primero
+    assert p1["siguiente"] is not None
+    p2 = await a.listar_auditoria(limite=2, antes_id=p1["siguiente"])
+    assert [e["accion"] for e in p2["eventos"]] == ["accion_2", "accion_1"]
+    p3 = await a.listar_auditoria(limite=2, antes_id=p2["siguiente"])
+    assert [e["accion"] for e in p3["eventos"]] == ["accion_0"] and p3["siguiente"] is None
+    solo_ana = await a.listar_auditoria(actor="ana@ejemplo.com")
+    assert {e["actor"] for e in solo_ana["eventos"]} == {"ana@ejemplo.com"} and len(solo_ana["eventos"]) == 3
+    una = await a.listar_auditoria(accion="accion_1")
+    assert [e["objetivo"] for e in una["eventos"]] == ["obj1"]
+
+
+async def test_endpoint_auditoria_solo_admin_con_sesion(construir_app, limpio):  # noqa: F811
+    a = AdminSql(limpio)
+    await a.crear_usuario("ana@ejemplo.com", CLAVE, "admin")
+    await a.crear_usuario("op@ejemplo.com", CLAVE, "operador")
+    async with construir_app() as c:
+        _, h_op = await entrar(c, "op@ejemplo.com")
+        assert (await c.get("/admin/api/auditoria", headers=h_op)).status_code == 403
+        _, h = await entrar(c, "ana@ejemplo.com")
+        r = await c.get("/admin/api/auditoria?limite=1", headers=h)
+        assert r.status_code == 200
+        cuerpo = r.json()
+        assert len(cuerpo["eventos"]) == 1 and cuerpo["siguiente"] is not None
+        assert (await c.get("/admin/api/auditoria?limite=0", headers=h)).status_code == 422

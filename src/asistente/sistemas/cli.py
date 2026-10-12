@@ -81,10 +81,15 @@ async def _ejecutar(args: argparse.Namespace) -> int:
                 return 2
             print(f"rotados {await registro_bd.rotar_clave(sesiones, cifrador)} secreto(s)")
         elif args.comando == "crear-admin":
-            await AdminSql(sesiones).crear_usuario(args.email, _pedir_clave(), args.rol)
-            print(f"usuario {args.email.strip().lower()} creado ({args.rol})")
+            admin = AdminSql(sesiones)
+            await admin.crear_usuario(args.email, _pedir_clave(), args.rol)
+            email = args.email.strip().lower()
+            await admin.auditar("cli", "usuario_crear", email, despues={"rol": args.rol})
+            print(f"usuario {email} creado ({args.rol})")
         elif args.comando == "cambiar-clave-admin":
-            await AdminSql(sesiones).cambiar_clave(args.email, _pedir_clave())
+            admin = AdminSql(sesiones)
+            await admin.cambiar_clave(args.email, _pedir_clave())
+            await admin.auditar("cli", "usuario_clave", args.email.strip().lower())
             print("contraseña cambiada; sesiones revocadas")
     except (registro_bd.ErrorRegistro, ErrorCifrado, ErrorAdmin) as e:
         print(f"error: {e}", file=sys.stderr)
