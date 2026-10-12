@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ToggleTema } from '@/components/ToggleTema'
 import { Button } from '@/components/ui/button'
 import { api, setCsrf, type Yo } from '@/lib/api'
 import { useHash } from '@/lib/hash'
@@ -42,6 +43,7 @@ export default function App() {
         <Button variant="ghost" size="sm" className="ml-auto" onClick={() => ir('/cuenta')}>
           {yo.email} · {yo.rol}
         </Button>
+        <ToggleTema />
         <Button variant="outline" size="sm" onClick={salir}>Salir</Button>
       </header>
       {partes[0] === 'cuenta' ? (

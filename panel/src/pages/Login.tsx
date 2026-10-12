@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { ToggleTema } from '@/components/ToggleTema'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -27,6 +28,7 @@ export function Login({ onEntrar }: { onEntrar: (yo: Yo) => void }) {
 
   return (
     <main className="min-h-screen grid place-items-center p-4">
+      <ToggleTema className="absolute top-4 right-4" />
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Panel de administración</CardTitle>

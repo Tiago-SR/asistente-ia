@@ -82,6 +82,7 @@ services:
       MOCK_NOMBRE: Mock A
       MOCK_SECRETO: secreto-mock-a-0123456789-0123456789
       MOCK_TOKEN_MANIFIESTO: manifiesto-mock-a
+      MOCK_XSS: ${MOCK_XSS:-}
     volumes:
       - ./ejemplos/sistema-mock:/mock:ro
     ports:

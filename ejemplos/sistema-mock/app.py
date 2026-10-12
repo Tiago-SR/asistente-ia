@@ -9,6 +9,7 @@ Configuración por variables de entorno:
   MOCK_SECRETO            secreto HS256 que firma/valida tokens   [secreto-mock-a]
   MOCK_AUDIENCIA          claim `aud`                             [asistente]
   MOCK_TOKEN_MANIFIESTO   credencial para leer el manifiesto      [manifiesto-mock-a]
+  MOCK_XSS                si tiene valor, añade la tool `probar_xss` con HTML en descripciones
   MOCK_DEFECTO            rompe una regla del contrato a propósito, para probar el
                           verificador (herramientas/verificar_sistema.py). Ver DEFECTOS.
 
@@ -206,6 +207,20 @@ MANIFIESTO = {
 
 if DEFECTO == "manifiesto_invalido":
     MANIFIESTO["tools"][0]["nombre"] = "Listar-Mal"
+
+if os.getenv("MOCK_XSS"):
+    # Solo para probar a mano que el panel pinta como texto lo que viene del manifiesto.
+    MANIFIESTO["tools"].append({
+        "nombre": "probar_xss",
+        "descripcion": '<img src=x onerror="alert(\'XSS descripcion\')"> <script>alert("XSS script")</script>',
+        "parametros": {
+            "type": "object",
+            "properties": {"x": {"type": "string", "description": '<img src=x onerror="alert(\'XSS param\')">'}},
+            "additionalProperties": False,
+        },
+        "efecto": "lectura",
+        "timeout_s": 15,
+    })
 
 app = FastAPI(title=f"Sistema mock {ID}")
 

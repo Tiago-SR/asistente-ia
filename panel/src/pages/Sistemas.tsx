@@ -6,11 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { api, mensaje, type Resumen, type Yo } from '@/lib/api'
+import { api, mensaje, type EstadoManifiesto, type Resumen, type Yo } from '@/lib/api'
 
 export function Sistemas({ yo, ir }: { yo: Yo; ir: (ruta: string) => void }) {
   const [lista, setLista] = useState<Resumen[] | null>(null)
   const [invalidos, setInvalidos] = useState<Record<string, string>>({})
+  // Aparte de la lista: pide el manifiesto de cada sistema por red y puede tardar si alguno no responde.
+  const [manifiestos, setManifiestos] = useState<Record<string, EstadoManifiesto> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nuevo, setNuevo] = useState({ id: '', nombre: '', base_url: '' })
   const [creando, setCreando] = useState(false)
@@ -24,6 +26,9 @@ export function Sistemas({ yo, ir }: { yo: Yo; ir: (ruta: string) => void }) {
       .catch((e) => setError(mensaje(e)))
   useEffect(() => {
     void cargar()
+    api<{ manifiestos: Record<string, EstadoManifiesto> }>('GET', '/manifiestos')
+      .then((r) => setManifiestos(r.manifiestos))
+      .catch(() => setManifiestos({}))
   }, [])
 
   async function crear(ev: React.FormEvent) {
@@ -83,7 +88,15 @@ export function Sistemas({ yo, ir }: { yo: Yo; ir: (ruta: string) => void }) {
                     )}
                   </TableCell>
                   <TableCell>
-                    {s.activo ? (s.manifiesto_ok ? `${s.tools_lectura} tools de lectura` : (s.ultimo_error ?? 'sin manifiesto')) : '—'}
+                    {!s.activo ? (
+                      '—'
+                    ) : manifiestos === null ? (
+                      <span className="text-muted-foreground">comprobando…</span>
+                    ) : manifiestos[s.id]?.ok ? (
+                      `${manifiestos[s.id].tools_lectura} tools de lectura`
+                    ) : (
+                      (manifiestos[s.id]?.error ?? 'sin manifiesto')
+                    )}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{s.base_url}</TableCell>
                 </TableRow>

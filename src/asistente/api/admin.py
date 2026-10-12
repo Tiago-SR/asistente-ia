@@ -276,45 +276,42 @@ async def recargar(request: Request, a: Actor = Depends(actor), svc: Servicios =
 
 @router.get("/sistemas")
 async def sistemas(svc: Servicios = Depends(admin)) -> dict:
-    if svc.sesiones is not None:
-        return await _sistemas_bd(svc)
-    estado = []
-    for s in svc.registro.todos():
-        try:
-            m = await svc.manifiestos.obtener(s.id)
-            manifiesto, error = True, None
-            tools = len(m.tools_lectura())
-        except ManifiestoInvalido as e:
-            manifiesto, error, tools = False, str(e), 0
-        estado.append({"id": s.id, "nombre": s.nombre, "habilitado": True,
-                       "manifiesto_ok": manifiesto, "tools_lectura": tools, "ultimo_error": error})
-    return {"sistemas": estado, "invalidos": svc.registro.errores}
+    """Lista del registro sin tocar la red: el estado de los manifiestos va aparte (`/manifiestos`)."""
+    if svc.sesiones is None:
+        return {"sistemas": [{"id": s.id, "nombre": s.nombre, "habilitado": True, "activo": True}
+                             for s in svc.registro.todos()],
+                "invalidos": svc.registro.errores}
+    return await _sistemas_bd(svc)
 
 
-async def _estado_manifiesto(svc: Servicios, sistema_id: str) -> tuple[bool, str | None, int]:
-    """(ok, error, tools). Acotado: un sistema caído no debe dejar la lista colgada hasta su timeout."""
+async def _estado_manifiesto(svc: Servicios, sistema_id: str) -> dict:
+    """Acotado: un sistema caído no debe dejar la respuesta colgada hasta su timeout."""
     try:
         m = await asyncio.wait_for(svc.manifiestos.obtener(sistema_id), _ESPERA_MANIFIESTO_S)
     except ManifiestoInvalido as e:
-        return False, str(e), 0
+        return {"ok": False, "error": str(e), "tools_lectura": 0}
     except TimeoutError:
-        return False, "el sistema no respondió a tiempo", 0
-    return True, None, len(m.tools_lectura())
+        return {"ok": False, "error": "el sistema no respondió a tiempo", "tools_lectura": 0}
+    return {"ok": True, "error": None, "tools_lectura": len(m.tools_lectura())}
+
+
+@router.get("/manifiestos")
+async def manifiestos(svc: Servicios = Depends(admin)) -> dict:
+    """Estado del manifiesto de cada sistema activo, en paralelo: tarda lo que el más lento (con tope)."""
+    ids = [s.id for s in svc.registro.todos()]
+    estados = await asyncio.gather(*(_estado_manifiesto(svc, i) for i in ids))
+    return {"manifiestos": dict(zip(ids, estados, strict=True))}
 
 
 async def _sistemas_bd(svc: Servicios) -> dict:
     """Lista del registro en BD: incluye los deshabilitados y los inválidos, con su versión y secretos."""
     assert svc.sesiones is not None
     filas = await escritura.listar(svc.sesiones)
-    activos = [svc.registro.obtener(f["id"]) is not None for f in filas]
-    # En paralelo: la lista tarda lo que el más lento (con tope), no la suma.
-    manifiestos = await asyncio.gather(
-        *(_estado_manifiesto(svc, f["id"]) if a else asyncio.sleep(0, (False, None, 0))
-          for f, a in zip(filas, activos, strict=True)))
     estado = []
-    for f, activo, (ok, error, tools) in zip(filas, activos, manifiestos, strict=True):
-        estado.append({**f, "activo": activo, "manifiesto_ok": ok, "tools_lectura": tools,
-                       "ultimo_error": error if activo else svc.registro.errores.get(f["id"])})
+    for f in filas:
+        activo = svc.registro.obtener(f["id"]) is not None
+        estado.append({**f, "activo": activo,
+                       "ultimo_error": None if activo else svc.registro.errores.get(f["id"])})
     return {"sistemas": estado, "invalidos": svc.registro.errores}
 
 

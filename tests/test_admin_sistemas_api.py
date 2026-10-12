@@ -121,6 +121,43 @@ async def test_admin_crea_edita_y_el_csrf_cubre_put_y_delete(cliente, limpio):
         assert (r.status_code, r.json()) == (409, {"error": "version_obsoleta", "version": 2})
 
 
+async def test_la_lista_no_espera_manifiestos_y_su_estado_va_aparte(cliente, limpio, monkeypatch):
+    import asyncio
+
+    from asistente.api import admin as api_admin
+    from asistente.sistemas.manifiesto import CacheManifiestos, ManifiestoInvalido
+
+    llamadas = []
+
+    async def obtener(self, sistema_id):
+        llamadas.append(sistema_id)
+        if sistema_id == "lento":
+            await asyncio.sleep(5)
+        raise ManifiestoInvalido("sin credencial")
+
+    monkeypatch.setattr(CacheManifiestos, "obtener", obtener)
+    monkeypatch.setattr(api_admin, "_ESPERA_MANIFIESTO_S", 0.05)
+    async with cliente() as c:
+        h = await _sesion(c, limpio, "admin")
+        for id_ in ("acme", "lento"):
+            r = await c.post("/admin/api/sistemas", json={"config": {**CONFIG, "id": id_}}, headers=h)
+            cuerpo = {"version": 1, "config": {**r.json()["config"], "habilitado": True},
+                      "secretos": {"token_manifiesto": SECRETO}}
+            assert (await c.put(f"/admin/api/sistemas/{id_}", json=cuerpo, headers=h)).status_code == 200
+
+        # la lista sale de la BD: no toca la red ni trae campos de manifiesto
+        lista = (await c.get("/admin/api/sistemas", headers=h)).json()["sistemas"]
+        assert llamadas == []
+        assert {x["id"] for x in lista} == {"acme", "lento"}
+        assert all("manifiesto_ok" not in x and "tools_lectura" not in x for x in lista)
+
+        r = await c.get("/admin/api/manifiestos", headers=h)
+        assert r.status_code == 200
+        m = r.json()["manifiestos"]
+        assert m["acme"] == {"ok": False, "error": "sin credencial", "tools_lectura": 0}
+        assert m["lento"]["ok"] is False and "a tiempo" in m["lento"]["error"]
+
+
 async def test_el_error_de_validacion_no_repite_el_secreto(cliente, limpio):
     async with cliente() as c:
         h = await _sesion(c, limpio, "admin")

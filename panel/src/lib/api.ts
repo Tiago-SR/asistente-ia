@@ -51,10 +51,9 @@ export type Resumen = {
   activo: boolean
   version: number
   base_url: string
-  manifiesto_ok: boolean
-  tools_lectura: number
   ultimo_error: string | null
 }
+export type EstadoManifiesto = { ok: boolean; error: string | null; tools_lectura: number }
 export type ToolVista = {
   nombre: string
   descripcion: string
