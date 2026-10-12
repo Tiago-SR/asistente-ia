@@ -116,3 +116,64 @@ async def test_el_cors_de_los_sistemas_no_aplica_al_panel(construir_app):  # noq
     async with construir_app() as c:
         r = await c.get("/admin/api/yo", headers={"Origin": ORIGEN_A})
         assert "access-control-allow-origin" not in r.headers
+
+
+async def test_cambiar_clave_propia_exige_la_actual_y_conserva_solo_la_sesion_actual(construir_app, limpio):  # noqa: F811
+    await AdminSql(limpio).crear_usuario("ana@ejemplo.com", CLAVE, "operador")  # cualquier rol puede
+    nueva = "otra-clave-larga-456"
+    async with construir_app() as c:
+        r, h = await entrar(c)
+        _, otra = await entrar(c)  # segunda sesión de la misma persona
+        csrf = r.json()["csrf"]
+        post = {**h, "X-CSRF": csrf, **ORIGEN}
+        # actual incorrecta: 403, no cambia nada y cuenta como fallo
+        mal = await c.post("/admin/api/yo/clave", json={"actual": "incorrecta-larga-1", "nueva": nueva}, headers=post)
+        assert (mal.status_code, mal.json()["error"]) == (403, "clave_actual_incorrecta")
+        # nueva igual a la actual o corta: 422
+        assert (await c.post("/admin/api/yo/clave", json={"actual": CLAVE, "nueva": CLAVE}, headers=post)).status_code == 422
+        assert (await c.post("/admin/api/yo/clave", json={"actual": CLAVE, "nueva": "corta"}, headers=post)).status_code == 422
+        ok = await c.post("/admin/api/yo/clave", json={"actual": CLAVE, "nueva": nueva}, headers=post)
+        assert ok.status_code == 200
+        assert (await c.get("/admin/api/yo", headers=h)).status_code == 200      # la sesión que cambia sigue
+        assert (await c.get("/admin/api/yo", headers=otra)).status_code == 401   # las demás se revocan
+        assert (await entrar(c, clave=CLAVE))[0].status_code == 401
+        assert (await entrar(c, clave=nueva))[0].status_code == 200
+    async with limpio() as s:
+        acciones = [f.accion for f in (await s.execute(select(AdminAuditoria).order_by(AdminAuditoria.id))).scalars()]
+    assert "clave_propia_fallida" in acciones and "clave_propia" in acciones
+    assert nueva not in str(acciones)
+
+
+async def test_cambiar_clave_propia_rechaza_el_token_estatico_y_sin_csrf(construir_app, limpio):  # noqa: F811
+    await AdminSql(limpio).crear_usuario("ana@ejemplo.com", CLAVE, "admin")
+    async with construir_app(admin_token="adm1n") as c:
+        r = await c.post("/admin/api/yo/clave", json={"actual": CLAVE, "nueva": "otra-clave-larga-456"},
+                         headers={"Authorization": "Bearer adm1n"})
+        assert r.status_code == 403
+        _, h = await entrar(c)
+        r = await c.post("/admin/api/yo/clave", json={"actual": CLAVE, "nueva": "otra-clave-larga-456"}, headers=h)
+        assert r.status_code == 403  # sin X-CSRF
+
+
+async def test_fallos_de_la_actual_bloquean_la_cuenta(limpio):
+    a = AdminSql(limpio)
+    await a.crear_usuario("ana@ejemplo.com", CLAVE, "admin")
+    token, _ = await a.login("ana@ejemplo.com", CLAVE)
+    for _ in range(FALLOS_MAX):
+        with pytest.raises(ErrorAdmin):
+            await a.cambiar_clave_propia("ana@ejemplo.com", "incorrecta-larga-1", "otra-clave-larga-456", token)
+    with pytest.raises(ErrorAdmin):  # ya bloqueada: ni con la correcta
+        await a.cambiar_clave_propia("ana@ejemplo.com", CLAVE, "otra-clave-larga-456", token)
+
+
+async def test_purgar_auditoria_borra_solo_lo_vencido(limpio):
+    a = AdminSql(limpio)
+    await a.auditar("ana@ejemplo.com", "login")
+    async with limpio.begin() as s:
+        s.add(AdminAuditoria(actor="ana@ejemplo.com", accion="vieja",
+                             fecha=datetime.now(UTC) - timedelta(days=400)))
+    assert await a.purgar_auditoria(0) == 0  # 0 = no purgar
+    assert await a.purgar_auditoria(365) == 1
+    async with limpio() as s:
+        acciones = [f.accion for f in (await s.execute(select(AdminAuditoria))).scalars()]
+    assert acciones == ["login"]

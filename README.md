@@ -59,8 +59,10 @@ docker compose -f docker-compose.dev.yml --profile panel up panel
 
 Sin Docker: `cd panel && npm install && npm run dev` (Vite reenvía `/admin/api` a `PANEL_API`, por defecto
 `http://localhost:8100`). En prod el `Dockerfile` compila el panel en una etapa Node y lo copia a la imagen final
-(sin Node); se sirve en `/panel` con CSP estricta. Los proxies de `deploy/` cierran `/admin*` hacia fuera: el panel
-se usa por red interna o túnel hasta decidir abrir solo `/admin/api` y `/panel`.
+(sin Node); se sirve en `/panel` con CSP estricta. Los proxies de `deploy/` cierran `/admin*` y `/panel*` hacia
+fuera y el servicio responde 404 a lo que traiga cabeceras de proxy o un `Host` fuera de `ASISTENTE_ADMIN_HOSTS`:
+en prod el panel se usa solo por túnel SSH (`ssh -N -L 8001:127.0.0.1:8000 deploy@asistente.<dominio>` y
+`http://localhost:8001/panel/`; detalle en `deploy/VPS.md` §5).
 
 ### LLM local
 

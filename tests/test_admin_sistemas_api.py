@@ -206,3 +206,33 @@ async def test_el_panel_se_sirve_con_csp_y_sin_cors(tmp_path):
         a = await c.get("/panel/assets/app-abc.js")
         assert "immutable" in a.headers["cache-control"]
     assert panel.montar(FastAPI(), tmp_path / "no-existe") is False
+
+
+@pytest.mark.parametrize("campo,cambios", [
+    ("base_url", {"base_url": "http://127.0.0.1:8000"}),
+    ("base_url", {"base_url": "http://169.254.169.254/latest"}),
+    ("base_url", {"base_url": "http://10.0.0.5"}),
+    ("auth.jwks_url", {"auth": {"algoritmo": "RS256", "jwks_url": "http://[::1]/jwks"}}),
+    ("llm.base_url", {"llm": {"base_url": "http://192.168.1.10:8090/v1"}}),
+])
+async def test_destinos_privados_se_rechazan_al_guardar(cliente, limpio, campo, cambios):
+    async with cliente() as c:
+        h = await _sesion(c, limpio, "admin")
+        r = await c.post("/admin/api/sistemas", json={"config": {**CONFIG, **cambios}}, headers=h)
+        assert (r.status_code, r.json()["error"]) == (422, "destino_no_permitido")
+        assert r.json()["mensaje"].startswith(campo)
+    async with limpio() as s:
+        assert (await s.execute(select(SistemaRegistro))).first() is None
+
+
+async def test_destino_privado_de_la_lista_de_permitidos_se_acepta(limpio, tmp_path):
+    c = _app(limpio, tmp_path)
+    c._transport.app.state.servicios.settings.hosts_internos_permitidos = "10.0.5.0/24"
+    async with c:
+        h = await _sesion(c, limpio, "admin")
+        r = await c.post("/admin/api/sistemas", json={"config": {**CONFIG, "base_url": "http://10.0.5.7:8000"}},
+                         headers=h)
+        assert r.status_code == 201
+        r = await c.post("/admin/api/sistemas", json={"config": {**CONFIG, "id": "otro",
+                                                                  "base_url": "http://10.0.6.7:8000"}}, headers=h)
+        assert r.status_code == 422

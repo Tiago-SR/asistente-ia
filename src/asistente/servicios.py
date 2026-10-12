@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -12,6 +13,7 @@ from asistente.core.adjuntos import AlmacenAdjuntos, NoGuarda
 from asistente.core.llm.openai_compat import OpenAICompat
 from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites
 from asistente.core.prompts import Prompts
+from asistente.core.red import ReglasRed, TransporteSeguro
 from asistente.core.voz import catalogo
 from asistente.core.voz.elevenlabs import TtsElevenLabs
 from asistente.core.voz.elevenlabs_stt import SttElevenLabs
@@ -68,8 +70,22 @@ class Servicios:
     cifrador: Cifrador | None = None  # secretos de sistema (solo registro en BD); None = sin claves maestras
 
 
-def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
-    cliente = httpx.AsyncClient(follow_redirects=False)
+def reglas_red(settings: Settings) -> ReglasRed:
+    """Destinos a los que puede conectarse el servicio: públicos, más los de ASISTENTE_HOSTS_INTERNOS_PERMITIDOS
+    y el host de LLM_BASE_URL (lo fija el operador)."""
+    llm_global = urlsplit(settings.llm_base_url or "").hostname
+    return ReglasRed.desde_texto(settings.hosts_internos_permitidos, extra_nombres=[llm_global or ""])
+
+
+def _cliente_saliente(settings: Settings) -> httpx.AsyncClient:
+    """Cliente para lo que apunta una URL editable desde el panel (conector, manifiesto, JWKS, LLM por sistema):
+    conecta solo a los destinos de `reglas_red`, y a la IP ya validada."""
+    return httpx.AsyncClient(transport=TransporteSeguro(reglas_red(settings)), follow_redirects=False)
+
+
+def _fabrica_llm(settings: Settings, registro: RegistroSistemas,
+                 cliente: httpx.AsyncClient | None = None) -> Callable[[Sistema], tuple[LLM, str]]:
+    cliente = cliente or httpx.AsyncClient(follow_redirects=False)
     cache: dict[tuple[str, str | None, bool], LLM] = {}
 
     def llm_para(sistema: Sistema) -> tuple[LLM, str]:
@@ -143,6 +159,13 @@ def _fabrica_web(settings: Settings) -> WebConRespaldo | None:
     return WebConRespaldo(proveedores, pausa_cupo_s=settings.web_pausa_cupo_s)
 
 
+def _cerrar(motor, saliente: httpx.AsyncClient):
+    async def cierre() -> None:
+        await saliente.aclose()
+        await motor.dispose()
+    return cierre
+
+
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
@@ -154,8 +177,9 @@ def construir(settings: Settings) -> Servicios:
         cifrador = None
     FuenteBD(registro, sesiones, cifrador)
     voces = _fabrica_voces(settings)
-    manifiestos = CacheManifiestos(registro)
-    autenticador = Autenticador(registro)
+    saliente = _cliente_saliente(settings)
+    manifiestos = CacheManifiestos(registro, saliente)
+    autenticador = Autenticador(registro, saliente)
 
     def _descartar_cachés(ids: set[str]) -> None:
         for i in ids:
@@ -168,14 +192,14 @@ def construir(settings: Settings) -> Servicios:
         registro=registro,
         autenticador=autenticador,
         manifiestos=manifiestos,
-        conector=ConectorHttp(registro, manifiestos),
+        conector=ConectorHttp(registro, manifiestos, saliente),
         repo=Repo(sesiones),
         limites=LimitesPostgres(sesiones),
         auditoria=AuditoriaSql(sesiones),
         prompts=Prompts(settings.prompts_dir),
-        llm_para=_fabrica_llm(settings, registro),
+        llm_para=_fabrica_llm(settings, registro, saliente),
         sesiones=sesiones,
-        cierre=motor.dispose,
+        cierre=_cerrar(motor, saliente),
         stt=_fabrica_stt(settings),
         tts=_fabrica_tts(settings, voces),
         voces=voces,

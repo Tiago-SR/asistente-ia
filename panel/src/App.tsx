@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { api, setCsrf, type Yo } from '@/lib/api'
 import { useHash } from '@/lib/hash'
+import { Cuenta } from '@/pages/Cuenta'
 import { Login } from '@/pages/Login'
 import { Sistema } from '@/pages/Sistema'
 import { Sistemas } from '@/pages/Sistemas'
@@ -36,10 +37,14 @@ export default function App() {
           <Button variant="ghost" onClick={() => ir('/sistemas')}>Sistemas</Button>
           {yo.rol === 'admin' && <Button variant="ghost" onClick={() => ir('/usuarios')}>Usuarios</Button>}
         </nav>
-        <span className="ml-auto text-sm text-muted-foreground">{yo.email} · {yo.rol}</span>
+        <Button variant="ghost" size="sm" className="ml-auto" onClick={() => ir('/cuenta')}>
+          {yo.email} · {yo.rol}
+        </Button>
         <Button variant="outline" size="sm" onClick={salir}>Salir</Button>
       </header>
-      {partes[0] === 'usuarios' && yo.rol === 'admin' ? (
+      {partes[0] === 'cuenta' ? (
+        <Cuenta yo={yo} />
+      ) : partes[0] === 'usuarios' && yo.rol === 'admin' ? (
         <Usuarios yo={yo} />
       ) : partes[0] === 'sistemas' && partes[1] ? (
         <Sistema key={partes[1]} id={partes[1]} yo={yo} ir={ir} />

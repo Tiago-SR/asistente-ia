@@ -76,3 +76,33 @@ async def test_sin_auditoria_no_se_purga_y_el_bucle_la_recibe(tmp_path):
     await asyncio.sleep(0.05)
     tarea.cancel()
     assert auditoria.llamadas
+
+
+class AdminFalso:
+    def __init__(self, falla: bool = False) -> None:
+        self.dias: list[int] = []
+        self.falla = falla
+
+    async def purgar_auditoria(self, dias: int) -> int:
+        if self.falla:
+            raise RuntimeError("BD caída")
+        self.dias.append(dias)
+        return 3
+
+
+async def test_la_auditoria_del_panel_se_purga_una_vez_con_sus_dias(tmp_path):
+    admin = AdminFalso()
+    await purgar_todos(registro(tmp_path), RepoFalso(), admin=admin, admin_auditoria_dias=365)
+    assert admin.dias == [365]  # una vez, no por sistema
+
+
+async def test_sin_dias_no_se_purga_la_auditoria_del_panel(tmp_path):
+    admin = AdminFalso()
+    await purgar_todos(registro(tmp_path), RepoFalso(), admin=admin, admin_auditoria_dias=0)
+    assert admin.dias == []
+
+
+async def test_si_falla_la_auditoria_del_panel_el_resto_se_purga(tmp_path):
+    repo = RepoFalso()
+    borradas = await purgar_todos(registro(tmp_path), repo, admin=AdminFalso(falla=True), admin_auditoria_dias=30)
+    assert borradas == {"ret-a": 2, "ret-b": 2, "ret-c": 2}

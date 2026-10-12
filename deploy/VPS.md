@@ -29,6 +29,7 @@ Completar `.env`:
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (obligatoria; sin ella el compose no arranca) |
 | `ASISTENTE_ADMIN_TOKEN` | `openssl rand -hex 32` (vacío = `/admin` deshabilitado) |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `ASISTENTE_MODELO_DEFAULT` | el proveedor de producción |
+| `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS` | solo si algún sistema (`base_url`, `jwks_url`) o un LLM por sistema vive en el mismo host o red docker: nombres y/o CIDR, coma (`mi-sistema,host.docker.internal,10.0.5.0/24`). Vacío = solo IPs públicas; `169.254.0.0/16` (metadatos) nunca |
 | `COMPOSE_PROFILES=voz` + `STT_*` | solo si se quiere dictado con Whisper local (2 GB de RAM) |
 
 `config/sistemas.yaml`: un bloque por sistema, con `origenes_permitidos` = origen de la página con el widget, `auth.algoritmo: RS256` y `clave_publica_env` (el PEM va en `.env`). HS256 solo para pruebas.
@@ -80,21 +81,57 @@ Orden seguro (todo reversible hasta el paso 6):
 - **nginx**: `deploy/nginx.conf.example` → `sites-available`, ajustar el dominio, `sudo certbot --nginx -d asistente.<dominio>`.
 - **Caddy en otro stack de compose** (red externa `web`): `COMPOSE_FILES="-f docker-compose.yml -f docker-compose.proxy-externo.yml" deploy/deploy.sh` y `reverse_proxy asistente:8000` en ese Caddy.
 
-Los ejemplos devuelven 404 para `/admin`, `/docs` y `/openapi.json` desde fuera, y desactivan el buffering (SSE). Ambos requisitos son obligatorios en cualquier otro proxy. `/docs` además está apagado en el servicio salvo `ASISTENTE_DOCS=1` (solo dev).
+Los ejemplos devuelven 404 para `/admin`, `/panel`, `/docs` y `/openapi.json` desde fuera, y desactivan el buffering (SSE). Ambos requisitos son obligatorios en cualquier otro proxy. `/docs` además está apagado en el servicio salvo `ASISTENTE_DOCS=1` (solo dev).
 
-## 5. Comprobar
+Defensa en profundidad: aunque el proxy no bloquee `/admin` ni `/panel`, el servicio responde 404 si la petición trae cabeceras de proxy (`X-Forwarded-*`) o si su `Host` no está en `ASISTENTE_ADMIN_HOSTS` (por defecto, `localhost`/`127.0.0.1` en los puertos 8001 y 8000). Uvicorn solo toma la IP real de `X-Forwarded-For` cuando el peer está en `ASISTENTE_PROXY_IPS` (por defecto loopback y las redes de docker).
+
+## 5. Acceder al panel (túnel SSH)
+
+El panel **no** se publica en internet: se entra por un túnel SSH hacia el puerto en loopback de la VPS. Desde tu
+máquina (usuario `deploy` de la sección 1, con clave SSH; el usuario no tiene contraseña):
+
+```sh
+ssh -N -L 8001:127.0.0.1:8000 deploy@asistente.<dominio>
+```
+
+Con el túnel abierto, en el navegador: **`http://localhost:8001/panel/`**.
+
+- `-N` no abre shell; `-L 8001:127.0.0.1:8000` publica el puerto 8000 de la VPS en el 8001 de tu máquina (se usa
+  8001 para no chocar con un servidor de dev local en el 8000). Si en la VPS cambiaste `ASISTENTE_PUERTO`, usa ese
+  puerto en lugar de `8000` a la derecha.
+- Usa exactamente `localhost:8001` o `127.0.0.1:8001`: cualquier otro `Host` da 404 (`ASISTENTE_ADMIN_HOSTS`).
+  Si usas otro puerto local, agrégalo a `ASISTENTE_ADMIN_HOSTS` en el `.env` de la VPS y haz `dc up -d`.
+- La cookie de sesión es `__Host-admin` (Secure): Chrome y Firefox la aceptan sobre `http://localhost`. Safari no
+  está verificado.
+- Cierra el túnel con `Ctrl+C` al terminar. Las sesiones caducan a los 30 min de inactividad.
+
+Atajo con `~/.ssh/config` (en tu máquina):
+
+```
+Host asistente-vps
+    HostName asistente.<dominio>
+    User deploy
+    LocalForward 8001 127.0.0.1:8000
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+```
+
+y entonces `ssh -N asistente-vps`. Para una sesión de terminal además del túnel, quita `-N`.
+
+## 6. Comprobar
 
 ```sh
 curl https://asistente.<dominio>/salud                  # {"ok":true,"bd":true,"sistemas":N}
 curl https://asistente.<dominio>/widget.js | head -3
 curl -o /dev/null -w '%{http_code}\n' https://asistente.<dominio>/admin/api/sistemas   # 404 desde fuera
-# Desde el host, con el token de admin:
+curl -o /dev/null -w '%{http_code}\n' https://asistente.<dominio>/panel/               # 404 desde fuera
+# Desde el host (o por el túnel, en localhost:8001), con el token de admin:
 curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" http://127.0.0.1:8000/admin/api/sistemas
 ```
 
 Antes de habilitar un sistema, pasarle `herramientas/verificar_sistema.py` (ver el README).
 
-## 6. Operación
+## 7. Operación
 
 | Tarea | Comando |
 |---|---|

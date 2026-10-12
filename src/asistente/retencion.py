@@ -1,10 +1,11 @@
-"""Purga periódica de conversaciones, acciones y auditoría de tools según la `retencion_dias` de cada sistema, y de la memoria por usuario según sus días sin uso."""
+"""Purga periódica de conversaciones, acciones y auditoría de tools según la `retencion_dias` de cada sistema, de la memoria por usuario según sus días sin uso y de la auditoría del panel según `ASISTENTE_ADMIN_AUDITORIA_DIAS`."""
 
 import asyncio
 import logging
 
 from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
+from asistente.store.admin import AdminSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
 from asistente.store.repo import Repo
@@ -15,6 +16,7 @@ log = logging.getLogger(__name__)
 async def purgar_todos(
     registro: RegistroSistemas, repo: Repo, acciones: AccionesSql | None = None,
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
+    admin: AdminSql | None = None, admin_auditoria_dias: int = 0,
 ) -> dict[str, int]:
     """Una pasada. Un sistema que falle no impide purgar a los demás."""
     borradas: dict[str, int] = {}
@@ -29,6 +31,13 @@ async def purgar_todos(
                 await memoria.purgar(sistema.id)
         except Exception:
             log.exception("purga de %s fallida", sistema.id)
+    if admin is not None and admin_auditoria_dias > 0:  # no es de ningún sistema: fuera del bucle
+        try:
+            n = await admin.purgar_auditoria(admin_auditoria_dias)
+            if n:
+                log.info("purga de retención: %d registros de auditoría del panel", n)
+        except Exception:
+            log.exception("purga de la auditoría del panel fallida")
     total = sum(borradas.values())
     if total:
         log.info("purga de retención: %d conversaciones borradas %s", total, borradas)
@@ -38,8 +47,9 @@ async def purgar_todos(
 async def bucle_purga(
     registro: RegistroSistemas, repo: Repo, intervalo_s: float, acciones: AccionesSql | None = None,
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
+    admin: AdminSql | None = None, admin_auditoria_dias: int = 0,
 ) -> None:
     """Purga al arrancar y luego cada `intervalo_s`. Se cancela al apagar."""
     while True:
-        await purgar_todos(registro, repo, acciones, auditoria, memoria)
+        await purgar_todos(registro, repo, acciones, auditoria, memoria, admin, admin_auditoria_dias)
         await asyncio.sleep(intervalo_s)

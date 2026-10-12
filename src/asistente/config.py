@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # válidos para el chequeo CSRF además del host propio (p. ej. el dev server de Vite); vacío en prod.
     admin_cookie_secure: bool = _env("ASISTENTE_ADMIN_COOKIE_SECURE", True)
     admin_origenes: str = _env("ASISTENTE_ADMIN_ORIGENES", "")
+    # `Host` (coma, con puerto) con que se sirven /admin y /panel; además se rechazan las peticiones con cabeceras
+    # de proxy (X-Forwarded-*). En prod lo fija docker-compose.prod.yml (túnel ssh); vacío = sin restricción.
+    admin_hosts: str = _env("ASISTENTE_ADMIN_HOSTS", "")
     precios_path: str = _env("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml")
     log_level: str = _env("ASISTENTE_LOG_LEVEL", "INFO")
 
@@ -56,6 +59,12 @@ class Settings(BaseSettings):
 
     # Purga de retención: cada cuántos segundos (0 = desactivada).
     purga_intervalo_s: float = _env("ASISTENTE_PURGA_INTERVALO_S", 86400.0)
+    # Destinos internos a los que el servicio puede conectarse (nombres y/o redes CIDR, separados por coma):
+    # `mock-a,sistema-php,host.docker.internal,10.0.5.0/24`. Por defecto solo direcciones públicas. La URL global
+    # del LLM (LLM_BASE_URL) se permite sola. 169.254.0.0/16 (metadatos de nube), link-local y multicast nunca.
+    hosts_internos_permitidos: str = _env("ASISTENTE_HOSTS_INTERNOS_PERMITIDOS", "")
+    # Días que se guarda `admin_auditoria` (quién cambió qué en el panel). 0 = no se purga nunca.
+    admin_auditoria_dias: int = _env("ASISTENTE_ADMIN_AUDITORIA_DIAS", 365)
 
     # Acciones con confirmación (Fase 5): propuestas por usuario y hora.
     acciones_max_por_hora: int = _env("ASISTENTE_ACCIONES_MAX_POR_HORA", 20)

@@ -11,6 +11,9 @@ services:
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: DEBUG
       ASISTENTE_DOCS: "1"   # /docs y /openapi.json
+      # Destinos internos a los que el servicio puede conectarse (anti-SSRF, core/red.py): los sistemas de ejemplo,
+      # el host (stmgis, LLM local) y los servicios de apoyo. Fuera de esta lista solo se llega a IPs públicas.
+      ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-mock-a,sistema-php,host.docker.internal,searxng,whisper}
       # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
       # Búsqueda web: el SearXNG del perfil `busqueda` (si no está arriba, la búsqueda responde «no disponible»).

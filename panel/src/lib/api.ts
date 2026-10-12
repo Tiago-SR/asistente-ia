@@ -85,6 +85,9 @@ const MENSAJES: Record<string, string> = {
   ultimo_admin: 'Debe quedar al menos un admin activo.',
   auto_cambio: 'No puede quitarse a sí mismo el acceso de admin.',
   usuario_invalido: 'Datos de usuario inválidos.',
+  destino_no_permitido:
+    'Ese destino no es público ni está permitido en el servidor (ASISTENTE_HOSTS_INTERNOS_PERMITIDOS).',
+  clave_actual_incorrecta: 'La contraseña actual no es correcta.',
   csrf: 'La sesión no es válida para escribir. Vuelva a entrar.',
 }
 

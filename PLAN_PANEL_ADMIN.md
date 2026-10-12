@@ -1,7 +1,7 @@
 # Plan: panel de administración de sistemas (Jarvis)
 
-> Documento de traspaso entre sesiones. Estado al 2026-10-11: **Fases 1 y 2 cerradas** (modo YAML eliminado), **Fase 3 en curso**
-> (pendiente la prueba manual y lo de su lista); fase 4 sin empezar. Origen de la charla:
+> Documento de traspaso entre sesiones. Estado al 2026-10-12: **Fases 1 y 2 cerradas** (modo YAML eliminado), **Fase 3 cerrada
+> salvo la prueba manual en navegador** (ver «Cierre de la Fase 3»); fase 4 sin empezar. Origen de la charla:
 > `PlataformaJarvisArquitectura.md`. Copia del plan corto: `~/.claude/plans/estoy-interesado-en-darle-quiet-music.md`.
 >
 > Reglas del proyecto para quien continúe: responder en español, **no hacer `git commit`** (sugerir el mensaje),
@@ -248,6 +248,27 @@ lista de permitidos para dev); retención de `admin_auditoria`; cambio de contra
       (solo escritura); tools del manifiesto en vivo con interruptores; usuarios admin (solo `admin`).
 - [ ] Campos sensibles (`base_url`, `auth`, `llm`) solo `admin`; edición con control de `version`.
 
+**Cierre de la Fase 3 (2026-10-12)**:
+- **Acceso en prod: túnel SSH** (`ssh -N -L 8001:127.0.0.1:8000 deploy@asistente.<dominio>` → `http://localhost:8001/panel/`,
+  `deploy/VPS.md` §5). Los proxies de ejemplo cierran también `/panel*`; `api/acceso_admin.py` responde 404 a `/admin` y
+  `/panel` con cabeceras de proxy o `Host` fuera de `ASISTENTE_ADMIN_HOSTS` (lo fija `docker-compose.yml`);
+  `FORWARDED_ALLOW_IPS` (`ASISTENTE_PROXY_IPS`) para que uvicorn solo confíe en `X-Forwarded-*` del proxy. El bloqueo de
+  login por IP ignora IPs no globales (túnel/proxy compartido): queda el bloqueo por cuenta. Siguiente paso si el equipo
+  crece: WireGuard/Tailscale.
+- **Contraseña propia**: `POST /admin/api/yo/clave` (cualquier rol, solo sesión, pide la actual, un fallo cuenta para el
+  bloqueo de la cuenta, revoca las demás sesiones, audita) y pantalla `/cuenta` en el panel.
+- **Retención de `admin_auditoria`**: `ASISTENTE_ADMIN_AUDITORIA_DIAS` (365; 0 = no purgar) dentro del bucle de purga.
+  Sigue sin endpoint ni pantalla de lectura de la auditoría; el CLI `cambiar-clave-admin` tampoco audita.
+- **SSRF**: `core/red.py` (reglas + `TransporteSeguro`: resuelve, valida todas las IPs y conecta a la IP validada con
+  Host/SNI originales) para conector, manifiesto, JWKS (ahora httpx, `ClienteJwks`, tope 256 KB, sin redirecciones) y LLM.
+  Por defecto solo IPs públicas; `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS` (nombres/CIDR); el host de `LLM_BASE_URL` se permite
+  solo; denegación fija (metadatos, link-local, `0.0.0.0/8`, multicast) que ninguna lista salta; IPv4 mapeada/NAT64/6to4
+  evaluadas por la IPv4 que llevan. Al guardar, el panel responde 422 `destino_no_permitido` (comodidad, no control).
+  `directo.py` comparte `ip_publica`. Fuera de alcance: STT/TTS/SearXNG/Tavily (URLs del operador, no del panel).
+- **Pendiente**: prueba manual en navegador (la hace el usuario); evals (`evals/correr.py`) y e2e con llama-server y
+  stmgis levantados, y comprobar en la VPS que `FORWARDED_ALLOW_IPS` coincide con la red del proxy; Safari con la
+  cookie `__Host-` sobre `http://localhost` sin verificar.
+
 ### Fase 4 — Métricas
 - [ ] Migración `evento_uso`; registrar en `core/agent.py` / `limits.py` / `api/voz.py`: rechazos por límite,
       errores y latencia del LLM, canal, costo calculado **al registrar** (histórico estable).
@@ -281,5 +302,4 @@ desde el panel.
 - Política de retención de `admin_auditoria` y de `evento_uso`.
 - Qué hacer con `config/sistemas.yaml` tras migrar: ¿se conserva para dev como semilla (`importar-yaml` al
   arrancar si la BD está vacía) o se elimina del flujo?
-- Si el proxy actual (Caddy/nginx en `deploy/`) ya restringe `/admin` a red interna; mantener esa restricción
-  además del login.
+- ~~Proxy~~: decidido — `/admin*` y `/panel*` cerrados en el proxy y acceso por túnel SSH.

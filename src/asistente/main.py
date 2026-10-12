@@ -20,11 +20,13 @@ from asistente.api import (
     voz,
     widget,
 )
+from asistente.api.acceso_admin import AccesoAdmin
 from asistente.api.cors import CorsSistemas
 from asistente.api.errores import ErrorApi, manejar_error_api
 from asistente.config import Settings
 from asistente.retencion import bucle_purga
 from asistente.servicios import Servicios, construir
+from asistente.store.admin import AdminSql
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +48,9 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
             svc = app.state.servicios
             purga = asyncio.create_task(
                 bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s, svc.acciones,
-                            svc.auditoria, svc.memoria))
+                            svc.auditoria, svc.memoria,
+                            svc.admin or (AdminSql(svc.sesiones) if svc.sesiones is not None else None),
+                            svc.settings.admin_auditoria_dias))
         sondeo = None
         fuente = app.state.servicios.registro.fuente_bd
         if propio and fuente is not None:
@@ -88,6 +92,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
 
     app.add_exception_handler(RequestValidationError, validacion)
     app.add_middleware(CorsSistemas)
+    app.add_middleware(AccesoAdmin)  # el último añadido es el más externo: corta antes que CORS
     routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
                voz.router, admin.router, widget.router)
     for r in routers:

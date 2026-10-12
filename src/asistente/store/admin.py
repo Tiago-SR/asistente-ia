@@ -91,6 +91,36 @@ class AdminSql:
                 raise ErrorAdmin("usuario inexistente")
             await s.execute(delete(AdminSesion).where(AdminSesion.usuario_id == uid))
 
+    async def cambiar_clave_propia(self, email: str, actual: str, nueva: str, token: str) -> None:
+        """Cambio por el propio usuario: exige la contraseña actual (un fallo cuenta para el bloqueo de la cuenta,
+        como en el login) y conserva solo la sesión desde la que se pide; revoca las demás."""
+        if len(nueva) < CLAVE_MIN:
+            raise ErrorAdmin(f"la contraseña debe tener al menos {CLAVE_MIN} caracteres")
+        if nueva == actual:
+            raise ErrorAdmin("la contraseña nueva debe ser distinta de la actual")
+        ahora = self._ahora()
+        async with self._sesiones() as s:
+            u = (await s.execute(
+                select(AdminUsuario).where(AdminUsuario.email == _normalizar(email))
+            )).scalar_one_or_none()
+        if u is None or not u.activo:
+            raise ErrorAdmin("usuario inexistente", "usuario_inexistente")
+        if u.bloqueado_hasta is not None and u.bloqueado_hasta > ahora:
+            raise ErrorAdmin("cuenta bloqueada temporalmente", "clave_actual_incorrecta")
+        if not await self._verificar(u.hash, actual):
+            fallos = u.fallos + 1
+            async with self._sesiones.begin() as s:
+                await s.execute(update(AdminUsuario).where(AdminUsuario.id == u.id).values(
+                    fallos=0 if fallos >= FALLOS_MAX else fallos,
+                    bloqueado_hasta=ahora + BLOQUEO if fallos >= FALLOS_MAX else None))
+            raise ErrorAdmin("la contraseña actual no es correcta", "clave_actual_incorrecta")
+        hash_ = await asyncio.to_thread(_hasher.hash, nueva)
+        async with self._sesiones.begin() as s:
+            await s.execute(update(AdminUsuario).where(AdminUsuario.id == u.id)
+                            .values(hash=hash_, fallos=0, bloqueado_hasta=None))
+            await s.execute(delete(AdminSesion).where(
+                AdminSesion.usuario_id == u.id, AdminSesion.token_hash != _sha(token)))
+
     async def listar_usuarios(self) -> list[dict]:
         async with self._sesiones() as s:
             filas = (await s.execute(select(AdminUsuario).order_by(AdminUsuario.email))).scalars().all()
@@ -192,6 +222,15 @@ class AdminSql:
             await s.execute(delete(AdminSesion).where(AdminSesion.token_hash == _sha(token)))
 
     # --- auditoría ---
+
+    async def purgar_auditoria(self, dias: int) -> int:
+        """Borra la auditoría del panel con más de `dias` días. `dias <= 0` no borra nada."""
+        if dias <= 0:
+            return 0
+        corte = self._ahora() - timedelta(days=dias)
+        async with self._sesiones.begin() as s:
+            r = await s.execute(delete(AdminAuditoria).where(AdminAuditoria.fecha < corte))
+        return r.rowcount or 0
 
     async def auditar(self, actor: str, accion: str, objetivo: str | None = None, *,
                       antes: dict | None = None, despues: dict | None = None, ip: str | None = None) -> None:

@@ -2,11 +2,13 @@
 
 Dos formas de entrar: el token estático `ASISTENTE_ADMIN_TOKEN` (automatización: sin cookie, no sufre CSRF) o la
 sesión de un usuario admin (cookie HttpOnly + Origin propio + cabecera `X-CSRF` en lo que no sea GET).
-La restricción a red interna se aplica en el proxy; el login se suma a eso, no lo reemplaza.
+/admin y /panel no se exponen en el proxy (túnel ssh, deploy/VPS.md) y `api/acceso_admin.py` lo refuerza; el
+login se suma a eso, no lo reemplaza.
 """
 
 import asyncio
 import hmac
+import ipaddress
 import re
 import time
 import uuid
@@ -21,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from asistente import precios
 from asistente.api.deps import servicios
 from asistente.api.errores import ErrorApi
-from asistente.servicios import Servicios
+from asistente.core.red import resolver_dns
+from asistente.servicios import Servicios, reglas_red
 from asistente.sistemas import escritura
 from asistente.sistemas.escritura import ErrorEscritura
 from asistente.sistemas.manifiesto import ManifiestoInvalido
@@ -185,9 +188,24 @@ class _Clave(BaseModel):
     clave: str = Field(max_length=200, repr=False)
 
 
+class _ClavePropia(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actual: str = Field(max_length=200, repr=False)
+    nueva: str = Field(max_length=200, repr=False)
+
+
 class _Login(BaseModel):
     email: str = Field(max_length=320)
     clave: str = Field(max_length=200)
+
+
+def _ip_distinguible(ip: str | None) -> bool:
+    """Una IP privada o de loopback (túnel ssh, proxy, red docker) es la de todos los operadores a la vez: contarla
+    haría que los fallos de uno bloqueen a los demás. El bloqueo por cuenta sigue vigente."""
+    try:
+        return ip is not None and ipaddress.ip_address(ip).is_global
+    except ValueError:
+        return False
 
 
 def _fallos_ip(request: Request) -> deque[float]:
@@ -202,16 +220,18 @@ async def login(datos: _Login, request: Request, response: Response,
                 svc: Servicios = Depends(servicios)) -> dict:
     if not _origen_propio(request, svc):
         raise ErrorApi(403, "csrf")
+    contar_ip = _ip_distinguible(_ip(request))
     fallos = _fallos_ip(request)
     ahora = time.monotonic()
     while fallos and ahora - fallos[0] > _VENTANA_IP_S:
         fallos.popleft()
-    if len(fallos) >= _FALLOS_IP_MAX:
+    if contar_ip and len(fallos) >= _FALLOS_IP_MAX:
         raise ErrorApi(429, "demasiados_intentos")
     store = _store(svc)
     res = await store.login(datos.email, datos.clave)
     if res is None:
-        fallos.append(ahora)
+        if contar_ip:
+            fallos.append(ahora)
         await store.auditar(datos.email.strip().lower()[:320], "login_fallido", ip=_ip(request))
         raise ErrorApi(401, "credenciales_invalidas")  # mismo mensaje en todos los casos
     token, ses = res
@@ -297,12 +317,46 @@ async def _sistemas_bd(svc: Servicios) -> dict:
     return {"sistemas": estado, "invalidos": svc.registro.errores}
 
 
+_DNS_TOPE_S = 3.0
+
+
+async def _verificar_destinos(config: dict, svc: Servicios) -> None:
+    """Rechaza al guardar una URL que el servicio no podría usar (loopback, red privada o metadatos que no figuren
+    en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS) para dar un error claro. No es el control: ese ocurre al conectar
+    (`core/red.py`), con la IP resuelta en ese momento. Un nombre que aún no resuelve se acepta."""
+    reglas = reglas_red(svc.settings)
+    auth, llm = config.get("auth"), config.get("llm")
+    for campo, url in (("base_url", config.get("base_url")),
+                       ("auth.jwks_url", auth.get("jwks_url") if isinstance(auth, dict) else None),
+                       ("llm.base_url", llm.get("base_url") if isinstance(llm, dict) else None)):
+        if not isinstance(url, str) or not url:
+            continue
+        try:
+            host = (urlsplit(url).hostname or "").rstrip(".").lower()
+            puerto = urlsplit(url).port or 80
+        except ValueError:
+            continue  # la forma la rechaza la validación del modelo
+        if not host:
+            continue
+        try:
+            ips = [ipaddress.ip_address(host)]
+        except ValueError:
+            try:
+                ips = [ipaddress.ip_address(i.split("%", 1)[0]) for i in await asyncio.wait_for(
+                    resolver_dns(host, puerto), _DNS_TOPE_S)]
+            except (OSError, ValueError, TimeoutError):
+                continue
+        if not reglas.permite(host, ips):
+            raise ErrorApi(422, "destino_no_permitido", datos={"mensaje": f"{campo}: {host}"})
+
+
 @router.post("/sistemas", status_code=201)
 async def crear_sistema(request: Request, datos: _Crear,
                         svc: Servicios = _ESCRIBIR) -> dict:
     """Crea el sistema DESHABILITADO: los secretos se cargan después y entonces se habilita (PUT)."""
     a = request.state.actor
     assert svc.sesiones is not None
+    await _verificar_destinos(datos.config, svc)
     try:
         r = await escritura.crear_sistema(svc.sesiones, datos.config, por=a.nombre, ip=_ip(request))
     except ErrorEscritura as e:
@@ -327,6 +381,7 @@ async def actualizar_sistema(sistema_id: str, datos: _Actualizar, request: Reque
                              svc: Servicios = _ESCRIBIR) -> dict:
     a = request.state.actor
     assert svc.sesiones is not None
+    await _verificar_destinos(datos.config, svc)
     try:
         r = await escritura.actualizar_sistema(
             svc.sesiones, svc.cifrador, sistema_id, datos.config, datos.version,
@@ -364,7 +419,8 @@ async def borrar_secreto(sistema_id: str, campo: str, request: Request, version:
 
 
 def _falla_admin(e: ErrorAdmin) -> ErrorApi:
-    estado = {"usuario_inexistente": 404, "ultimo_admin": 409, "auto_cambio": 409}.get(e.codigo, 422)
+    estado = {"usuario_inexistente": 404, "ultimo_admin": 409, "auto_cambio": 409,
+              "clave_actual_incorrecta": 403}.get(e.codigo, 422)
     return ErrorApi(estado, e.codigo if e.codigo != "invalido" else "usuario_invalido",
                     datos={"mensaje": str(e)})
 
@@ -397,6 +453,25 @@ async def modificar_usuario(usuario_id: uuid.UUID, datos: _UsuarioCambio, reques
     await _store(svc).auditar(a.nombre, "usuario_modificar", r["email"],
                               despues={"rol": r["rol"], "activo": r["activo"]}, ip=_ip(request))
     return r
+
+
+@router.post("/yo/clave")
+async def cambiar_clave_propia(datos: _ClavePropia, request: Request, svc: Servicios = Depends(servicios)) -> dict:
+    """Cualquier rol, solo con sesión (el token estático no es una persona). Pide la contraseña actual y deja
+    abierta únicamente la sesión desde la que se cambia."""
+    a = await actor(request, svc)
+    token = request.cookies.get(_nombre_cookie(svc))
+    if a.nombre == "token" or not token:
+        raise ErrorApi(403, "permiso_insuficiente")
+    store = _store(svc)
+    try:
+        await store.cambiar_clave_propia(a.nombre, datos.actual, datos.nueva, token)
+    except ErrorAdmin as e:
+        if e.codigo == "clave_actual_incorrecta":
+            await store.auditar(a.nombre, "clave_propia_fallida", a.nombre, ip=_ip(request))
+        raise _falla_admin(e) from None
+    await store.auditar(a.nombre, "clave_propia", a.nombre, ip=_ip(request))
+    return {"ok": True}
 
 
 @router.post("/usuarios/{usuario_id}/clave")
