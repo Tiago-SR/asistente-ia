@@ -18,9 +18,11 @@ __all__ = [
     "Conector",
     "ConsultaPrevia",
     "Contexto",
+    "EventoMetrica",
     "LimiteExcedido",
     "Limites",
     "Memoria",
+    "Metricas",
     "Recientes",
     "Recuerdo",
     "Recuerdos",
@@ -245,6 +247,37 @@ class Limites(Protocol):
 
     async def reservar_web(self, sistema_id: str, usuario_ref: str, tope_por_min: int, tope_por_dia: int) -> None:
         """Cuenta una búsqueda o lectura web del usuario; lanza `LimiteExcedido("web_min")` o `("web_dia")`."""
+
+
+@dataclass(frozen=True)
+class EventoMetrica:
+    """Un hecho de uso para observar (no para facturar: eso es `uso_modelo`/`uso_voz`). Nunca lleva texto,
+    audio ni parámetros. `n` > 1 cuando varios rechazos idénticos se agregaron en el mismo minuto."""
+
+    sistema_id: str
+    tipo: str  # llm | tts | stt
+    resultado: str  # ok | error | limite
+    motivo: str = ""  # tokens_mes, mensajes_min, llm_no_disponible, timeout_turno, voz_min…
+    usuario_ref: str = ""
+    modelo: str = ""  # en tts, la clave de tarifa «proveedor:modelo»
+    canal: str = "texto"  # texto | voz
+    tokens_in: int = 0
+    tokens_in_cache: int = 0
+    tokens_out: int = 0
+    unidades: int = 0  # caracteres (tts) o bytes de audio (stt)
+    llamadas_llm: int = 0
+    latencia_llm_ms: int | None = None  # suma del tiempo en el LLM, sin tools
+    ttft_ms: int | None = None
+    duracion_ms: int | None = None
+    # Los rellena la implementación con la tarifa vigente; NULL = el modelo no tiene tarifa.
+    costo_valle_usd: float | None = None
+    costo_pico_usd: float | None = None
+    n: int = 1
+
+
+class Metricas(Protocol):
+    def registrar(self, evento: EventoMetrica) -> None:
+        """Encola un evento. Síncrono, sin esperar y sin lanzar: nunca debe afectar al turno ni a la voz."""
 
 
 @dataclass(frozen=True)

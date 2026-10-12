@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from asistente.config import Settings
 from asistente.core.adjuntos import AlmacenAdjuntos, NoGuarda
 from asistente.core.llm.openai_compat import OpenAICompat
-from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites
+from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites, Metricas
 from asistente.core.prompts import Prompts
 from asistente.core.red import ReglasRed, TransporteSeguro
 from asistente.core.voz import catalogo
@@ -23,6 +23,7 @@ from asistente.core.web.respaldo import WebConRespaldo
 from asistente.core.web.searxng import WebSearxng
 from asistente.core.web.tavily import WebTavily
 from asistente.limits import LimitesPostgres
+from asistente.precios import Tarifas
 from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.cifrado import Cifrador, ErrorCifrado
 from asistente.sistemas.conector_http import ConectorHttp
@@ -33,6 +34,7 @@ from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
+from asistente.store.metricas import MetricasSql
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo
 
@@ -68,6 +70,7 @@ class Servicios:
     adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
     admin: AdminSql | None = None  # usuarios, sesiones y auditoría del panel
     cifrador: Cifrador | None = None  # secretos de sistema (solo registro en BD); None = sin claves maestras
+    metricas: Metricas | None = None  # None = sin métricas de uso (tests)
 
 
 def reglas_red(settings: Settings) -> ReglasRed:
@@ -209,4 +212,5 @@ def construir(settings: Settings) -> Servicios:
         web=_fabrica_web(settings),
         admin=AdminSql(sesiones),
         cifrador=cifrador,
+        metricas=MetricasSql(sesiones, Tarifas(settings.precios_path)),
     )

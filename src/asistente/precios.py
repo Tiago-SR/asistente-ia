@@ -42,3 +42,22 @@ def costo(tokens_in: int, tokens_in_cache: int, tokens_out: int, tarifa: dict | 
         + tokens_in_cache * tarifa["entrada_cache_hit"][horario]
         + tokens_out * tarifa["salida"][horario]
     ) / 1e6
+
+
+class Tarifas:
+    """Tarifas vigentes, releídas cuando cambia el archivo (se consulta en cada evento registrado)."""
+
+    def __init__(self, ruta: str | Path) -> None:
+        self._ruta = Path(ruta)
+        self._mtime: float | None = None
+        self._datos: dict[str, dict] = {}
+
+    def __call__(self) -> dict[str, dict]:
+        try:
+            mtime = self._ruta.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime != self._mtime:
+            self._datos = cargar(self._ruta)
+            self._mtime = mtime
+        return self._datos

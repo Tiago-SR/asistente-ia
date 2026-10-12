@@ -1,7 +1,7 @@
 # Plan: panel de administración de sistemas (Jarvis)
 
-> Documento de traspaso entre sesiones. Estado al 2026-10-12: **Fases 1 y 2 cerradas** (modo YAML eliminado), **Fase 3 cerrada
-> salvo la prueba manual en navegador** (ver «Cierre de la Fase 3»); fase 4 sin empezar. Origen de la charla:
+> Documento de traspaso entre sesiones. Estado al 2026-10-12: **Fases 1, 2 y 3 cerradas** (modo YAML eliminado; la prueba
+> manual en navegador de la Fase 3 ya se hizo, con ajustes); **fase 4 en curso** (pasos 1 y 2 hechos). Origen de la charla:
 > `PlataformaJarvisArquitectura.md`. Copia del plan corto: `~/.claude/plans/estoy-interesado-en-darle-quiet-music.md`.
 >
 > Reglas del proyecto para quien continúe: responder en español, **no hacer `git commit`** (sugerir el mensaje),
@@ -228,7 +228,7 @@ COPY --from=panel-build /panel/dist /app/src/asistente/static/panel
   `rol == admin` a los endpoints de escritura de la Fase 3 (base_url, auth, llm) y gestión de usuarios;
   retención de `admin_auditoria` sin decidir; el bloqueo por IP es por réplica (en memoria).
 
-### Fase 3 — Panel (frontend)  *(implementada; solo faltan las comprobaciones manuales de abajo)*
+### Fase 3 — Panel (frontend)  *(cerrada 2026-10-12; prueba manual hecha por el usuario, con algunos cambios)*
 **Hecho**: API bajo `/admin/api`; `sistemas/escritura.py` (una transacción por operación: `FOR UPDATE` → validar →
 `version` → secretos/tools → `registro_version` → auditoría); `PERMISOS` por rol (`requiere(...)`: escritura solo
 `admin` y solo con **sesión**, el token estático no escribe); 409 `registro_en_yaml` en modo YAML; endpoints
@@ -271,19 +271,39 @@ lista de permitidos para dev); retención de `admin_auditoria`; cambio de contra
 - **Evals 2026-10-12** (DeepSeek, con SSRF y registro en BD): `preguntas` 30/32, acciones 20/21, memoria 5/6, voz 8/12
   (línea base 30/32, 20/21, 3/6, 9/12). Los fallos de voz son de redacción del resumen hablado (demasiadas cifras, v09
   lo lee entero), no del registro ni de la red; voz −1 se considera ruido del modelo.
-- **Pendiente** (tests: 833 pasan, 15 saltados, 2026-10-12): prueba manual en navegador (la hace el usuario; incluir la
-  pantalla Auditoría); e2e de `tests_e2e/` (acciones, widget, memoria; no necesitan llama-server, el LLM de dev es
+- **Prueba manual en navegador: hecha** (2026-10-12, por el usuario).
+- **Pendiente** (tests: 833 pasan, 15 saltados, 2026-10-12): e2e de `tests_e2e/` (acciones, widget, memoria; no necesitan llama-server, el LLM de dev es
   DeepSeek), y comprobar en la VPS que `FORWARDED_ALLOW_IPS` coincide con la red del proxy; Safari con la
   cookie `__Host-` sobre `http://localhost` sin verificar.
 
-### Fase 4 — Métricas
-- [ ] Migración `evento_uso`; registrar en `core/agent.py` / `limits.py` / `api/voz.py`: rechazos por límite,
-      errores y latencia del LLM, canal, costo calculado **al registrar** (histórico estable).
-- [ ] Endpoints: series diarias, por usuario (top, cuota restante), tools más usadas con ok/error y p50/p95,
-      rechazos y errores; filtros por sistema y rango, paginación. Mantener `/admin/uso`.
-- [ ] Retención: purgar `evento_uso` con `retencion_dias`; resumen diario sin `usuario_ref` si crece el volumen.
-      Purgar también filas `min` de `contadores_uso`.
-- [ ] Gráficos en el panel (usar el skill `dataviz` al diseñarlos).
+### Fase 4 — Métricas  *(en curso desde 2026-10-12: pasos 1 y 2 hechos)*
+**Decisiones (2026-10-12, con el asesor)**: gráficos con shadcn `chart` (recharts); `admin` y `operador` ven métricas
+(solo lectura); sin tests de frontend (lint + build + prueba manual). **Un evento por turno de chat** (no por llamada
+al LLM) y uno por llamada de STT/TTS; `resultado` ∈ ok/error/limite con `motivo` aparte. Las tools se quedan en
+`llamadas_tool` (30 días); el resumen diario copia sus agregados antes de la purga. **Cola en memoria y escritura en
+lote**, nunca propaga errores (la contabilidad que factura sigue siendo `uso_modelo`/`uso_voz`); rechazos agregados por
+(sistema, usuario, motivo, minuto). Costo al registrar como **dos cotas** `costo_valle_usd`/`costo_pico_usd` (NULL si
+no hay tarifa, nunca 0). Retención de crudos `min(90, retencion_dias del sistema)`; `uso_diario` (sin `usuario_ref`) se
+conserva. `/admin/uso` no cambia (facturación mensual con la tarifa vigente; cubre el histórico anterior).
+- [x] Migración 0009: `evento_uso` (btree `(sistema_id, creada)` + BRIN `creada`) y `uso_diario`. Verificada desde BD vacía.
+- [x] Puerto `Metricas`/`EventoMetrica` (`core/ports.py`), `store/metricas.py` (`MetricasSql`: cola, lote, agregación de
+      rechazos, costo con `precios.Tarifas` que relee por mtime), arranque/vaciado en el lifespan, `core/metricas.py`
+      (`MetricasMemoria` para tests).
+- [x] Instrumentación: `run_turn` (`finally`, cubre ok/error/límite/timeout/cancelado/token_expirado) y `api/voz.py`
+      (STT y TTS: ok, error, límite). `ResultadoTurno` lleva `llamadas_llm` y `latencia_llm_ms`.
+- [ ] Resumen y purga: `uso_diario` recalculado de forma idempotente (ventana `hoy-7`..`ayer`, UTC) dentro de
+      `purgar_todos`; no purgar un día sin resumen; filas de `tool` desde `llamadas_tool`; purgar `evento_uso` y las
+      filas `min`/`dia` de `contadores_uso`.
+- [ ] Endpoints de lectura (admin y operador): series diarias, top de usuarios con cuota restante, tools con p50/p95
+      (sobre `llamadas_tool`; la duración incluye la espera del semáforo), rechazos y errores; rango máximo 90 días
+      sobre crudos, más allá solo `uso_diario`. Permiso nuevo en `PERMISOS`.
+- [ ] Gráficos en el panel (shadcn `chart`, skill `dataviz`); la sesión caducada hoy no vuelve al login (ver
+      `panel/src/lib/api.ts`).
+- [ ] Evals (`evals/correr.py`) para confirmar que el agente no cambia, e2e y despliegue (la migración 0009 se aplica
+      sola al arrancar).
+- Nota: la BD dev tiene `alembic_version=0001` con todas las tablas creadas (de un `create_all` antiguo), así que
+  `python -m asistente.store.migrar` falla contra ella («acciones already exists»); las migraciones se verificaron en
+  una BD temporal. Resolverlo con `alembic stamp` o recreando la BD dev.
 
 ## 8. Fuera de alcance (por ahora)
 App de escritorio, implementación de canales (Telegram/WhatsApp), versionado de contratos de tools, entidad

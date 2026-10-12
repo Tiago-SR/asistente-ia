@@ -11,7 +11,9 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -149,6 +151,69 @@ class UsoVoz(Base):
     modelo: Mapped[str] = mapped_column(String(200))
     llamadas: Mapped[int] = mapped_column(Integer, default=0)  # síntesis pedidas (una por frase)
     caracteres: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class EventoUso(Base):
+    """Un hecho de uso (turno de chat, síntesis o dictado) para las métricas del panel. Se escribe en lote y
+    puede perder filas: la contabilidad que factura es `uso_modelo`/`uso_voz`. Sin texto ni parámetros.
+    Se purga a `min(90, retencion_dias del sistema)`; antes, `uso_diario` conserva el resumen sin usuario."""
+
+    __tablename__ = "evento_uso"
+    __table_args__ = (
+        CheckConstraint("tipo IN ('llm', 'tts', 'stt')", name="ck_evento_uso_tipo"),
+        CheckConstraint("resultado IN ('ok', 'error', 'limite')", name="ck_evento_uso_resultado"),
+        Index("ix_evento_uso_sistema_creada", "sistema_id", "creada"),
+        Index("ix_evento_uso_creada_brin", "creada", postgresql_using="brin"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    usuario_ref: Mapped[str] = mapped_column(String(256), default="")
+    tipo: Mapped[str] = mapped_column(String(8))
+    resultado: Mapped[str] = mapped_column(String(8))
+    motivo: Mapped[str] = mapped_column(String(32), default="")
+    modelo: Mapped[str] = mapped_column(String(200), default="")
+    canal: Mapped[str] = mapped_column(String(16), default="texto")
+    n: Mapped[int] = mapped_column(Integer, default=1)
+    tokens_in: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens_in_cache: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens_out: Mapped[int] = mapped_column(BigInteger, default=0)
+    unidades: Mapped[int] = mapped_column(BigInteger, default=0)
+    llamadas_llm: Mapped[int] = mapped_column(Integer, default=0)
+    latencia_llm_ms: Mapped[int | None] = mapped_column(Integer)
+    ttft_ms: Mapped[int | None] = mapped_column(Integer)
+    duracion_ms: Mapped[int | None] = mapped_column(Integer)
+    costo_valle_usd: Mapped[float | None] = mapped_column(Float)
+    costo_pico_usd: Mapped[float | None] = mapped_column(Float)
+
+
+class UsoDiario(Base):
+    """Resumen por día (UTC) de `evento_uso` y de `llamadas_tool`, sin usuario. Se recalcula de forma
+    idempotente (sobrescribe) y se conserva: son las series largas del panel. Para las tools, `tipo='tool'`
+    y el nombre de la tool va en `modelo`."""
+
+    __tablename__ = "uso_diario"
+
+    dia: Mapped[datetime] = mapped_column(Date, primary_key=True)
+    sistema_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(8), primary_key=True)
+    modelo: Mapped[str] = mapped_column(String(200), primary_key=True, default="")
+    resultado: Mapped[str] = mapped_column(String(8), primary_key=True)
+    motivo: Mapped[str] = mapped_column(String(32), primary_key=True, default="")
+    canal: Mapped[str] = mapped_column(String(16), primary_key=True, default="")
+    n: Mapped[int] = mapped_column(BigInteger, default=0)
+    usuarios: Mapped[int] = mapped_column(Integer, default=0)  # distintos en el día
+    tokens_in: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens_in_cache: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens_out: Mapped[int] = mapped_column(BigInteger, default=0)
+    unidades: Mapped[int] = mapped_column(BigInteger, default=0)
+    costo_valle_usd: Mapped[float | None] = mapped_column(Float)
+    costo_pico_usd: Mapped[float | None] = mapped_column(Float)
+    latencia_sum_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    latencia_max_ms: Mapped[int | None] = mapped_column(Integer)
+    p50_ms: Mapped[int | None] = mapped_column(Integer)
+    p95_ms: Mapped[int | None] = mapped_column(Integer)
 
 
 class Accion(Base):

@@ -83,7 +83,8 @@ def llm():
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None, tts=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
-                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None, voces=None):
+                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None, voces=None,
+                   metricas=None):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
@@ -113,6 +114,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             acciones=AccionesSql(sesiones, max_acciones_hora), recientes=RecientesSql(sesiones),
             memoria=MemoriaSql(sesiones, memoria_dias),
             **({"voces": voces} if voces else {}),
+            **({"metricas": metricas} if metricas else {}),
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")
@@ -815,3 +817,72 @@ async def test_estado_ofrece_las_voces_sin_el_voice_id(construir_app):
     assert voz["voces"] == [{"id": "m1", "etiqueta": "Mateo", "genero": "masculina"},
                             {"id": "f1", "etiqueta": "Lucía", "genero": "femenina"}]
     assert "EL_M1" not in str(voz)
+
+
+# --- métricas de uso (evento_uso) ---------------------------------------------------------------
+
+
+async def test_chat_registra_un_evento_con_el_canal(construir_app, llm):
+    from asistente.core.metricas import MetricasMemoria
+
+    m = MetricasMemoria()
+    llm.usar(texto("Hola"), texto("Hola otra vez"))
+    async with construir_app(metricas=m) as c:
+        assert (await c.post("/v1/chat", json={"mensaje": "hola"}, headers=auth())).status_code == 200
+        assert (await c.post("/v1/chat", json={"mensaje": "hola", "canal": "voz"}, headers=auth())).status_code == 200
+    assert [(e.tipo, e.resultado, e.canal, e.sistema_id) for e in m.eventos] == [
+        ("llm", "ok", "texto", "mock-a"), ("llm", "ok", "voz", "mock-a")]
+
+
+async def test_sintetizar_registra_caracteres_y_la_clave_de_tarifa(construir_app):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.voz.falso import TtsFalso
+
+    m = MetricasMemoria()
+    async with construir_app(tts=TtsFalso(b"MP3"), metricas=m) as c:
+        assert (await sintetizar(c, texto="Hola")).status_code == 200
+    (e,) = m.eventos
+    assert (e.tipo, e.resultado, e.modelo, e.unidades, e.canal) == ("tts", "ok", "falso:falso", 4, "voz")
+    assert e.duracion_ms is not None
+
+
+async def test_sintetizar_que_falla_se_registra_como_error_sin_texto(construir_app):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.voz.falso import TtsFalso
+
+    m = MetricasMemoria()
+    async with construir_app(tts=TtsFalso(falla=True), metricas=m) as c:
+        assert (await sintetizar(c, texto="algo privado")).status_code == 502
+    (e,) = m.eventos
+    assert (e.tipo, e.resultado, e.motivo, e.unidades) == ("tts", "error", "voz_error", 0)
+    assert "privado" not in repr(e)
+
+
+async def test_dictado_registra_bytes_y_errores(construir_app):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.voz.falso import SttFalso
+
+    m = MetricasMemoria()
+    async with construir_app(stt=SttFalso("hola"), metricas=m) as c:
+        assert (await dictar(c, audio=b"12345")).status_code == 200
+    async with construir_app(stt=SttFalso(falla=True), metricas=m) as c:
+        assert (await dictar(c, audio=b"123")).status_code == 502
+    assert [(e.tipo, e.resultado, e.motivo, e.unidades) for e in m.eventos] == [
+        ("stt", "ok", "", 5), ("stt", "error", "voz_error", 3)]
+
+
+async def test_voz_rechazada_por_limite_se_registra(construir_app, monkeypatch):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.ports import LimiteExcedido
+    from asistente.core.voz.falso import SttFalso, TtsFalso
+
+    async def tope(self, *a, **kw):
+        raise LimiteExcedido("voz_min")
+
+    monkeypatch.setattr(LimitesPostgres, "reservar_voz", tope)
+    m = MetricasMemoria()
+    async with construir_app(stt=SttFalso(), tts=TtsFalso(), metricas=m) as c:
+        assert (await dictar(c)).status_code == 429
+        assert (await sintetizar(c)).status_code == 429
+    assert [(e.tipo, e.resultado, e.motivo) for e in m.eventos] == [
+        ("stt", "limite", "voz_min"), ("tts", "limite", "voz_min")]

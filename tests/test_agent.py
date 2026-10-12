@@ -5,6 +5,7 @@ import pytest
 from asistente.core.agent import ConfigTurno, run_turn
 from asistente.core.llm.base import LlamadaTool, LLMError, Respuesta, ToolDef
 from asistente.core.llm.falso import LLMFalso, pide, texto
+from asistente.core.metricas import MetricasMemoria
 from asistente.core.ports import Contexto, LimiteExcedido, LimitesUso, ResultadoTool
 
 TOOL = ToolDef("lista", "d", {"type": "object", "properties": {}})
@@ -64,7 +65,7 @@ class LimitesFalsos:
         self.uso += uso.total
 
 
-async def correr(llm, conector=None, *, limites=None, config=None, historial=None, ctx=None):
+async def correr(llm, conector=None, *, limites=None, config=None, historial=None, ctx=None, metricas=None):
     eventos: list[tuple[str, object]] = []
 
     async def emit(ev, datos):
@@ -73,7 +74,7 @@ async def correr(llm, conector=None, *, limites=None, config=None, historial=Non
     aud = AuditoriaFalsa()
     lim = limites or LimitesFalsos()
     res = await run_turn(ctx or contexto(), llm, conector or ConectorFalso(), aud, lim,
-                         historial or [], "hola", emit, "conv-1", config)
+                         historial or [], "hola", emit, "conv-1", config, metricas=metricas)
     return res, eventos, aud, lim
 
 
@@ -198,3 +199,85 @@ async def test_cancelacion_se_propaga():
     with pytest.raises(asyncio.CancelledError):
         await tarea
     assert conector.activas == 0
+
+
+# --- métricas: un evento por turno, en cualquier camino ---------------------------------------
+
+
+async def test_metrica_de_un_turno_ok_con_tokens_llamadas_y_latencias():
+    m = MetricasMemoria()
+    llm = LLMFalso([pide(LlamadaTool("c1", "lista", {})), texto("hay 1")])
+    res, *_ = await correr(llm, metricas=m)
+    (e,) = m.eventos
+    assert (e.tipo, e.resultado, e.motivo, e.sistema_id, e.usuario_ref, e.modelo) == ("llm", "ok", "", "mock-a", "ana", "m")
+    assert e.llamadas_llm == 2 and e.tokens_in + e.tokens_out == res.uso.total > 0
+    assert e.latencia_llm_ms is not None and e.duracion_ms is not None and e.duracion_ms >= e.latencia_llm_ms
+    assert e.ttft_ms is not None and e.canal == "texto"
+
+
+async def test_metrica_de_voz_marca_el_canal():
+    m = MetricasMemoria()
+    await correr(LLMFalso([texto("Hola")]), config=ConfigTurno(resumen_voz=True), metricas=m)
+    assert m.eventos[0].canal == "voz"
+
+
+async def test_metrica_de_un_rechazo_por_limite_sin_llamadas_al_llm():
+    m = MetricasMemoria()
+    await correr(LLMFalso([]), limites=LimitesFalsos("tokens_mes"), metricas=m)
+    (e,) = m.eventos
+    assert (e.resultado, e.motivo, e.llamadas_llm, e.latencia_llm_ms, e.tokens_in) == ("limite", "tokens_mes", 0, None, 0)
+
+
+async def test_metrica_de_fallo_del_llm_cuenta_la_llamada_fallida():
+    def falla(_):
+        raise LLMError("x")
+
+    m = MetricasMemoria()
+    await correr(LLMFalso([falla]), metricas=m)
+    (e,) = m.eventos
+    assert (e.resultado, e.motivo, e.llamadas_llm) == ("error", "llm_no_disponible", 1)
+    assert e.tokens_in == e.tokens_out == 0
+
+
+@pytest.mark.parametrize("guion,motivo", [
+    ([texto(""), texto("  ")], "respuesta_vacia"),
+    ([Respuesta("", (), "limite")], "respuesta_cortada"),
+])
+async def test_metrica_de_errores_visibles_para_el_usuario(guion, motivo):
+    m = MetricasMemoria()
+    await correr(LLMFalso(guion), metricas=m)
+    assert [(e.resultado, e.motivo) for e in m.eventos] == [("error", motivo)]
+
+
+async def test_metrica_de_timeout_del_turno():
+    m = MetricasMemoria()
+    llm = LLMFalso([pide(LlamadaTool("c", "lista", {}))])
+    await correr(llm, ConectorFalso(demora=1), config=ConfigTurno(timeout_turno_s=0.05, timeout_tool_s=5), metricas=m)
+    assert [(e.resultado, e.motivo) for e in m.eventos] == [("error", "timeout_turno")]
+
+
+async def test_metrica_de_token_expirado():
+    m = MetricasMemoria()
+    conector = ConectorFalso({"lista": ResultadoTool(False, error="token_expirado")})
+    await correr(LLMFalso([pide(LlamadaTool("c", "lista", {}))]), conector, metricas=m)
+    assert [(e.resultado, e.motivo) for e in m.eventos] == [("error", "token_expirado")]
+
+
+async def test_metrica_cuando_el_cliente_corta_el_turno():
+    m = MetricasMemoria()
+    llm = LLMFalso([pide(LlamadaTool("c", "lista", {}))])
+    tarea = asyncio.create_task(correr(llm, ConectorFalso(demora=5), config=ConfigTurno(timeout_tool_s=10), metricas=m))
+    await asyncio.sleep(0.05)
+    tarea.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await tarea
+    assert [(e.resultado, e.motivo) for e in m.eventos] == [("error", "cancelado")]
+
+
+async def test_un_registrador_que_falla_no_rompe_el_turno():
+    class Roto:
+        def registrar(self, evento):
+            raise RuntimeError("bd caída")
+
+    res, *_ = await correr(LLMFalso([texto("Hola")]), metricas=Roto())
+    assert res.completo and res.texto == "Hola"

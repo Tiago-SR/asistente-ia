@@ -51,6 +51,9 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
                             svc.auditoria, svc.memoria,
                             svc.admin or (AdminSql(svc.sesiones) if svc.sesiones is not None else None),
                             svc.settings.admin_auditoria_dias))
+        escritor = None
+        if propio and app.state.servicios.metricas is not None:
+            escritor = asyncio.create_task(app.state.servicios.metricas.bucle())
         sondeo = None
         fuente = app.state.servicios.registro.fuente_bd
         if propio and fuente is not None:
@@ -62,10 +65,15 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
         try:
             yield
         finally:
-            for tarea in (purga, sondeo):
+            for tarea in (purga, sondeo, escritor):
                 if tarea:
                     tarea.cancel()
             svc = app.state.servicios
+            if propio and escritor is not None:  # lo encolado se escribe antes de cerrar el motor
+                try:
+                    await asyncio.wait_for(svc.metricas.vaciar(), timeout=5)
+                except Exception:  # noqa: BLE001 apagar no debe fallar por las métricas
+                    log.warning("métricas: no se pudo vaciar la cola al apagar")
             if propio and svc.cierre:
                 await svc.cierre()
 
