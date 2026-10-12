@@ -106,3 +106,42 @@ async def test_si_falla_la_auditoria_del_panel_el_resto_se_purga(tmp_path):
     repo = RepoFalso()
     borradas = await purgar_todos(registro(tmp_path), repo, admin=AdminFalso(falla=True), admin_auditoria_dias=30)
     assert borradas == {"ret-a": 2, "ret-b": 2, "ret-c": 2}
+
+
+class ResumenFalso:
+    def __init__(self, falla_resumir: str | None = None) -> None:
+        self.orden: list[tuple] = []
+        self.falla_resumir = falla_resumir
+
+    async def resumir(self, sistema_id: str, retencion_dias: int) -> int:
+        if sistema_id == self.falla_resumir:
+            raise RuntimeError("BD caída")
+        self.orden.append(("resumir", sistema_id, retencion_dias))
+        return 1
+
+    async def purgar_eventos(self, sistema_id: str, retencion_dias: int) -> int:
+        self.orden.append(("eventos", sistema_id, retencion_dias))
+        return 0
+
+    async def purgar_contadores(self) -> int:
+        self.orden.append(("contadores",))
+        return 0
+
+
+async def test_resume_antes_de_purgar_y_purga_contadores_una_vez(tmp_path):
+    resumen = ResumenFalso()
+    await purgar_todos(registro(tmp_path), RepoFalso(), resumen=resumen)
+    assert resumen.orden == [
+        ("resumir", "ret-a", 7), ("eventos", "ret-a", 7),
+        ("resumir", "ret-b", 30), ("eventos", "ret-b", 30),
+        ("resumir", "ret-c", 90), ("eventos", "ret-c", 90),
+        ("contadores",),
+    ]
+
+
+async def test_si_falla_el_resumen_se_purga_el_resto(tmp_path):
+    resumen = ResumenFalso(falla_resumir="ret-b")
+    repo = RepoFalso()
+    borradas = await purgar_todos(registro(tmp_path), repo, resumen=resumen)
+    assert set(borradas) == {"ret-a", "ret-b", "ret-c"}
+    assert ("resumir", "ret-b", 30) not in resumen.orden

@@ -139,6 +139,7 @@ Antes de habilitar un sistema, pasarle `herramientas/verificar_sistema.py` (ver 
 | Volver atrás | `docker images asistente` → `deploy/deploy.sh rollback <tag>`. Si el esquema cambió, hace backup y baja las migraciones con la imagen actual (pregunta antes; `YES=1` lo salta). Si el asistente actual no corre, restaurar el backup |
 | Cambiar un sistema | desde el panel (`/panel`), o `importar-yaml --reemplazar` con las variables `*_env` en el entorno del contenedor. Se toma solo en ~5 s (`POST /admin/api/recargar` lo fuerza). Sin reiniciar |
 | Costo del mes por sistema | `curl -H "Authorization: Bearer $ASISTENTE_ADMIN_TOKEN" "http://127.0.0.1:8000/admin/api/uso?mes=2026-10"` (tokens, caché y USD por sistema y modelo, y los caracteres y USD de la voz del servidor; las tarifas están en `config/precios.yaml`, a revisar contra el proveedor) |
+| Métricas de uso (gráficos) | en el panel, pantalla **Métricas** (admin y operador): turnos, errores y rechazos, costo (cota valle/pico), tools con p50/p95 y usuarios con cuota restante. Por API: `GET /admin/api/metricas/{series,usuarios,tools}` con sesión de usuario (el token estático no vale: `403`) |
 | Logs | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f asistente` (rotan a 5 × 10 MB) |
 | Backup | `deploy/backup.sh` (guarda los últimos 14 en `backups/`) |
 | Restaurar | `deploy/backup.sh restore backups/<archivo>.sql.gz` |
@@ -150,6 +151,16 @@ Backup diario con cron (`crontab -e` como `deploy`):
 ```
 
 Copiar `backups/` fuera de la VPS (rsync, rclone, snapshot del proveedor): un backup en el mismo disco no protege de perder la VPS.
+
+### Métricas: migración y retención
+
+- Las migraciones `0009` (`evento_uso`, `uso_diario`) y `0010` (`uso_diario.n_sin_tarifa`, índice en `llamadas_tool`) se aplican solas al arrancar. `deploy.sh` ya hace backup antes; el rollback las baja con `migrar downgrade 0008` (se pierden solo las métricas).
+- Las métricas se escriben en lote desde memoria: **un reinicio puede perder los últimos segundos**. Lo que factura (`uso_modelo`, `uso_voz`, `/admin/api/uso`) no depende de esto.
+- La purga (al arrancar y luego cada `ASISTENTE_PURGA_INTERVALO_S`, 24 h por defecto: hasta entonces los días recientes se calculan al vuelo desde los crudos) resume antes de borrar: `uso_diario` se recalcula de los últimos 7 días UTC y se conserva sin límite (no lleva `usuario_ref`; son pocas filas por día). Los eventos crudos con usuario (`evento_uso`) duran `min(90, retencion_dias)` del sistema y se borran por días completos ya resumidos; `llamadas_tool` sigue en `retencion_dias`.
+- Si el servicio estuvo caído más de 7 días, los agregados de **tools** de esos días se pierden (`llamadas_tool` se purga sin resumen); los de chat y voz no.
+- `contadores_uso`: se borran las ventanas `min` y `dia` de más de 2 días; la del mes se conserva.
+- La cuota diaria que muestra el panel se reinicia a medianoche UTC (21:00 en Uruguay), como la del servidor.
+- Las consultas del panel tienen un tope de 5 s (`504 consulta_lenta`): si pasa con «Todos los sistemas», elegir un sistema o un rango menor.
 
 ## Dev frente a prod
 

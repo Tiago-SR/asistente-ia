@@ -79,7 +79,10 @@ class LlamadaTool(Base):
     retención del sistema; `parametros` alimenta `consultas_recientes`."""
 
     __tablename__ = "llamadas_tool"
-    __table_args__ = (Index("ix_llamada_sistema_usuario", "sistema_id", "usuario_ref", "creada"),)
+    __table_args__ = (
+        Index("ix_llamada_sistema_usuario", "sistema_id", "usuario_ref", "creada"),
+        Index("ix_llamada_sistema_creada", "sistema_id", "creada"),  # métricas por rango
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     # Sin FK: la auditoría puede sobrevivir al borrado de la conversación.
@@ -210,6 +213,8 @@ class UsoDiario(Base):
     unidades: Mapped[int] = mapped_column(BigInteger, default=0)
     costo_valle_usd: Mapped[float | None] = mapped_column(Float)
     costo_pico_usd: Mapped[float | None] = mapped_column(Float)
+    # Eventos (no rechazos) sin tarifa: el costo suma solo el resto y no debe leerse como completo.
+    n_sin_tarifa: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     latencia_sum_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     latencia_max_ms: Mapped[int | None] = mapped_column(Integer)
     p50_ms: Mapped[int | None] = mapped_column(Integer)

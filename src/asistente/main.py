@@ -27,6 +27,7 @@ from asistente.config import Settings
 from asistente.retencion import bucle_purga
 from asistente.servicios import Servicios, construir
 from asistente.store.admin import AdminSql
+from asistente.store.resumen import ResumenSql
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,8 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
                 bucle_purga(svc.registro, svc.repo, svc.settings.purga_intervalo_s, svc.acciones,
                             svc.auditoria, svc.memoria,
                             svc.admin or (AdminSql(svc.sesiones) if svc.sesiones is not None else None),
-                            svc.settings.admin_auditoria_dias))
+                            svc.settings.admin_auditoria_dias,
+                            ResumenSql(svc.sesiones) if svc.sesiones is not None else None))
         escritor = None
         if propio and app.state.servicios.metricas is not None:
             escritor = asyncio.create_task(app.state.servicios.metricas.bucle())

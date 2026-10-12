@@ -128,3 +128,19 @@
     @apply font-sans;
     }
 }
+/* Gráficos de métricas: categórico (azul, naranja) y estado (crítico, aviso), pasos de claro/oscuro validados
+   con el skill dataviz contra la superficie de cada tema. Texto y rejilla usan los tokens del panel. */
+:root {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-critico: #d03b3b;
+  --viz-aviso: #fab219;
+  --viz-rejilla: #e1e0d9;
+}
+.dark {
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-critico: #d03b3b;
+  --viz-aviso: #fab219;
+  --viz-rejilla: #2c2c2a;
+}

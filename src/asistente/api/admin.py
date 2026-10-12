@@ -14,11 +14,12 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import DBAPIError
 
 from asistente import precios
 from asistente.api.deps import servicios
@@ -30,6 +31,11 @@ from asistente.sistemas.escritura import ErrorEscritura
 from asistente.sistemas.manifiesto import ManifiestoInvalido
 from asistente.sistemas.permisos import tool_permitida
 from asistente.store.admin import DURACION_MAX, AdminSql, ErrorAdmin, SesionAdmin
+from asistente.store.lectura_metricas import (
+    ORDENES,
+    RANGO_CRUDOS_MAX_DIAS,
+    MetricasLectura,
+)
 from asistente.store.uso import consumo_del_mes, consumo_voz_del_mes
 
 router = APIRouter(prefix="/admin/api")
@@ -106,8 +112,8 @@ async def admin(request: Request, svc: Servicios = Depends(servicios)) -> Servic
 # Permisos por rol. Las escrituras exigen una sesión de usuario (el token estático es solo automatización:
 # recargar y leer). Abrir algo al operador es cambiar esta tabla, no cada endpoint.
 PERMISOS: dict[str, frozenset[str]] = {
-    "admin": frozenset({"sistemas.escribir", "usuarios.gestionar", "auditoria.leer"}),
-    "operador": frozenset(),
+    "admin": frozenset({"sistemas.escribir", "usuarios.gestionar", "auditoria.leer", "metricas.leer"}),
+    "operador": frozenset({"metricas.leer"}),
 }
 
 
@@ -139,6 +145,7 @@ _ESCRIBIR = Depends(requiere("sistemas.escribir"))
 _ESPERA_MANIFIESTO_S = 3.0  # tope por sistema al listar
 _USUARIOS = Depends(requiere("usuarios.gestionar"))
 _AUDITORIA = Depends(requiere("auditoria.leer"))
+_METRICAS = Depends(requiere("metricas.leer"))
 
 
 class _Secretos(BaseModel):
@@ -555,6 +562,110 @@ async def fijar_tool(sistema_id: str, tool: str, datos: _EstadoTool, request: Re
     except ErrorEscritura as e:
         raise _fallo(e) from None
     return await _tras_escribir(svc, {"tool_estado": estado})
+
+
+SERIES_MAX_DIAS = 731
+
+
+def _rango(desde: date | None, hasta: date | None, max_dias: int) -> tuple[date, date]:
+    """Fechas UTC, `hasta` inclusivo. Por defecto, los últimos 30 días (hoy incluido)."""
+    hoy = datetime.now(UTC).date()
+    h = hasta or hoy
+    d = desde or h - timedelta(days=29)
+    if d > h:
+        raise ErrorApi(422, "rango_invalido")
+    if (h - d).days + 1 > max_dias:
+        raise ErrorApi(422, "rango_excedido", datos={"max_dias": max_dias})
+    return d, h
+
+
+def _ids_registro(svc: Servicios, sistema_id: str | None) -> list[str]:
+    return [sistema_id] if sistema_id else [s.id for s in svc.registro.todos()]
+
+
+async def _leer(coro):
+    try:
+        return await coro
+    except DBAPIError as e:
+        if "statement timeout" in str(e.orig).lower():
+            raise ErrorApi(504, "consulta_lenta") from None
+        raise
+
+
+def _sobre(d: date, h: date, cuerpo: dict) -> dict:
+    return {"desde": d.isoformat(), "hasta": h.isoformat(), "zona": "UTC",
+            "generado": datetime.now(UTC).isoformat(), **cuerpo}
+
+
+@router.get("/metricas/series")
+async def metricas_series(
+    sistema_id: str | None = Query(None, max_length=64), desde: date | None = None, hasta: date | None = None,
+    tipo: str | None = Query(None, pattern="^(llm|tts|stt|tool)$"),
+    resultado: str | None = Query(None, pattern="^(ok|error|limite)$"),
+    agrupar: str = Query("detalle", pattern="^(detalle|tipo)$"), svc: Servicios = _METRICAS,
+) -> dict:
+    """Serie diaria (UTC) de uso: turnos de chat (`llm`), voz (`tts`/`stt`) y tools (`tool`, con el nombre en
+    `modelo`). Hasta 731 días. Sale de `uso_diario` y, al vuelo, de los días aún sin resumir (`fuente: crudos`).
+
+    `agrupar=detalle` devuelve las filas tal como se guardan (día, sistema, tipo, modelo, resultado, motivo,
+    canal); `agrupar=tipo` suma por (día, sistema, tipo, resultado). `usuarios`, `p50_ms` y `p95_ms` no se
+    pueden sumar: al agrupar vienen `null` salvo que el grupo sea una sola fila. Costo: `costo_valle_usd` y
+    `costo_pico_usd` son las cotas inferior y superior; `null` = sin tarifa (nunca 0) y `n_sin_tarifa` cuenta los
+    eventos que no entran en la suma. `cobertura` dice hasta dónde hay resumen y desde cuándo hay crudos."""
+    d, h = _rango(desde, hasta, SERIES_MAX_DIAS)
+    r = await _leer(MetricasLectura(svc.sesiones).series(
+        _ids_registro(svc, sistema_id), d, h, filtrar=sistema_id is not None, tipo=tipo, resultado=resultado,
+        agrupar=agrupar))
+    return _sobre(d, h, r)
+
+
+@router.get("/metricas/usuarios")
+async def metricas_usuarios(
+    sistema_id: str | None = Query(None, max_length=64), desde: date | None = None, hasta: date | None = None,
+    orden: str = Query("turnos", pattern="^(" + "|".join(ORDENES) + ")$"),
+    limite: int = Query(20, ge=1, le=100), svc: Servicios = _METRICAS,
+) -> dict:
+    """Top de usuarios finales (con su `usuario_ref`) sobre los eventos crudos: máximo 90 días. Cada fila trae
+    `cuota_dia` (`usados`, `limite`, `restante`): mensajes de hoy (UTC; se reinicia en `reinicia_dia`, no a
+    medianoche local) contra el límite actual del sistema; los rechazos también cuentan. `cuota_mes` es la cuota
+    de tokens del sistema, la única que puede detener a todos."""
+    d, h = _rango(desde, hasta, RANGO_CRUDOS_MAX_DIAS)
+    lec = MetricasLectura(svc.sesiones)
+    r = await _leer(lec.usuarios([sistema_id] if sistema_id else None, d, h, orden, limite))
+    registro = {s.id: s for s in svc.registro.todos()}
+    ids = sorted({f["sistema_id"] for f in r["filas"]} | ({sistema_id} if sistema_id else set(registro)))
+    cont = await _leer(lec.contadores([(f["sistema_id"], f["usuario_ref"]) for f in r["filas"]],
+                                      [i for i in ids if i in registro]))
+    for f in r["filas"]:
+        s = registro.get(f["sistema_id"])
+        if s is None:
+            f["cuota_dia"] = None
+            continue
+        usados = cont["dia"].get((f["sistema_id"], f["usuario_ref"]), 0)
+        lim = s.limites.mensajes_por_usuario_dia
+        f["cuota_dia"] = {"usados": usados, "limite": lim, "restante": max(0, lim - usados)}
+    cuota_mes = []
+    for i in ids:
+        if i in registro:
+            usados = cont["mes"].get(i, 0)
+            lim = registro[i].limites.tokens_por_mes
+            cuota_mes.append({"sistema_id": i, "usados": usados, "limite": lim, "restante": max(0, lim - usados)})
+    return _sobre(d, h, {**r, "cuota_mes": cuota_mes, "reinicia_dia": cont["reinicia_dia"],
+                         "reinicia_mes": cont["reinicia_mes"]})
+
+
+@router.get("/metricas/tools")
+async def metricas_tools(
+    sistema_id: str | None = Query(None, max_length=64), desde: date | None = None, hasta: date | None = None,
+    svc: Servicios = _METRICAS,
+) -> dict:
+    """Por tool: llamadas, errores y p50/p95 exactos sobre `llamadas_tool` (máximo 90 días; los datos llegan
+    solo hasta `retencion_dias` del sistema: ver `cobertura.tools_desde`). La duración incluye la espera del
+    semáforo del conector, así que un p95 alto puede ser cola y no lentitud del sistema externo. Para más
+    de 90 días, `/metricas/series?tipo=tool` (por día, sin percentiles del rango)."""
+    d, h = _rango(desde, hasta, RANGO_CRUDOS_MAX_DIAS)
+    r = await _leer(MetricasLectura(svc.sesiones).tools([sistema_id] if sistema_id else None, d, h))
+    return _sobre(d, h, r)
 
 
 @router.get("/uso")

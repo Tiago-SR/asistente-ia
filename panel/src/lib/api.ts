@@ -16,6 +16,12 @@ export const setCsrf = (valor: string | null) => {
   csrf = valor
 }
 
+// La sesión caduca con la pantalla abierta: un 401 fuera del login lleva de vuelta a él (App lo registra).
+let alCaducar: (() => void) | null = null
+export const onSesionCaducada = (cb: (() => void) | null) => {
+  alCaducar = cb
+}
+
 export async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
@@ -27,6 +33,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const data = await r.json().catch(() => ({}))
+  if (r.status === 401 && path !== '/login' && path !== '/yo') alCaducar?.()
   if (!r.ok) throw new ApiError(r.status, String(data.error ?? 'error'), data)
   return data as T
 }
@@ -98,6 +105,10 @@ const MENSAJES: Record<string, string> = {
     'Ese destino no es público ni está permitido en el servidor (ASISTENTE_HOSTS_INTERNOS_PERMITIDOS).',
   clave_actual_incorrecta: 'La contraseña actual no es correcta.',
   csrf: 'La sesión no es válida para escribir. Vuelva a entrar.',
+  no_autorizado: 'La sesión caducó. Vuelva a entrar.',
+  rango_excedido: 'El rango pedido es demasiado largo para esta consulta.',
+  rango_invalido: 'La fecha inicial es posterior a la final.',
+  consulta_lenta: 'La consulta tardó demasiado. Pruebe con un rango menor o un solo sistema.',
 }
 
 export function mensaje(e: unknown): string {
@@ -113,3 +124,50 @@ export function mensaje(e: unknown): string {
         : ''
   return base + extra
 }
+
+export type Cobertura = { resumido_hasta: string | null; crudos_desde: string | null; tools_desde: string | null }
+export type FilaSerie = {
+  dia: string
+  sistema_id: string
+  tipo: 'llm' | 'tts' | 'stt' | 'tool'
+  resultado: 'ok' | 'error' | 'limite'
+  fuente: 'resumen' | 'crudos'
+  n: number
+  usuarios: number | null
+  tokens_in: number
+  tokens_out: number
+  unidades: number
+  costo_valle_usd: number | null
+  costo_pico_usd: number | null
+  n_sin_tarifa: number
+  p50_ms: number | null
+  p95_ms: number | null
+}
+export type Cuota = { usados: number; limite: number; restante: number }
+export type FilaUsuario = {
+  sistema_id: string
+  usuario_ref: string
+  turnos: number
+  rechazos: number
+  errores: number
+  tokens: number
+  n_sin_tarifa: number
+  cuota_dia: Cuota | null
+}
+export type FilaTool = {
+  sistema_id: string
+  tool: string
+  n: number
+  errores: number
+  p50_ms: number | null
+  p95_ms: number | null
+  max_ms: number | null
+}
+export type RespSeries = { cobertura: Cobertura; filas: FilaSerie[] }
+export type RespUsuarios = {
+  cobertura: Cobertura
+  filas: FilaUsuario[]
+  cuota_mes: ({ sistema_id: string } & Cuota)[]
+  reinicia_dia: string
+}
+export type RespTools = { cobertura: Cobertura; filas: FilaTool[] }

@@ -291,16 +291,57 @@ conserva. `/admin/uso` no cambia (facturación mensual con la tarifa vigente; cu
       (`MetricasMemoria` para tests).
 - [x] Instrumentación: `run_turn` (`finally`, cubre ok/error/límite/timeout/cancelado/token_expirado) y `api/voz.py`
       (STT y TTS: ok, error, límite). `ResultadoTurno` lleva `llamadas_llm` y `latencia_llm_ms`.
-- [ ] Resumen y purga: `uso_diario` recalculado de forma idempotente (ventana `hoy-7`..`ayer`, UTC) dentro de
-      `purgar_todos`; no purgar un día sin resumen; filas de `tool` desde `llamadas_tool`; purgar `evento_uso` y las
-      filas `min`/`dia` de `contadores_uso`.
-- [ ] Endpoints de lectura (admin y operador): series diarias, top de usuarios con cuota restante, tools con p50/p95
-      (sobre `llamadas_tool`; la duración incluye la espera del semáforo), rechazos y errores; rango máximo 90 días
-      sobre crudos, más allá solo `uso_diario`. Permiso nuevo en `PERMISOS`.
-- [ ] Gráficos en el panel (shadcn `chart`, skill `dataviz`); la sesión caducada hoy no vuelve al login (ver
-      `panel/src/lib/api.ts`).
-- [ ] Evals (`evals/correr.py`) para confirmar que el agente no cambia, e2e y despliegue (la migración 0009 se aplica
-      sola al arrancar).
+- [x] Resumen y purga (2026-10-12, `store/resumen.py` `ResumenSql`, llamado desde `purgar_todos`): `uso_diario`
+      recalculado de forma idempotente (ON CONFLICT DO UPDATE, ventana `hoy-7`..`ayer`, UTC); filas `tipo='tool'`
+      desde `llamadas_tool` (nombre en `modelo`, `resultado` ok/error, `canal`/`motivo` vacíos). Decisiones:
+      · La ventana de tools es `min(7, retencion_dias-1)` (con retención 1 no hay resumen de tools): `llamadas_tool`
+        se purga a `retencion_dias` exactos y recalcular un día recortado lo sobrescribiría con datos parciales.
+      · `evento_uso` se purga solo por días UTC completos (corte en frontera de día, `min(90, retencion_dias)`) y solo
+        días con resumen; antes de borrar se resume cualquier día elegible que no lo tenga (cubre caídas largas).
+        Los eventos no se recalculan por debajo del corte.
+      · Se resume antes de las demás purgas del sistema. `contadores_uso`: se borran `min` y `dia` de más de 2 días
+        (la `mes` se conserva). Borrado en lotes de 5000. Un fallo del resumen no frena el resto de purgas.
+      · Límite conocido: si el servicio está caído más de 7 días, los agregados de tools de esos días se pierden
+        (se purgan en `llamadas_tool` sin resumen); los de eventos no.
+      · 869 tests verdes (10 nuevos: `tests/test_resumen.py` con BD real, `tests/test_retencion.py` con fakes).
+- [x] Endpoints de lectura (2026-10-12, con el asesor; `store/lectura_metricas.py`, `api/admin.py`, 874 tests verdes):
+      permiso `metricas.leer` (admin y operador; el token estático no, como el resto de `requiere`). Todos GET,
+      fechas UTC con `hasta` inclusivo, respuesta en sobre `{desde, hasta, zona, generado, cobertura, filas}`;
+      `cobertura = {resumido_hasta, crudos_desde, tools_desde}`. `SET LOCAL statement_timeout` 5 s (→ 504
+      `consulta_lenta`). Errores: 422 `rango_invalido` / `rango_excedido {max_dias}`.
+      · `/metricas/series` (máx. 731 días; `sistema_id`, `tipo`, `resultado`, `agrupar=detalle|tipo`): `uso_diario`
+        + al vuelo los días posteriores al último resumido de cada sistema (hoy y, si el resumen se atrasó, ayer;
+        `fuente: resumen|crudos`, mismos SELECT que el resumen). Con `agrupar=tipo`, `usuarios`/`p50`/`p95` salen
+        `null` salvo grupo de una sola fila (no se suman ni promedian). Costos `null` = sin tarifa; `n_sin_tarifa`.
+      · `/metricas/usuarios` (máx. 90 días; `orden=turnos|tokens|rechazos`, `limite` ≤100): top sobre
+        `evento_uso` con `cuota_dia {usados, limite, restante}` (ventana `dia` de `limits.py`: medianoche UTC,
+        `reinicia_dia`; los rechazos cuentan, `restante` acotado a 0) y `cuota_mes` (tokens del sistema).
+      · `/metricas/tools` (máx. 90 días): n, errores, p50/p95/max exactos sobre `llamadas_tool` (incluye la espera
+        del semáforo); más allá, `series?tipo=tool` por día.
+      · No hay `/problemas`: rechazos y errores = `series?resultado=error|limite` y `usuarios?orden=rechazos`.
+      · Migración 0010: `uso_diario.n_sin_tarifa` (costo parcial) e índice `(sistema_id, creada)` en
+        `llamadas_tool`. Verificada en BD temporal (upgrade, downgrade, upgrade).
+      · Decidido con el usuario: NULL al agrupar por encima del detalle (sin GROUPING SETS), sin histograma para
+        percentiles de rango largo (los de más de la retención de crudos se muestran solo como serie diaria de
+        p95; añadirlo después no reconstruye el pasado) y el operador ve `usuario_ref`.
+- [x] Gráficos en el panel (2026-10-12): `panel/src/pages/Metricas.tsx` (ruta `#/metricas`, visible para admin y
+      operador, carga diferida porque recharts pesa ~375 kB), componente shadcn `chart` (recharts 3). Tiles
+      (turnos, tokens, costo valle–pico con aviso si hay eventos sin tarifa, errores·rechazos), turnos por día
+      (barras), errores y rechazos (líneas, colores de estado + leyenda), costo por día (dos cotas), vista «como
+      tabla» de los mismos datos, tools (p50/p95/máx.) y usuarios con cuota de hoy y de tokens del mes. Colores
+      validados con `validate_palette.js` (claro y oscuro) y definidos como `--viz-*` en `index.css`.
+      · Sesión caducada: `api.ts` avisa (`onSesionCaducada`) ante un 401 fuera de `/login` y `/yo`, y `App` vuelve
+        al login.
+      · Arreglo de paso: la cabecera del panel no hacía wrap y desbordaba a 390 px.
+      · Lint: solo los avisos de siempre (`set-state-in-effect`, `only-export-components`); build correcto. No hay
+        tests de frontend (decisión): verificado con `tests_e2e/panel-metricas.e2e.js` (7/7 con la API fabricada)
+        y captura a 390 px. **Falta la prueba manual contra el backend real** (datos de verdad).
+- [~] Evals, e2e y despliegue (2026-10-12): e2e del panel hecho (`tests_e2e/panel-metricas.e2e.js`, 7/7, README
+      actualizado); notas de despliegue en `deploy/VPS.md` («Métricas: migración y retención») y `README.md`.
+      **Evals sin ejecutar**: `evals/correr.py` usa el LLM real (llama-server/DeepSeek) y no había ninguno
+      disponible; no se tocó el agente ni el prompt en esta fase, así que la línea base del 2026-10-11 (preguntas
+      30/32, acciones 20/21, memoria 3/6, voz 9/12) es la referencia a repetir. Tampoco se probó el flujo con
+      datos reales (turno de chat → `evento_uso` → resumen → pantalla): hace falta levantar el stack.
 - Nota: la BD dev tiene `alembic_version=0001` con todas las tablas creadas (de un `create_all` antiguo), así que
   `python -m asistente.store.migrar` falla contra ella («acciones already exists»); las migraciones se verificaron en
   una BD temporal. Resolverlo con `alembic stamp` o recreando la BD dev.
