@@ -242,7 +242,7 @@ sistemas:
       ruta_manifiesto: /asistente/tools
       ruta_ejecucion: /asistente/tools/{nombre}
       token_manifiesto_env: SGAGRO_MANIFEST_TOKEN
-    prompt_dominio: prompts/dominio/sgagro.md   # vocabulario y reglas del negocio
+    prompt_dominio: prompts/dominio/sgagro.md   # vocabulario y reglas del negocio (archivo propio de cada sistema; prompts/dominio/ viene vacío)
     locale_defecto: es-UY                       # idioma si el token no trae `locale`
     acciones_habilitadas: [agregar_nota, modificar_nota]   # escrituras que el modelo puede proponer (vacío = solo lectura)
     zona_horaria: America/Montevideo            # «hoy» para usuarios cuyo navegador no informa la suya

@@ -366,8 +366,8 @@ desde el panel.
 ## 10. Preguntas aún abiertas (decidir al llegar)
 - Librería de gráficos para la Fase 4 (la de componentes ya es shadcn/ui).
 - ~~Ruta del panel y API~~: decidido — panel en `/panel`, API en `/admin/api`; librería: shadcn/ui.
-- Si `operador` puede recargar manifiestos y editar `limites`, o solo `admin`.
+- ~~Si `operador` puede recargar manifiestos~~: decidido (2026-10-13) — solo `admin` (y el token de automatización); `POST /recargar` y `tools?refrescar=true` dan 403 al operador.
 - Política de retención de `admin_auditoria` y de `evento_uso`.
-- Qué hacer con `config/sistemas.yaml` tras migrar: ¿se conserva para dev como semilla (`importar-yaml` al
+- ~~Qué hacer con `config/sistemas.yaml` tras migrar~~: decidido (2026-10-13) — queda en disco sin uso (el usuario lo borrará); no se importa solo. (antes: ¿se conserva para dev como semilla (`importar-yaml` al
   arrancar si la BD está vacía) o se elimina del flujo?
 - ~~Proxy~~: decidido — `/admin*` y `/panel*` cerrados en el proxy y acceso por túnel SSH.

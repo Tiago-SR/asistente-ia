@@ -106,7 +106,7 @@ export function Usuarios({ yo }: { yo: Yo }) {
               <Label htmlFor="u-rol">Rol</Label>
               <select id="u-rol" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value })}
                 className="h-9 rounded-md border bg-background px-3 text-sm">
-                <option value="operador">operador (solo lectura y recargar)</option>
+                <option value="operador">operador (solo lectura)</option>
                 <option value="admin">admin (todo)</option>
               </select>
             </div>

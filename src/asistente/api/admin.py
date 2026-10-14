@@ -128,6 +128,12 @@ def requiere(permiso: str):
     return dependencia
 
 
+def _solo_admin_o_token(a: Actor) -> None:
+    """Recargar manifiestos: admin o el token de automatización; el operador no."""
+    if a.nombre != "token" and a.rol != "admin":
+        raise ErrorApi(403, "permiso_insuficiente")
+
+
 async def _tras_escribir(svc: Servicios, respuesta: dict) -> dict:
     """La réplica que escribe recarga al momento; las otras lo ven con el sondeo (hasta 5 s)."""
     try:
@@ -273,6 +279,7 @@ async def logout(request: Request, response: Response, a: Actor = Depends(actor)
 
 @router.post("/recargar")
 async def recargar(request: Request, a: Actor = Depends(actor), svc: Servicios = Depends(servicios)) -> dict:
+    _solo_admin_o_token(a)
     await svc.registro.recargar_async()
     svc.manifiestos.invalidar()
     svc.autenticador.invalidar_jwks()
@@ -509,7 +516,10 @@ def _defecto(efecto: str) -> bool:
 
 
 @router.get("/sistemas/{sistema_id}/tools")
-async def tools(sistema_id: str, refrescar: bool = False, svc: Servicios = Depends(admin)) -> dict:
+async def tools(sistema_id: str, request: Request, refrescar: bool = False,
+                svc: Servicios = Depends(admin)) -> dict:
+    if refrescar:
+        _solo_admin_o_token(await actor(request, svc))
     """Tools del manifiesto en vivo y su estado. Los nombres y descripciones los escribe un tercero: el panel
     los muestra como texto, nunca como HTML."""
     if svc.sesiones is None:

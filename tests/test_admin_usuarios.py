@@ -49,7 +49,9 @@ async def test_login_y_sesion_leen_pero_no_escriben_sin_csrf(construir_app, limp
         ajeno = {**h, "X-CSRF": csrf, "Origin": "http://malo.example"}
         assert (await c.post("/admin/api/recargar", headers=ajeno)).status_code == 403
         ok = {**h, "X-CSRF": csrf, **ORIGEN}
-        assert (await c.post("/admin/api/recargar", headers=ok)).status_code == 200
+        # el operador no recarga (solo admin), ni con CSRF y Origin correctos
+        assert (await c.post("/admin/api/recargar", headers=ok)).status_code == 403
+        assert (await c.get("/admin/api/sistemas/x/tools?refrescar=true", headers=ok)).status_code == 403
         assert (await c.post("/admin/api/logout", headers=ok)).status_code == 200
         assert (await c.get("/admin/api/yo", headers=h)).status_code == 401
 
