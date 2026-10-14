@@ -21,7 +21,6 @@ from asistente.servicios import LLMNoConfigurado, Servicios
 from asistente.sistemas.auth import Autenticador
 from asistente.sistemas.conector_http import ConectorHttp
 from asistente.sistemas.manifiesto import CacheManifiestos
-from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
@@ -29,7 +28,7 @@ from asistente.store.models import Base, UsoModelo, UsoVoz
 from asistente.store.models import LlamadaTool as FilaLlamada
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo, recortar
-from conftest import entorno, entrada_sistema, escribir_registro, firmar
+from conftest import entorno, entrada_sistema, escribir_registro, firmar, registro_desde_yaml
 
 URL = os.environ.get("ASISTENTE_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="sin ASISTENTE_DATABASE_URL")
@@ -84,7 +83,8 @@ def llm():
 def construir_app(tmp_path, cliente_mocks, sesiones, llm):
     def _construir(heartbeat_s=15.0, admin_token=None, llm_ok=True, limites=None, llm_obj=None, stt=None, tts=None,
                    acciones_habilitadas=(), max_acciones_hora=20, precios_path="/no/existe.yaml",
-                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None, voces=None):
+                   consultas_recientes=True, memoria_habilitada=False, memoria_dias=30, nombre_asistente=None, voces=None,
+                   metricas=None):
         (tmp_path / "base.md").write_text("Reglas base.", encoding="utf-8")
         (tmp_path / "voz.md").write_text("Resumen hablado.", encoding="utf-8")
         topes = limites or {"mensajes_por_usuario_min": 1000, "mensajes_por_usuario_dia": 1000}
@@ -96,7 +96,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             entrada_sistema("mock-b", origenes_permitidos=[ORIGEN_B], limites=topes,
                             memoria_habilitada=memoria_habilitada),
         ])
-        registro = RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
+        registro = registro_desde_yaml(ruta, env=entorno("mock-a", "mock-b"))
         manifiestos = CacheManifiestos(registro, cliente_mocks)
 
         def llm_para(sistema):
@@ -114,6 +114,7 @@ def construir_app(tmp_path, cliente_mocks, sesiones, llm):
             acciones=AccionesSql(sesiones, max_acciones_hora), recientes=RecientesSql(sesiones),
             memoria=MemoriaSql(sesiones, memoria_dias),
             **({"voces": voces} if voces else {}),
+            **({"metricas": metricas} if metricas else {}),
         )
         app = create_app(svc)
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://asistente")
@@ -330,17 +331,19 @@ async def test_heartbeat_en_turnos_lentos(construir_app):
 
 
 async def test_admin_deshabilitado_sin_token_configurado(api):
-    assert (await api.post("/admin/recargar")).status_code == 503
+    assert (await api.post("/admin/api/recargar")).status_code == 503
 
 
 async def test_admin_exige_token_y_reporta_sistemas(construir_app):
     async with construir_app(admin_token="adm1n") as c:
-        assert (await c.get("/admin/sistemas", headers={"Authorization": "Bearer mal"})).status_code == 401
-        assert (await c.get("/admin/sistemas")).status_code == 401
+        assert (await c.get("/admin/api/sistemas", headers={"Authorization": "Bearer mal"})).status_code == 401
+        assert (await c.get("/admin/api/sistemas")).status_code == 401
         h = {"Authorization": "Bearer adm1n"}
-        r = (await c.get("/admin/sistemas", headers=h)).json()
-        assert {s["id"]: s["manifiesto_ok"] for s in r["sistemas"]} == {"mock-a": True, "mock-b": True}
-        assert (await c.post("/admin/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
+        # El listado sale de la BD (filas de `sistema`): aquí el registro es en memoria, así que no hay filas.
+        # El detalle con manifiestos está en test_admin_sistemas_api.py.
+        r = (await c.get("/admin/api/sistemas", headers=h)).json()
+        assert r == {"sistemas": [], "invalidos": {}}
+        assert (await c.post("/admin/api/recargar", headers=h)).json() == {"sistemas": 2, "errores": {}}
 
 
 async def test_admin_uso_calcula_el_costo_por_sistema_y_modelo(construir_app, sesiones, tmp_path):
@@ -362,9 +365,9 @@ m-caro:
         ])
     async with construir_app(admin_token="adm1n", precios_path=str(precios)) as c:
         h = {"Authorization": "Bearer adm1n"}
-        assert (await c.get("/admin/uso")).status_code == 401
-        assert (await c.get("/admin/uso?mes=2026-13", headers=h)).status_code == 422
-        r = (await c.get("/admin/uso?mes=2019-03", headers=h)).json()
+        assert (await c.get("/admin/api/uso")).status_code == 401
+        assert (await c.get("/admin/api/uso?mes=2026-13", headers=h)).status_code == 422
+        r = (await c.get("/admin/api/uso?mes=2019-03", headers=h)).json()
         assert r["mes"] == "2019-03"
         a = next(s for s in r["sistemas"] if s["id"] == "mock-a")
         assert a["nombre"] == "MOCK-A"
@@ -374,8 +377,8 @@ m-caro:
         assert caro["costo_usd"]["pico"] == pytest.approx(14.8)
         assert next(m for m in a["modelos"] if m["modelo"] == "m-local")["costo_usd"] is None
         assert a["sin_tarifa"] == ["m-local"] and a["costo_usd"]["valle"] == pytest.approx(7.4)
-        assert (await c.get("/admin/uso?mes=2019-04", headers=h)).json()["sistemas"] == []
-        assert (await c.get("/admin/uso", headers=h)).status_code == 200  # mes en curso
+        assert (await c.get("/admin/api/uso?mes=2019-04", headers=h)).json()["sistemas"] == []
+        assert (await c.get("/admin/api/uso", headers=h)).status_code == 200  # mes en curso
 
 
 async def test_admin_uso_suma_el_costo_de_la_voz_del_servidor(construir_app, sesiones, tmp_path):
@@ -402,7 +405,7 @@ m-caro:
                    caracteres=1_000),   # un sistema que solo usó voz también aparece
         ])
     async with construir_app(admin_token="adm1n", precios_path=str(precios)) as c:
-        r = (await c.get("/admin/uso?mes=2019-05", headers={"Authorization": "Bearer adm1n"})).json()
+        r = (await c.get("/admin/api/uso?mes=2019-05", headers={"Authorization": "Bearer adm1n"})).json()
     a = next(s for s in r["sistemas"] if s["id"] == "mock-a")
     voz = {v["modelo"]: v for v in a["voz"]}
     assert voz["con-tarifa"]["caracteres"] == 50_000 and voz["con-tarifa"]["llamadas"] == 40
@@ -814,3 +817,72 @@ async def test_estado_ofrece_las_voces_sin_el_voice_id(construir_app):
     assert voz["voces"] == [{"id": "m1", "etiqueta": "Mateo", "genero": "masculina"},
                             {"id": "f1", "etiqueta": "Lucía", "genero": "femenina"}]
     assert "EL_M1" not in str(voz)
+
+
+# --- métricas de uso (evento_uso) ---------------------------------------------------------------
+
+
+async def test_chat_registra_un_evento_con_el_canal(construir_app, llm):
+    from asistente.core.metricas import MetricasMemoria
+
+    m = MetricasMemoria()
+    llm.usar(texto("Hola"), texto("Hola otra vez"))
+    async with construir_app(metricas=m) as c:
+        assert (await c.post("/v1/chat", json={"mensaje": "hola"}, headers=auth())).status_code == 200
+        assert (await c.post("/v1/chat", json={"mensaje": "hola", "canal": "voz"}, headers=auth())).status_code == 200
+    assert [(e.tipo, e.resultado, e.canal, e.sistema_id) for e in m.eventos] == [
+        ("llm", "ok", "texto", "mock-a"), ("llm", "ok", "voz", "mock-a")]
+
+
+async def test_sintetizar_registra_caracteres_y_la_clave_de_tarifa(construir_app):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.voz.falso import TtsFalso
+
+    m = MetricasMemoria()
+    async with construir_app(tts=TtsFalso(b"MP3"), metricas=m) as c:
+        assert (await sintetizar(c, texto="Hola")).status_code == 200
+    (e,) = m.eventos
+    assert (e.tipo, e.resultado, e.modelo, e.unidades, e.canal) == ("tts", "ok", "falso:falso", 4, "voz")
+    assert e.duracion_ms is not None
+
+
+async def test_sintetizar_que_falla_se_registra_como_error_sin_texto(construir_app):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.voz.falso import TtsFalso
+
+    m = MetricasMemoria()
+    async with construir_app(tts=TtsFalso(falla=True), metricas=m) as c:
+        assert (await sintetizar(c, texto="algo privado")).status_code == 502
+    (e,) = m.eventos
+    assert (e.tipo, e.resultado, e.motivo, e.unidades) == ("tts", "error", "voz_error", 0)
+    assert "privado" not in repr(e)
+
+
+async def test_dictado_registra_bytes_y_errores(construir_app):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.voz.falso import SttFalso
+
+    m = MetricasMemoria()
+    async with construir_app(stt=SttFalso("hola"), metricas=m) as c:
+        assert (await dictar(c, audio=b"12345")).status_code == 200
+    async with construir_app(stt=SttFalso(falla=True), metricas=m) as c:
+        assert (await dictar(c, audio=b"123")).status_code == 502
+    assert [(e.tipo, e.resultado, e.motivo, e.unidades) for e in m.eventos] == [
+        ("stt", "ok", "", 5), ("stt", "error", "voz_error", 3)]
+
+
+async def test_voz_rechazada_por_limite_se_registra(construir_app, monkeypatch):
+    from asistente.core.metricas import MetricasMemoria
+    from asistente.core.ports import LimiteExcedido
+    from asistente.core.voz.falso import SttFalso, TtsFalso
+
+    async def tope(self, *a, **kw):
+        raise LimiteExcedido("voz_min")
+
+    monkeypatch.setattr(LimitesPostgres, "reservar_voz", tope)
+    m = MetricasMemoria()
+    async with construir_app(stt=SttFalso(), tts=TtsFalso(), metricas=m) as c:
+        assert (await dictar(c)).status_code == 429
+        assert (await sintetizar(c)).status_code == 429
+    assert [(e.tipo, e.resultado, e.motivo) for e in m.eventos] == [
+        ("stt", "limite", "voz_min"), ("tts", "limite", "voz_min")]

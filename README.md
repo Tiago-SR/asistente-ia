@@ -43,6 +43,27 @@ curl localhost:8100/salud
 
 La documentación interactiva de la API está en <http://localhost:8100/docs> (solo dev: en prod `/docs` está apagado).
 
+### Panel de administración
+
+El panel (React + Vite + shadcn/ui, carpeta `panel/`) gestiona sistemas, secretos, tools y usuarios admin. Habla con
+la API en `/admin/api` por sesión (cookie HttpOnly + CSRF); el token `ASISTENTE_ADMIN_TOKEN` queda solo para
+automatización (recargar, leer) y **no** puede escribir.
+
+```sh
+# Requisito en .env: ASISTENTE_CLAVES_MAESTRAS (ver .env.example)
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml   # una vez
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli crear-admin tu@correo.com --rol admin   # primer usuario
+# Panel con HMR (perfil `panel`): http://localhost:5173/panel/
+docker compose -f docker-compose.dev.yml --profile panel up panel
+```
+
+Sin Docker: `cd panel && npm install && npm run dev` (Vite reenvía `/admin/api` a `PANEL_API`, por defecto
+`http://localhost:8100`). En prod el `Dockerfile` compila el panel en una etapa Node y lo copia a la imagen final
+(sin Node); se sirve en `/panel` con CSP estricta. Los proxies de `deploy/` cierran `/admin*` y `/panel*` hacia
+fuera y el servicio responde 404 a lo que traiga cabeceras de proxy o un `Host` fuera de `ASISTENTE_ADMIN_HOSTS`:
+en prod el panel se usa solo por túnel SSH (`ssh -N -L 8001:127.0.0.1:8000 deploy@asistente.<dominio>` y
+`http://localhost:8001/panel/`; detalle en `deploy/VPS.md` §5).
+
 ### LLM local
 
 El servicio habla con cualquier endpoint OpenAI-compatible (`/v1/chat/completions` con streaming y tool calling). Para usar un `llama-server` en el host:
@@ -123,6 +144,28 @@ V_MANIFIESTO=... V_SECRETO=... python herramientas/verificar_sistema.py \
 
 Opciones y comprobaciones en la [sección 6.5 del contrato](contrato/CONTRATO.md#65-verificar-la-integración). Los tests (`tests/test_verificador.py`) comprueban que detecta una variante rota del mock por cada comprobación.
 
+## Registro de sistemas en base de datos
+
+El registro sale siempre de Postgres y los secretos van cifrados (AES-256-GCM) con
+`ASISTENTE_CLAVES_MAESTRAS="k1:<base64 de 32 bytes>"`; no se lee el entorno para secretos de sistema. Cada réplica
+sondea `registro_version` cada 5 s y `POST /admin/api/recargar` fuerza la relectura. `config/sistemas.yaml` ya no se
+lee en runtime: es solo la entrada de `importar-yaml` (que resuelve las variables `*_env` en ese momento y las cifra)
+y el formato de `exportar-yaml`. `ASISTENTE_REGISTRO` está retirada: ausente o `bd` se acepta, cualquier otro valor
+aborta el arranque.
+
+```sh
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli generar-clave
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml [ruta] [--reemplazar]
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli exportar-yaml [salida]   # sin secretos
+docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli rotar-clave
+```
+
+- **Rotar la clave:** anteponer la nueva (`k2:...,k1:...`), `rotar-clave`, y recién entonces retirar `k1`.
+- **Respaldar `ASISTENTE_CLAVES_MAESTRAS` fuera del backup de la BD.** Si se pierde no hay recuperación: hay que
+  re-emitir los secretos con cada sistema cliente.
+- `acciones_habilitadas` se importa como filas de `tool_estado` (solo excepciones: lectura habilitada salvo que se
+  apague, escritura apagada salvo que se encienda). Plan completo del panel en `PLAN_PANEL_ADMIN.md`.
+
 ## Producción
 
 Guía completa para una VPS nueva (host, DNS, proxy con TLS, backups, rollback): [`deploy/VPS.md`](deploy/VPS.md). Resumen:
@@ -133,7 +176,7 @@ cp config/sistemas.example.yaml config/sistemas.yaml
 deploy/deploy.sh                                       # build etiquetado + up + espera salud (backup previo si ya hay BD)
 ```
 
-`docker-compose.yml` es la base (imagen `prod`: sin dependencias de desarrollo, no-root, solo lectura, Postgres sin puertos, logs rotados, Whisper opcional con `COMPOSE_PROFILES=voz`); `docker-compose.prod.yml` publica el puerto en loopback y `docker-compose.proxy-externo.yml` conecta a un Caddy en la red `web`. Dockge usa el `docker-compose.yml` y el `.env` del stack. Hace falta un proxy con TLS, sin buffering (SSE) y sin exponer `/admin` ni `/docs`: ejemplos en `deploy/Caddyfile.example` y `deploy/nginx.conf.example`. Un `.env` por host (no se versiona).
+`docker-compose.yml` es la base (imagen `prod`: sin dependencias de desarrollo, no-root, solo lectura, Postgres sin puertos, logs rotados, Whisper opcional con `COMPOSE_PROFILES=voz`); `docker-compose.prod.yml` publica el puerto en loopback y `docker-compose.proxy-externo.yml` conecta a un Caddy en la red `web`. Dockge usa el `docker-compose.yml` y el `.env` del stack. Hace falta un proxy con TLS, sin buffering (SSE) y sin exponer `/admin`, `/panel` ni `/docs` (el panel se usa por túnel SSH, `deploy/VPS.md` §5): ejemplos en `deploy/Caddyfile.example` y `deploy/nginx.conf.example`. Un `.env` por host (no se versiona).
 
 ## Estructura
 
@@ -170,7 +213,7 @@ IDEAS.md                 ideas pendientes (deshacer en acciones, ajustes del wid
 - **Memoria por usuario (en curso, por fases):** la **Fase 0** («lo mismo que ayer») está hecha: tool local `consultas_recientes` sobre la auditoría, zona horaria del navegador guardada con cada consulta y purga de `llamadas_tool` (contrato 6.7; evals en `evals/preguntas_memoria.yaml`: 6/6, set principal 32/32). La **Fase 1** también está hecha (apagada por defecto, `memoria_habilitada: true` por sistema; contrato 6.8): tools locales `recordar` y `olvidar` para preferencias (`decimales`, `brevedad`, `entidad_principal`), alias y consultas guardadas, por sistema y usuario, siempre con el botón de confirmación (`confirmar-local`, también si se pidió por voz), tope de 20, vencimiento al mes sin usarse (se renueva al usarlos, `ASISTENTE_MEMORIA_DIAS_SIN_USO`) y panel «Lo que recuerdo» en el widget para ver y olvidar. Evals en `evals/preguntas_memoria_fase1.yaml` (15/15; set principal 32/32, `preguntas_memoria.yaml` 6/6). Pendiente: prueba manual en Chrome real y decidir si se enciende para SGAgro.
 - **Búsqueda web (implementada 2026-10-10, apagada por defecto, `busqueda_web: true` por sistema; contrato 6.9):** tools locales `buscar_web` y `leer_pagina`, con Tavily mientras tenga cupo y SearXNG propio (perfil `busqueda`) como respaldo; la lectura de páginas va por Tavily o, si no, por un lector directo con defensas de SSRF (`core/web/directo.py`). Lo buscado y leído se muestra en el chat y se audita; `leer_pagina` solo abre URLs vistas en resultados o escritas por el usuario. Probado con `deepseek-flash` contra SearXNG en dev (`sistema-php`). Falta: clave de Tavily en `.env` y probar el paso de Tavily a SearXNG con el cupo real, evals propios (fuga de datos en la consulta, inyección en páginas, citas), decidir si se enciende para SGAgro y avisar a los clientes que esas consultas salen a un proveedor externo. Los PDF no se leen.
 - **Fase 6, proactivo (a evaluar):** webhooks del sistema hacia el asistente o consultas programadas; requiere cola o cron en el contenedor.
-- **Despliegue en el VPS (en espera):** kit listo y probado en local. Hito: stack tras el proxy con TLS, `/admin` y `/docs` cerrados, SSE sin buffering y widget probado contra el dominio real. Los backups quedan en el mismo VPS por ahora.
+- **Despliegue en el VPS (en espera):** kit listo y probado en local. Hito: stack tras el proxy con TLS, `/admin`, `/panel` y `/docs` cerrados, SSE sin buffering y widget probado contra el dominio real. Los backups quedan en el mismo VPS por ahora.
 
 **Preguntas abiertas:**
 
@@ -199,8 +242,8 @@ Lo que define el contrato HTTP está en [`contrato/CONTRATO.md`](contrato/CONTRA
   7. Los parámetros que genera el LLM se validan contra el JSON Schema de la tool antes de llamar, y el sistema los vuelve a validar.
   8. Los resultados de tools son datos, no instrucciones (prompt injection); se entregan como JSON.
   9. Límites de abuso: rate limit por usuario, cuota de tokens por sistema, tope de iteraciones y de tokens de salida, timeouts por tool y por turno, tamaño máximo de resultados.
-  10. Auditoría de sistema, usuario, `jti`, tool, parámetros, estado, duración, tokens y zona horaria, sin guardar resultados completos; se purga con la retención del sistema (30 días por defecto; antes `llamadas_tool` no se purgaba).
-  11. Secretos solo por variables de entorno; nunca se loguean cabeceras `Authorization` ni tokens. Si la infraestructura lo permite, restringir el egress a la API del LLM y a las `base_url` registradas (con la búsqueda web encendida, también a Tavily y SearXNG; el lector directo de páginas necesita salida general a internet en los puertos 80/443, o se apaga con `WEB_LECTOR_DIRECTO=false`).
+  10. Auditoría de sistema, usuario, `jti`, tool, parámetros, estado, duración, tokens y zona horaria, sin guardar resultados completos; se purga con la retención del sistema (30 días por defecto; antes `llamadas_tool` no se purgaba). Las métricas de uso del panel (`evento_uso`, con usuario) duran `min(90, retención)`; su resumen diario sin usuario (`uso_diario`) se conserva.
+  11. Secretos solo por variables de entorno; nunca se loguean cabeceras `Authorization` ni tokens. Si la infraestructura lo permite, restringir el egress a la API del LLM y a las `base_url` registradas. Además, el servicio ya valida los destinos que el panel puede editar (`base_url`, `jwks_url`, `llm.base_url`) al conectar: solo IPs públicas más `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS`, y nunca metadatos de nube ni link-local (`core/red.py`); es defensa adicional, no sustituye al egress (con la búsqueda web encendida, también a Tavily y SearXNG; el lector directo de páginas necesita salida general a internet en los puertos 80/443, o se apaga con `WEB_LECTOR_DIRECTO=false`).
 - **Decisiones menores:** manifiesto global por sistema, `HS256` solo para sistemas legados (lo demás, firma asimétrica), widget como vista de chat a pantalla completa y solo con la conversación actual (historial oculto tras `MOSTRAR_HISTORIAL`).
-- **Costo por sistema:** cada llamada al LLM suma a `uso_modelo` (sistema, mes y modelo; entrada, caché de entrada y salida por separado; no se purga). `GET /admin/uso?mes=YYYY-MM` lo traduce a USD con `config/precios.yaml`, con una cota `valle` y otra `pico` porque el servicio no sabe en qué horario del proveedor cayó cada llamada. Un modelo sin tarifa figura en `sin_tarifa` y no entra en el total. La voz del servidor (ElevenLabs) suma sus caracteres a `uso_voz` (sistema, mes y motor) y `/admin/uso` la informa en `voz` con un costo por carácter (precio de lista en `config/precios.yaml`, clave `proveedor:modelo`), que entra en el total del sistema.
+- **Costo por sistema:** cada llamada al LLM suma a `uso_modelo` (sistema, mes y modelo; entrada, caché de entrada y salida por separado; no se purga). `GET /admin/api/uso?mes=YYYY-MM` lo traduce a USD con `config/precios.yaml`, con una cota `valle` y otra `pico` porque el servicio no sabe en qué horario del proveedor cayó cada llamada. Un modelo sin tarifa figura en `sin_tarifa` y no entra en el total. La voz del servidor (ElevenLabs) suma sus caracteres a `uso_voz` (sistema, mes y motor) y `/admin/api/uso` la informa en `voz` con un costo por carácter (precio de lista en `config/precios.yaml`, clave `proveedor:modelo`), que entra en el total del sistema.
 - **Voz:** Web Speech del navegador como camino principal. Whisper `small` y Kokoro locales se descartaron por calidad en pruebas manuales (resultados en `PROVEEDORES_VOZ.md`); el servicio Whisper sigue en el compose como opcional (perfil `voz`) y como STT del servidor (`voz-motor="servidor"`).

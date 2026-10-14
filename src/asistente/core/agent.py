@@ -21,9 +21,11 @@ from asistente.core.ports import (
     Auditoria,
     Conector,
     Contexto,
+    EventoMetrica,
     LimiteExcedido,
     Limites,
     Memoria,
+    Metricas,
     Recientes,
     ResultadoTool,
     TurnoMemoria,
@@ -73,6 +75,9 @@ class ResultadoTurno:
     uso: Uso = field(default_factory=Uso)
     # Milisegundos desde que empezó el turno: primer texto (`primer_delta`), resumen hablado (`voz`) y fin (`total`).
     tiempos: dict[str, int] = field(default_factory=dict)
+    # Llamadas al LLM de este turno (incluidas las fallidas) y el tiempo que se pasó esperándolas, sin tools.
+    llamadas_llm: int = 0
+    latencia_llm_ms: int = 0
 
     @property
     def completo(self) -> bool:
@@ -95,23 +100,62 @@ async def run_turn(
     memoria: Memoria | None = None,
     adjuntos: tuple[Adjunto, ...] = (),
     web: Web | None = None,
+    metricas: Metricas | None = None,
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
     estado.tiempos["_t0"] = time.monotonic_ns() // 1_000_000
-    try:
-        await limites.reservar_mensaje(ctx)
-    except LimiteExcedido as e:
-        await emit(events.ERROR, e.cual)
+    errores: list[str] = []  # los códigos de error que se le dijeron al usuario: son el motivo en las métricas
+    limite: str | None = None
+
+    async def emitir(evento: str, datos: Any = None) -> None:
+        if evento == events.ERROR and isinstance(datos, str):
+            errores.append(datos)
+        await emit(evento, datos)
+
+    try:  # el `finally` también corre si el cliente corta (CancelledError): el turno se cuenta igual
+        try:
+            await limites.reservar_mensaje(ctx)
+        except LimiteExcedido as e:
+            limite = e.cual
+            await emitir(events.ERROR, e.cual)
+            return estado
+        try:
+            async with asyncio.timeout(config.timeout_turno_s):
+                await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emitir,
+                            conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web)
+        except TimeoutError:
+            estado.motivo, estado.nuevos = "error", []
+            await emitir(events.ERROR, "timeout_turno")
         return estado
+    finally:
+        if metricas is not None:
+            _medir(metricas, ctx, config, estado, errores, limite)
+
+
+def _medir(metricas: Metricas, ctx: Contexto, config: ConfigTurno, estado: ResultadoTurno,
+           errores: list[str], limite: str | None) -> None:
+    """Un evento por turno. Nunca lanza: observar no puede romper la respuesta."""
     try:
-        async with asyncio.timeout(config.timeout_turno_s):
-            await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
-                        conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web)
-    except TimeoutError:
-        estado.motivo, estado.nuevos = "error", []
-        await emit(events.ERROR, "timeout_turno")
-    return estado
+        if limite is not None:
+            resultado, motivo = "limite", limite
+        elif estado.motivo == "fin":
+            resultado, motivo = "ok", ""
+        elif estado.motivo == "token_expirado":
+            resultado, motivo = "error", "token_expirado"
+        else:  # sin error emitido = el turno se cortó (el cliente cerró la conexión)
+            resultado, motivo = "error", errores[-1] if errores else "cancelado"
+        duracion = time.monotonic_ns() // 1_000_000 - estado.tiempos["_t0"]
+        metricas.registrar(EventoMetrica(
+            sistema_id=ctx.sistema_id, usuario_ref=ctx.usuario_ref, tipo="llm", resultado=resultado,
+            motivo=motivo, modelo=ctx.modelo, canal="voz" if config.resumen_voz else "texto",
+            tokens_in=estado.uso.tokens_in, tokens_in_cache=estado.uso.tokens_in_cache,
+            tokens_out=estado.uso.tokens_out, llamadas_llm=estado.llamadas_llm,
+            latencia_llm_ms=estado.latencia_llm_ms if estado.llamadas_llm else None,
+            ttft_ms=estado.tiempos.get("primer_delta"), duracion_ms=duracion,
+        ))
+    except Exception:
+        log.warning("[%s] no se pudo registrar la métrica del turno", ctx.request_id, exc_info=True)
 
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
@@ -154,6 +198,8 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 marca("primer_delta")
                 await emit(events.DELTA, visible)
 
+        t_llm = time.monotonic_ns()
+        estado.llamadas_llm += 1
         try:
             resp = await llm.stream(
                 modelo=ctx.modelo,
@@ -168,6 +214,8 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
             estado.motivo = "error"
             await emit(events.ERROR, "llm_no_disponible")
             return
+        finally:
+            estado.latencia_llm_ms += (time.monotonic_ns() - t_llm) // 1_000_000
         estado.uso += resp.uso
         await limites.registrar_uso(ctx, resp.uso)
         if filtro is not None:

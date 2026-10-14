@@ -1,4 +1,6 @@
+import asyncio
 import importlib.util
+import os
 import time
 import uuid
 from pathlib import Path
@@ -7,11 +9,55 @@ import httpx
 import jwt
 import pytest
 import yaml
+from sqlalchemy.engine import make_url
 
-from asistente.sistemas.registro import RegistroSistemas
+from asistente.sistemas.registro import RegistroSistemas, entradas_desde_yaml
 
 RAIZ = Path(__file__).resolve().parent.parent
 MOCK = RAIZ / "ejemplos" / "sistema-mock" / "app.py"
+
+
+# ── BD de pruebas aparte ──
+# Varios tests limpian tablas (sistema, admin_usuario, auditoría…). Contra la BD de desarrollo borrarían el
+# registro y los usuarios admin del servidor dev, así que la suite SIEMPRE usa `<bd>_test`, recreada al empezar.
+# Se reescribe ASISTENTE_DATABASE_URL aquí, al importar el conftest, antes de que los módulos de test la lean.
+def _url_de_pruebas() -> str | None:
+    explicita = os.environ.get("ASISTENTE_TEST_DATABASE_URL")
+    base = explicita or os.environ.get("ASISTENTE_DATABASE_URL")
+    if not base:
+        return None
+    url = make_url(base)
+    if not (url.database or "").endswith("_test"):
+        if explicita:
+            raise pytest.UsageError("ASISTENTE_TEST_DATABASE_URL debe apuntar a una BD cuyo nombre termine en _test")
+        url = url.set(database=f"{url.database}_test")
+    return url.render_as_string(hide_password=False)
+
+
+_URL_PRUEBAS = _url_de_pruebas()
+if _URL_PRUEBAS:
+    os.environ["ASISTENTE_DATABASE_URL"] = _URL_PRUEBAS
+
+
+def pytest_sessionstart(session):
+    if not _URL_PRUEBAS:
+        return
+    import asyncpg
+
+    url = make_url(_URL_PRUEBAS)
+    assert url.database and url.database.endswith("_test"), "la BD de pruebas debe terminar en _test"
+
+    async def recrear() -> None:
+        c = await asyncpg.connect(
+            host=url.host, port=url.port, user=url.username, password=url.password, database="postgres"
+        )
+        try:
+            await c.execute(f'DROP DATABASE IF EXISTS "{url.database}" WITH (FORCE)')
+            await c.execute(f'CREATE DATABASE "{url.database}"')
+        finally:
+            await c.close()
+
+    asyncio.run(recrear())
 
 
 def cargar_mock(monkeypatch, id_: str):
@@ -68,10 +114,17 @@ def firmar(id_: str, sub: str = "ana", **claims) -> str:
     return jwt.encode(base, clave, algorithm="HS256")
 
 
+def registro_desde_yaml(ruta: Path, env: dict | None = None) -> RegistroSistemas:
+    """Registro en memoria cargado de un YAML (solo tests): el mismo `aplicar` que usa la fuente BD en runtime."""
+    r = RegistroSistemas()
+    r.aplicar(entradas_desde_yaml(ruta, env))
+    return r
+
+
 @pytest.fixture
 def registro_dos(tmp_path) -> RegistroSistemas:
     ruta = escribir_registro(tmp_path / "s.yaml", [entrada_sistema("mock-a"), entrada_sistema("mock-b")])
-    return RegistroSistemas(ruta, env=entorno("mock-a", "mock-b"))
+    return registro_desde_yaml(ruta, env=entorno("mock-a", "mock-b"))
 
 
 @pytest.fixture

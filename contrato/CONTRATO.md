@@ -202,7 +202,7 @@ El mismo secreto está en el sistema y en el asistente. Quien lo conozca puede e
        conector:
          token_manifiesto_env: STMGIS_MANIFEST_TOKEN
    ```
-5. Reiniciar el asistente (las variables de entorno se leen al arrancar; `POST /admin/recargar` relee el YAML pero **no** cambia variables de entorno).
+5. Cargar el sistema en el registro: `python -m asistente.sistemas.cli importar-yaml` (resuelve las variables de entorno **en ese momento** y las guarda cifradas; con `--reemplazar` sustituye todo el registro) o darlo de alta desde el panel. El asistente lo toma solo en unos 5 s (o con `POST /admin/api/recargar`).
 
 ### 6.2 Opción B: `RS256` o `EdDSA` (recomendada fuera de pruebas)
 
@@ -225,7 +225,7 @@ En el registro se reemplaza `secreto_env` por `clave_publica_env: STMGIS_PUBKEY`
 - **`consultas_recientes` (opcional, `true` por defecto):** `false` desactiva para este sistema la tool local de «lo mismo que ayer» ([6.7](#67-lo-mismo-que-ayer-consultas_recientes)).
 - **`memoria_habilitada` (opcional, `false` por defecto):** `true` enciende para este sistema la memoria por usuario ([6.8](#68-memoria-por-usuario-recordar-y-olvidar)): tools locales `recordar` y `olvidar`, sección «lo que el usuario pidió recordar» en el prompt, endpoints `/v1/memoria` y panel en el widget. Apagada, nada de eso existe.
 - **`busqueda_web` (opcional, `false` por defecto):** `true` ofrece al modelo, en este sistema, las tools locales de internet ([6.9](#69-búsqueda-web-buscar_web-y-leer_pagina)). Requiere un proveedor configurado en el asistente (`WEB_TAVILY_API_KEY` y/o `WEB_SEARXNG_URL`); sin ninguno, el flag no tiene efecto.
-- **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/sistemas`.
+- **Variables faltantes:** si falta alguna variable referenciada, **ese sistema** queda deshabilitado (el resto sigue) y el motivo queda en el log y en `GET /admin/api/sistemas`.
 - **Verificar la integración:** ver [6.5](#65-verificar-la-integración).
 
 **Ejemplo de entrada completa en `config/sistemas.yaml`** (todo lo que va después de `conector` es opcional):
@@ -242,7 +242,7 @@ sistemas:
       ruta_manifiesto: /asistente/tools
       ruta_ejecucion: /asistente/tools/{nombre}
       token_manifiesto_env: SGAGRO_MANIFEST_TOKEN
-    prompt_dominio: prompts/dominio/sgagro.md   # vocabulario y reglas del negocio
+    prompt_dominio: prompts/dominio/sgagro.md   # vocabulario y reglas del negocio (archivo propio de cada sistema; prompts/dominio/ viene vacío)
     locale_defecto: es-UY                       # idioma si el token no trae `locale`
     acciones_habilitadas: [agregar_nota, modificar_nota]   # escrituras que el modelo puede proponer (vacío = solo lectura)
     zona_horaria: America/Montevideo            # «hoy» para usuarios cuyo navegador no informa la suya
@@ -258,7 +258,7 @@ sistemas:
     retencion_dias: 30
 ```
 
-**Costo por sistema.** `GET /admin/uso?mes=2026-10` (cabecera de administración; no se expone en el proxy) devuelve el consumo y el costo en USD por modelo, con una cota `valle` y otra `pico` porque la tarifa depende del horario del proveedor (tarifas en `config/precios.yaml`):
+**Costo por sistema.** `GET /admin/api/uso?mes=2026-10` (cabecera de administración; no se expone en el proxy) devuelve el consumo y el costo en USD por modelo, con una cota `valle` y otra `pico` porque la tarifa depende del horario del proveedor (tarifas en `config/precios.yaml`):
 
 ```json
 { "mes": "2026-10", "sistemas": [ { "id": "sgagro", "nombre": "SGAgro",

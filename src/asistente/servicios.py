@@ -1,7 +1,9 @@
 """Cableado de dependencias. La API solo ve esta estructura, así los tests inyectan fakes."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -9,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from asistente.config import Settings
 from asistente.core.adjuntos import AlmacenAdjuntos, NoGuarda
 from asistente.core.llm.openai_compat import OpenAICompat
-from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites
+from asistente.core.ports import LLM, STT, TTS, Auditoria, Limites, Metricas
 from asistente.core.prompts import Prompts
+from asistente.core.red import ReglasRed, TransporteSeguro
 from asistente.core.voz import catalogo
 from asistente.core.voz.elevenlabs import TtsElevenLabs
 from asistente.core.voz.elevenlabs_stt import SttElevenLabs
@@ -20,15 +23,22 @@ from asistente.core.web.respaldo import WebConRespaldo
 from asistente.core.web.searxng import WebSearxng
 from asistente.core.web.tavily import WebTavily
 from asistente.limits import LimitesPostgres
+from asistente.precios import Tarifas
 from asistente.sistemas.auth import Autenticador
+from asistente.sistemas.cifrado import Cifrador, ErrorCifrado
 from asistente.sistemas.conector_http import ConectorHttp
 from asistente.sistemas.manifiesto import CacheManifiestos
 from asistente.sistemas.registro import RegistroSistemas, Sistema
+from asistente.sistemas.registro_bd import FuenteBD
 from asistente.store.acciones import AccionesSql
+from asistente.store.admin import AdminSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
+from asistente.store.metricas import MetricasSql
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo
+
+log = logging.getLogger(__name__)
 
 
 class LLMNoConfigurado(Exception):
@@ -58,18 +68,39 @@ class Servicios:
     memoria: MemoriaSql | None = None  # None = sin memoria por usuario
     web: WebConRespaldo | None = None  # None = sin búsqueda web (aunque el sistema la tenga habilitada)
     adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
+    admin: AdminSql | None = None  # usuarios, sesiones y auditoría del panel
+    cifrador: Cifrador | None = None  # secretos de sistema (solo registro en BD); None = sin claves maestras
+    metricas: Metricas | None = None  # None = sin métricas de uso (tests)
 
 
-def _fabrica_llm(settings: Settings, registro: RegistroSistemas) -> Callable[[Sistema], tuple[LLM, str]]:
-    cliente = httpx.AsyncClient(follow_redirects=False)
+def reglas_red(settings: Settings) -> ReglasRed:
+    """Destinos a los que puede conectarse el servicio: públicos, más los de ASISTENTE_HOSTS_INTERNOS_PERMITIDOS
+    y el host de LLM_BASE_URL (lo fija el operador)."""
+    llm_global = urlsplit(settings.llm_base_url or "").hostname
+    return ReglasRed.desde_texto(settings.hosts_internos_permitidos, extra_nombres=[llm_global or ""])
+
+
+def _cliente_saliente(settings: Settings) -> httpx.AsyncClient:
+    """Cliente para lo que apunta una URL editable desde el panel (conector, manifiesto, JWKS, LLM por sistema):
+    conecta solo a los destinos de `reglas_red`, y a la IP ya validada."""
+    return httpx.AsyncClient(transport=TransporteSeguro(reglas_red(settings)), follow_redirects=False)
+
+
+def _fabrica_llm(settings: Settings, registro: RegistroSistemas,
+                 cliente: httpx.AsyncClient | None = None) -> Callable[[Sistema], tuple[LLM, str]]:
+    cliente = cliente or httpx.AsyncClient(follow_redirects=False)
     cache: dict[tuple[str, str | None, bool], LLM] = {}
 
     def llm_para(sistema: Sistema) -> tuple[LLM, str]:
         cfg = sistema.llm
         proveedor = (cfg.proveedor if cfg else None) or settings.llm_proveedor
         modelo = (cfg.modelo if cfg else None) or settings.modelo_default
-        base_url = (sistema.secreto(cfg.base_url_env, registro.env) if cfg else None) or settings.llm_base_url
-        api_key = (sistema.secreto(cfg.api_key_env, registro.env) if cfg else None) or settings.llm_api_key
+        base_url = (cfg.base_url if cfg else None) or settings.llm_base_url
+        api_key = registro.secreto(sistema.id, "llm_api_key")
+        if not (cfg and cfg.base_url):
+            # La clave global solo acompaña a la URL global: con una URL propia del sistema saldría hacia
+            # un servidor que no controla el operador.
+            api_key = api_key or settings.llm_api_key
         if proveedor != "openai_compat":
             raise LLMNoConfigurado(f"proveedor no soportado: {proveedor}")
         if not base_url or not modelo:
@@ -131,25 +162,47 @@ def _fabrica_web(settings: Settings) -> WebConRespaldo | None:
     return WebConRespaldo(proveedores, pausa_cupo_s=settings.web_pausa_cupo_s)
 
 
+def _cerrar(motor, saliente: httpx.AsyncClient):
+    async def cierre() -> None:
+        await saliente.aclose()
+        await motor.dispose()
+    return cierre
+
+
 def construir(settings: Settings) -> Servicios:
     motor = create_async_engine(settings.database_url, pool_pre_ping=True)
     sesiones = async_sessionmaker(motor, expire_on_commit=False)
-    registro = RegistroSistemas(settings.sistemas_path)
+    registro = RegistroSistemas()
+    try:
+        cifrador: Cifrador | None = Cifrador.desde_entorno()
+    except ErrorCifrado as e:  # sin clave los sistemas con secretos quedan en `errores`
+        log.error("claves maestras no utilizables: %s", e)
+        cifrador = None
+    FuenteBD(registro, sesiones, cifrador)
     voces = _fabrica_voces(settings)
-    manifiestos = CacheManifiestos(registro)
+    saliente = _cliente_saliente(settings)
+    manifiestos = CacheManifiestos(registro, saliente)
+    autenticador = Autenticador(registro, saliente)
+
+    def _descartar_cachés(ids: set[str]) -> None:
+        for i in ids:
+            manifiestos.invalidar(i)
+            autenticador.invalidar_jwks(i)
+
+    registro.suscribir(_descartar_cachés)
     return Servicios(
         settings=settings,
         registro=registro,
-        autenticador=Autenticador(registro),
+        autenticador=autenticador,
         manifiestos=manifiestos,
-        conector=ConectorHttp(registro, manifiestos),
+        conector=ConectorHttp(registro, manifiestos, saliente),
         repo=Repo(sesiones),
         limites=LimitesPostgres(sesiones),
         auditoria=AuditoriaSql(sesiones),
         prompts=Prompts(settings.prompts_dir),
-        llm_para=_fabrica_llm(settings, registro),
+        llm_para=_fabrica_llm(settings, registro, saliente),
         sesiones=sesiones,
-        cierre=motor.dispose,
+        cierre=_cerrar(motor, saliente),
         stt=_fabrica_stt(settings),
         tts=_fabrica_tts(settings, voces),
         voces=voces,
@@ -157,4 +210,7 @@ def construir(settings: Settings) -> Servicios:
         recientes=RecientesSql(sesiones),
         memoria=MemoriaSql(sesiones, settings.memoria_dias_sin_uso),
         web=_fabrica_web(settings),
+        admin=AdminSql(sesiones),
+        cifrador=cifrador,
+        metricas=MetricasSql(sesiones, Tarifas(settings.precios_path)),
     )

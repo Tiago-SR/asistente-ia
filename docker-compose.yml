@@ -24,6 +24,12 @@ services:
       ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:${POSTGRES_PASSWORD:?definir POSTGRES_PASSWORD}@postgres:5432/asistente
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: INFO
+      # Uvicorn solo confía en X-Forwarded-* si el peer es el proxy: loopback y las redes de docker (el proxy del
+      # host llega desde la IP de la pasarela del bridge). Nunca `*`. Cambiar solo si el proxy está en otro rango.
+      FORWARDED_ALLOW_IPS: ${ASISTENTE_PROXY_IPS:-127.0.0.1,172.16.0.0/12,192.168.0.0/16}
+      # /admin y /panel solo por túnel ssh (deploy/VPS.md §5): 404 con otro Host o con cabeceras de proxy.
+      # Si se cambia el puerto local del túnel o ASISTENTE_PUERTO, ajustar la lista en .env.
+      ASISTENTE_ADMIN_HOSTS: ${ASISTENTE_ADMIN_HOSTS:-localhost:8001,127.0.0.1:8001,localhost:8000,127.0.0.1:8000}
     volumes:
       - ./config/sistemas.yaml:/config/sistemas.yaml:ro
       - ./config/precios.yaml:/config/precios.yaml:ro

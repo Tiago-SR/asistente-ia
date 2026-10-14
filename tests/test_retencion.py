@@ -2,7 +2,7 @@ import asyncio
 
 from asistente.retencion import bucle_purga, purgar_todos
 from asistente.sistemas.registro import RegistroSistemas
-from conftest import entorno, entrada_sistema, escribir_registro
+from conftest import entorno, entrada_sistema, escribir_registro, registro_desde_yaml
 
 
 class RepoFalso:
@@ -34,7 +34,7 @@ def registro(tmp_path) -> RegistroSistemas:
         tmp_path / "s.yaml",
         [entrada_sistema("ret-a", retencion_dias=7), entrada_sistema("ret-b"), entrada_sistema("ret-c", retencion_dias=90)],
     )
-    return RegistroSistemas(ruta, env=entorno("ret-a", "ret-b", "ret-c"))
+    return registro_desde_yaml(ruta, env=entorno("ret-a", "ret-b", "ret-c"))
 
 
 async def test_cada_sistema_se_purga_con_su_retencion(tmp_path):
@@ -76,3 +76,72 @@ async def test_sin_auditoria_no_se_purga_y_el_bucle_la_recibe(tmp_path):
     await asyncio.sleep(0.05)
     tarea.cancel()
     assert auditoria.llamadas
+
+
+class AdminFalso:
+    def __init__(self, falla: bool = False) -> None:
+        self.dias: list[int] = []
+        self.falla = falla
+
+    async def purgar_auditoria(self, dias: int) -> int:
+        if self.falla:
+            raise RuntimeError("BD caída")
+        self.dias.append(dias)
+        return 3
+
+
+async def test_la_auditoria_del_panel_se_purga_una_vez_con_sus_dias(tmp_path):
+    admin = AdminFalso()
+    await purgar_todos(registro(tmp_path), RepoFalso(), admin=admin, admin_auditoria_dias=365)
+    assert admin.dias == [365]  # una vez, no por sistema
+
+
+async def test_sin_dias_no_se_purga_la_auditoria_del_panel(tmp_path):
+    admin = AdminFalso()
+    await purgar_todos(registro(tmp_path), RepoFalso(), admin=admin, admin_auditoria_dias=0)
+    assert admin.dias == []
+
+
+async def test_si_falla_la_auditoria_del_panel_el_resto_se_purga(tmp_path):
+    repo = RepoFalso()
+    borradas = await purgar_todos(registro(tmp_path), repo, admin=AdminFalso(falla=True), admin_auditoria_dias=30)
+    assert borradas == {"ret-a": 2, "ret-b": 2, "ret-c": 2}
+
+
+class ResumenFalso:
+    def __init__(self, falla_resumir: str | None = None) -> None:
+        self.orden: list[tuple] = []
+        self.falla_resumir = falla_resumir
+
+    async def resumir(self, sistema_id: str, retencion_dias: int) -> int:
+        if sistema_id == self.falla_resumir:
+            raise RuntimeError("BD caída")
+        self.orden.append(("resumir", sistema_id, retencion_dias))
+        return 1
+
+    async def purgar_eventos(self, sistema_id: str, retencion_dias: int) -> int:
+        self.orden.append(("eventos", sistema_id, retencion_dias))
+        return 0
+
+    async def purgar_contadores(self) -> int:
+        self.orden.append(("contadores",))
+        return 0
+
+
+async def test_resume_antes_de_purgar_y_purga_contadores_una_vez(tmp_path):
+    resumen = ResumenFalso()
+    await purgar_todos(registro(tmp_path), RepoFalso(), resumen=resumen)
+    assert resumen.orden == [
+        ("resumir", "ret-a", 7), ("eventos", "ret-a", 7),
+        ("resumir", "ret-b", 30), ("eventos", "ret-b", 30),
+        ("resumir", "ret-c", 90), ("eventos", "ret-c", 90),
+        ("contadores",),
+    ]
+
+
+async def test_si_falla_el_resumen_se_purga_el_resto(tmp_path):
+    resumen = ResumenFalso(falla_resumir="ret-b")
+    repo = RepoFalso()
+    borradas = await purgar_todos(registro(tmp_path), repo, resumen=resumen)
+    assert set(borradas) == {"ret-a", "ret-b", "ret-c"}
+    assert ("resumir", "ret-b", 30) not in resumen.orden

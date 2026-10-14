@@ -5,12 +5,14 @@ algoritmo de ese sistema. Nunca se acepta un algoritmo que no sea el configurado
 (así se rechazan `none` y los ataques de confusión de algoritmo).
 """
 
-import asyncio
+import json
 import logging
+import time
 from dataclasses import dataclass
 
+import httpx
 import jwt
-from jwt import PyJWKClient
+from jwt import PyJWKSet
 
 from asistente.sistemas.registro import RegistroSistemas, Sistema
 
@@ -52,10 +54,80 @@ class Usuario:
     accion: AccionClaims | None = None  # solo con scope de escritura
 
 
+class ClienteJwks:
+    """Claves públicas de un `jwks_url`, descargadas con el cliente httpx del servicio (el mismo control de
+    destinos que el conector, sin redirecciones). Caché con TTL; si llega un `kid` que no está, se vuelve a
+    descargar, como mucho una vez cada `_REFRESCO_MIN_S` (un atacante con kids al azar no multiplica las
+    peticiones al emisor)."""
+
+    _TTL_S = 300.0
+    _REFRESCO_MIN_S = 30.0
+    _MAX_BYTES = 256 * 1024
+
+    def __init__(self, url: str, cliente: httpx.AsyncClient, timeout_s: float = 5.0, reloj=time.monotonic) -> None:
+        self._url = url
+        self._cliente = cliente
+        self._timeout = timeout_s
+        self._reloj = reloj
+        self._set: PyJWKSet | None = None
+        self._descargado = float("-inf")
+
+    async def _descargar(self) -> None:
+        cuerpo = bytearray()
+        try:
+            async with self._cliente.stream("GET", self._url, timeout=self._timeout,
+                                            headers={"Accept": "application/json"}) as r:
+                if r.status_code != 200:
+                    raise jwt.PyJWKClientError(f"JWKS inválido (HTTP {r.status_code})")
+                async for trozo in r.aiter_bytes():
+                    cuerpo += trozo
+                    if len(cuerpo) > self._MAX_BYTES:  # se corta: no se descarga un cuerpo sin tope
+                        raise jwt.PyJWKClientError("JWKS demasiado grande")
+        except httpx.HTTPError as e:
+            raise jwt.PyJWKClientError(f"JWKS no disponible: {type(e).__name__}") from e
+        try:
+            self._set = PyJWKSet.from_dict(json.loads(cuerpo))
+        except (ValueError, jwt.PyJWTError) as e:
+            raise jwt.PyJWKClientError("JWKS malformado") from e
+        self._descargado = self._reloj()
+
+    async def clave(self, token: str):
+        kid = jwt.get_unverified_header(token).get("kid")
+        edad = self._reloj() - self._descargado
+        if self._set is None or edad > self._TTL_S:
+            await self._descargar()
+        claves = {k.key_id: k for k in self._set.keys}  # type: ignore[union-attr]
+        if kid not in claves and self._reloj() - self._descargado > self._REFRESCO_MIN_S:
+            await self._descargar()
+            claves = {k.key_id: k for k in self._set.keys}  # type: ignore[union-attr]
+        if kid is None and len(claves) == 1:
+            return next(iter(claves.values())).key
+        if kid not in claves:
+            raise jwt.PyJWKClientError("kid desconocido")
+        return claves[kid].key
+
+
 class Autenticador:
-    def __init__(self, registro: RegistroSistemas) -> None:
+    def __init__(self, registro: RegistroSistemas, cliente: httpx.AsyncClient | None = None) -> None:
         self._registro = registro
-        self._jwks: dict[str, PyJWKClient] = {}
+        self._http = cliente or httpx.AsyncClient(follow_redirects=False)
+        # sistema_id → (jwks_url con la que se creó, cliente). La URL va en el valor para que un cambio
+        # de `jwks_url` no siga usando el cliente (y las claves) del emisor anterior.
+        self._jwks: dict[str, tuple[str, ClienteJwks]] = {}
+
+    def invalidar_jwks(self, sistema_id: str | None = None) -> None:
+        """Descarta las claves JWKS en caché (de un sistema o de todos), p. ej. tras recargar el registro."""
+        if sistema_id is None:
+            self._jwks.clear()
+        else:
+            self._jwks.pop(sistema_id, None)
+
+    def _cliente_jwks(self, sistema_id: str, url: str) -> ClienteJwks:
+        hit = self._jwks.get(sistema_id)
+        if hit is None or hit[0] != url:
+            hit = (url, ClienteJwks(url, self._http))
+            self._jwks[sistema_id] = hit
+        return hit[1]
 
     async def validar(self, token: str, scope: str = SCOPE_LECTURA) -> Usuario:
         sistema = self._sistema_del_token(token)
@@ -110,15 +182,14 @@ class Autenticador:
 
     async def _clave(self, sistema: Sistema, token: str):
         auth = sistema.auth
-        env = self._registro.env
-        if auth.secreto_env:
-            return sistema.secreto(auth.secreto_env, env)
-        if auth.clave_publica_env:
-            return sistema.secreto(auth.clave_publica_env, env)
+        if auth.algoritmo == "HS256":
+            return self._registro.secreto(sistema.id, "auth_hs256")
+        if auth.clave_publica:
+            return auth.clave_publica
         assert auth.jwks_url
-        cliente = self._jwks.setdefault(sistema.id, PyJWKClient(auth.jwks_url, timeout=5))
+        cliente = self._cliente_jwks(sistema.id, auth.jwks_url)
         try:
-            return (await asyncio.to_thread(cliente.get_signing_key_from_jwt, token)).key
+            return await cliente.clave(token)
         except jwt.PyJWTError as e:
             log.warning("no se pudo obtener la clave JWKS de %s: %s", sistema.id, e)
             raise TokenInvalido("clave de firma no disponible") from e

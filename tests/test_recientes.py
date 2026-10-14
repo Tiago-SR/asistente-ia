@@ -10,8 +10,7 @@ from asistente.core.llm.base import LlamadaTool
 from asistente.core.llm.falso import LLMFalso, pide, texto
 from asistente.core.ports import ConsultaPrevia
 from asistente.sistemas.manifiesto import parsear_manifiesto
-from asistente.sistemas.registro import RegistroSistemas
-from conftest import entorno, entrada_sistema, escribir_registro
+from conftest import entorno, entrada_sistema, escribir_registro, registro_desde_yaml
 from test_agent import AuditoriaFalsa, ConectorFalso, LimitesFalsos, contexto
 from test_manifiesto import manifiesto, tool
 
@@ -185,7 +184,7 @@ async def test_si_el_historial_falla_el_turno_sigue():
 
 
 def test_registro_zona_y_interruptor(tmp_path):
-    r = RegistroSistemas(escribir_registro(tmp_path / "s.yaml", [
+    r = registro_desde_yaml(escribir_registro(tmp_path / "s.yaml", [
         entrada_sistema("a", zona_horaria=MONTEVIDEO, consultas_recientes=False),
         entrada_sistema("b"),
         entrada_sistema("c", zona_horaria="Mar/Inexistente"),

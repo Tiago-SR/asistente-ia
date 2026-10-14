@@ -1,6 +1,6 @@
 """Configuración del servicio por variables de entorno."""
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,9 +12,31 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     database_url: str = _env("ASISTENTE_DATABASE_URL")
-    sistemas_path: str = _env("ASISTENTE_SISTEMAS_PATH", "/config/sistemas.yaml")
+    # El registro de sistemas vive siempre en Postgres (secretos cifrados con ASISTENTE_CLAVES_MAESTRAS); el YAML
+    # solo se importa con `python -m asistente.sistemas.cli importar-yaml`. La variable ya no elige nada: se
+    # acepta ausente o `bd` (deprecada) y cualquier otro valor aborta el arranque, para que un `yaml` olvidado
+    # en el .env no deje el servicio sirviendo 0 sistemas en silencio.
+    registro: str = _env("ASISTENTE_REGISTRO", "bd")
+
+    @field_validator("registro")
+    @classmethod
+    def _registro_solo_bd(cls, v: str) -> str:
+        if v != "bd":
+            raise ValueError(
+                f"ASISTENTE_REGISTRO={v!r} ya no existe: el registro se lee de la BD. Importa el YAML con "
+                "`python -m asistente.sistemas.cli importar-yaml` y quita la variable (o ponla en `bd`)."
+            )
+        return v
     prompts_dir: str = _env("ASISTENTE_PROMPTS_DIR", "prompts")
     admin_token: str | None = _env("ASISTENTE_ADMIN_TOKEN", None)
+    # Panel: la cookie de sesión es `__Host-admin` (solo HTTPS). En dev sobre http://localhost poner
+    # ASISTENTE_ADMIN_COOKIE_SECURE=false (cookie `admin`). `ASISTENTE_ADMIN_ORIGENES` (coma) suma orígenes
+    # válidos para el chequeo CSRF además del host propio (p. ej. el dev server de Vite); vacío en prod.
+    admin_cookie_secure: bool = _env("ASISTENTE_ADMIN_COOKIE_SECURE", True)
+    admin_origenes: str = _env("ASISTENTE_ADMIN_ORIGENES", "")
+    # `Host` (coma, con puerto) con que se sirven /admin y /panel; además se rechazan las peticiones con cabeceras
+    # de proxy (X-Forwarded-*). En prod lo fija docker-compose.prod.yml (túnel ssh); vacío = sin restricción.
+    admin_hosts: str = _env("ASISTENTE_ADMIN_HOSTS", "")
     precios_path: str = _env("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml")
     log_level: str = _env("ASISTENTE_LOG_LEVEL", "INFO")
 
@@ -37,6 +59,12 @@ class Settings(BaseSettings):
 
     # Purga de retención: cada cuántos segundos (0 = desactivada).
     purga_intervalo_s: float = _env("ASISTENTE_PURGA_INTERVALO_S", 86400.0)
+    # Destinos internos a los que el servicio puede conectarse (nombres y/o redes CIDR, separados por coma):
+    # `mock-a,sistema-php,host.docker.internal,10.0.5.0/24`. Por defecto solo direcciones públicas. La URL global
+    # del LLM (LLM_BASE_URL) se permite sola. 169.254.0.0/16 (metadatos de nube), link-local y multicast nunca.
+    hosts_internos_permitidos: str = _env("ASISTENTE_HOSTS_INTERNOS_PERMITIDOS", "")
+    # Días que se guarda `admin_auditoria` (quién cambió qué en el panel). 0 = no se purga nunca.
+    admin_auditoria_dias: int = _env("ASISTENTE_ADMIN_AUDITORIA_DIAS", 365)
 
     # Acciones con confirmación (Fase 5): propuestas por usuario y hora.
     acciones_max_por_hora: int = _env("ASISTENTE_ACCIONES_MAX_POR_HORA", 20)

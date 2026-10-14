@@ -1,0 +1,173 @@
+// Cliente de /admin/api. La sesión viaja en una cookie HttpOnly; lo que no es GET lleva el token CSRF.
+export class ApiError extends Error {
+  status: number
+  code: string
+  data: Record<string, unknown>
+  constructor(status: number, code: string, data: Record<string, unknown>) {
+    super(code)
+    this.status = status
+    this.code = code
+    this.data = data
+  }
+}
+
+let csrf: string | null = null
+export const setCsrf = (valor: string | null) => {
+  csrf = valor
+}
+
+// La sesión caduca con la pantalla abierta: un 401 fuera del login lleva de vuelta a él (App lo registra).
+let alCaducar: (() => void) | null = null
+export const onSesionCaducada = (cb: (() => void) | null) => {
+  alCaducar = cb
+}
+
+export async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (csrf && method !== 'GET') headers['X-CSRF'] = csrf
+  const r = await fetch(`/admin/api${path}`, {
+    method,
+    credentials: 'same-origin',
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const data = await r.json().catch(() => ({}))
+  if (r.status === 401 && path !== '/login' && path !== '/yo') alCaducar?.()
+  if (!r.ok) throw new ApiError(r.status, String(data.error ?? 'error'), data)
+  return data as T
+}
+
+export type Yo = { email: string; rol: 'admin' | 'operador'; csrf: string | null }
+export type Config = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+export type Secreto = { configurado: boolean; huella?: string; actualizado_en?: string }
+export type Vista = {
+  id: string
+  version: number
+  config: Config
+  secretos: Record<string, Secreto>
+  tool_estado: Record<string, boolean>
+  activo: boolean
+  error: string | null
+  aviso?: string
+}
+export type Resumen = {
+  id: string
+  nombre: string
+  habilitado: boolean
+  activo: boolean
+  version: number
+  base_url: string
+  ultimo_error: string | null
+}
+export type EstadoManifiesto = { ok: boolean; error: string | null; tools_lectura: number }
+export type ToolVista = {
+  nombre: string
+  descripcion: string
+  efecto: string
+  accionable: boolean
+  destructiva: boolean
+  habilitada: boolean
+}
+export type Usuario = { id: string; email: string; rol: string; activo: boolean; bloqueado: boolean; ultimo_login: string | null }
+export type EventoAuditoria = {
+  id: number
+  fecha: string
+  actor: string
+  accion: string
+  objetivo: string | null
+  antes: Config | null
+  despues: Config | null
+  ip: string | null
+}
+
+const MENSAJES: Record<string, string> = {
+  credenciales_invalidas: 'Email o contraseña incorrectos.',
+  demasiados_intentos: 'Demasiados intentos. Espere unos minutos.',
+  permiso_insuficiente: 'Su rol no permite esta acción.',
+  version_obsoleta: 'Alguien cambió este sistema mientras lo editaba. Se recargó la versión actual.',
+  sistema_existente: 'Ya existe un sistema con ese id.',
+  sistema_inexistente: 'El sistema no existe.',
+  config_invalida: 'La configuración no es válida.',
+  base_url_requiere_token:
+    'Cambiar base_url exige cargar un token del manifiesto nuevo (o deshabilitar el sistema).',
+  faltan_secretos: 'Faltan secretos para habilitar el sistema.',
+  secreto_requerido: 'Un sistema habilitado necesita ese secreto; deshabilítelo primero.',
+  secreto_invalido: 'Secreto inválido: sin espacios en los extremos ni vacío.',
+  secreto_corto: 'El secreto HS256 debe tener al menos 32 bytes.',
+  secreto_no_aplica: 'Ese secreto no aplica al algoritmo de autenticación actual.',
+  sin_claves_maestras: 'El servidor no tiene ASISTENTE_CLAVES_MAESTRAS: no puede cifrar secretos.',
+  tool_no_accionable: 'Esa escritura no declara confirmación o es destructiva: no se puede habilitar.',
+  ultimo_admin: 'Debe quedar al menos un admin activo.',
+  auto_cambio: 'No puede quitarse a sí mismo el acceso de admin.',
+  usuario_invalido: 'Datos de usuario inválidos.',
+  destino_no_permitido:
+    'Ese destino no es público ni está permitido en el servidor (ASISTENTE_HOSTS_INTERNOS_PERMITIDOS).',
+  clave_actual_incorrecta: 'La contraseña actual no es correcta.',
+  csrf: 'La sesión no es válida para escribir. Vuelva a entrar.',
+  no_autorizado: 'La sesión caducó. Vuelva a entrar.',
+  rango_excedido: 'El rango pedido es demasiado largo para esta consulta.',
+  rango_invalido: 'La fecha inicial es posterior a la final.',
+  consulta_lenta: 'La consulta tardó demasiado. Pruebe con un rango menor o un solo sistema.',
+}
+
+export function mensaje(e: unknown): string {
+  if (!(e instanceof ApiError)) return 'No se pudo contactar con el servidor.'
+  const base = MENSAJES[e.code] ?? `Error: ${e.code}`
+  const detalle = e.data.detalle
+  const extra = Array.isArray(detalle)
+    ? ' ' + detalle.map((d: { campo: string; mensaje: string }) => `${d.campo}: ${d.mensaje}`).join('; ')
+    : typeof e.data.mensaje === 'string'
+      ? ' ' + e.data.mensaje
+      : Array.isArray(e.data.faltan)
+        ? ' (' + e.data.faltan.join(', ') + ')'
+        : ''
+  return base + extra
+}
+
+export type Cobertura = { resumido_hasta: string | null; crudos_desde: string | null; tools_desde: string | null }
+export type FilaSerie = {
+  dia: string
+  sistema_id: string
+  tipo: 'llm' | 'tts' | 'stt' | 'tool'
+  resultado: 'ok' | 'error' | 'limite'
+  fuente: 'resumen' | 'crudos'
+  n: number
+  usuarios: number | null
+  tokens_in: number
+  tokens_out: number
+  unidades: number
+  costo_valle_usd: number | null
+  costo_pico_usd: number | null
+  n_sin_tarifa: number
+  p50_ms: number | null
+  p95_ms: number | null
+}
+export type Cuota = { usados: number; limite: number; restante: number }
+export type FilaUsuario = {
+  sistema_id: string
+  usuario_ref: string
+  turnos: number
+  rechazos: number
+  errores: number
+  tokens: number
+  n_sin_tarifa: number
+  cuota_dia: Cuota | null
+}
+export type FilaTool = {
+  sistema_id: string
+  tool: string
+  n: number
+  errores: number
+  p50_ms: number | null
+  p95_ms: number | null
+  max_ms: number | null
+}
+export type RespSeries = { cobertura: Cobertura; filas: FilaSerie[] }
+export type RespUsuarios = {
+  cobertura: Cobertura
+  filas: FilaUsuario[]
+  cuota_mes: ({ sistema_id: string } & Cuota)[]
+  reinicia_dia: string
+}
+export type RespTools = { cobertura: Cobertura; filas: FilaTool[] }

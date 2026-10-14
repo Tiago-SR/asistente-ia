@@ -13,6 +13,8 @@ _PERMITE = {
     b"access-control-max-age": b"600",
 }
 
+_SIN_CORS = ("/admin", "/panel")  # "/admin" cubre /admin/api (startswith)
+
 
 class CorsSistemas:
     def __init__(self, app: ASGIApp) -> None:
@@ -28,6 +30,8 @@ class CorsSistemas:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         origen = Headers(scope=scope).get("origin")
+        if scope["path"].startswith(_SIN_CORS):  # el panel es mismo-origen; nunca abrirlo a los sistemas
+            return await self.app(scope, receive, send)
         if origen is None or origen not in self._permitidos(scope):
             return await self.app(scope, receive, send)
 

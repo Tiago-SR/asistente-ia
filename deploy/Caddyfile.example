@@ -2,8 +2,8 @@
 #  a) Caddy en el host:  asistente en 127.0.0.1:8000 (docker-compose.prod.yml) -> reverse_proxy 127.0.0.1:8000
 #  b) Caddy en otro stack de compose, red `web`: docker-compose.proxy-externo.yml -> reverse_proxy asistente:8000
 asistente.midominio.com {
-	# /admin y la documentación no se exponen. Operación por el host (127.0.0.1:8000) o ssh.
-	@cerrado path /admin* /docs* /openapi.json
+	# /admin, el panel (/panel) y la documentación no se exponen. Operación por túnel ssh (ver deploy/VPS.md §5).
+	@cerrado path /admin* /panel* /docs* /openapi.json
 	respond @cerrado 404
 
 	request_body {

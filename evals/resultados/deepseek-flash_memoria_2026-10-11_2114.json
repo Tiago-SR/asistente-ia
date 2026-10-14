@@ -1,0 +1,244 @@
+{
+ "modelo": "deepseek-flash",
+ "fecha": "2026-10-11T21:14:41+00:00",
+ "nota": "registro=bd, antes de eliminar modo YAML",
+ "resumen": {
+  "preguntas": 6,
+  "aciertos": 3,
+  "tasa_acierto": 0.5,
+  "por_categoria": {
+   "aislamiento": "1/1",
+   "ambigua": "0/1",
+   "repetir": "2/3",
+   "sin_registro": "0/1"
+  },
+  "cifras_no_respaldadas": 3,
+  "errores_servicio": 0,
+  "iteraciones_media": 2.83,
+  "latencia_s": {
+   "mediana": 3.78,
+   "p95": 6.54
+  },
+  "tokens_por_pregunta": {
+   "tokens_in": 18938,
+   "tokens_out": 401,
+   "tokens_in_cache": 17600
+  },
+  "cache_hit_pct": 92.9,
+  "costo_usd_por_pregunta": {
+   "valle": 0.000494,
+   "pico": 0.000988
+  }
+ },
+ "resultados": [
+  {
+   "id": "m01",
+   "categoria": "repetir",
+   "usuario": "ana",
+   "turnos": [
+    "Hacé lo mismo que la última vez que te consulté."
+   ],
+   "ok": false,
+   "fallos": [
+    "cifra no respaldada: 11"
+   ],
+   "respuesta": "Tu superficie por cultivo (hoy, 2026-10-11):\n\n| Cultivo | Superficie (ha) | Establecimientos |\n|---|---|---|\n| soja | 660,5 | 2 |\n| maíz | 210 | 1 |\n| **Total** | **870,5** | **3** |",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {
+    "primer_delta": 3518,
+    "total": 3759
+   },
+   "tools": [
+    "consultas_recientes",
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 3,
+   "latencia_s": 3.78,
+   "primer_token_s": 3.52,
+   "uso": {
+    "tokens_in": 19264,
+    "tokens_out": 277,
+    "tokens_in_cache": 18048
+   },
+   "costo_usd": {
+    "valle": 0.000402744,
+    "pico": 0.000805488
+   }
+  },
+  {
+   "id": "m02",
+   "categoria": "repetir",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí el resumen por cultivo que te pedí antes."
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "| Cultivo | Superficie (ha) | Establecimientos |\n|---|---|---|\n| soja | 660,5 | 2 |\n| maíz | 210 | 1 |\n| **Total** | **870,5** | **3** |",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {
+    "primer_delta": 3246,
+    "total": 3485
+   },
+   "tools": [
+    "consultas_recientes",
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 3,
+   "latencia_s": 3.5,
+   "primer_token_s": 3.25,
+   "uso": {
+    "tokens_in": 27071,
+    "tokens_out": 408,
+    "tokens_in_cache": 25344
+   },
+   "costo_usd": {
+    "valle": 0.000579882,
+    "pico": 0.001159764
+   }
+  },
+  {
+   "id": "m03",
+   "categoria": "repetir",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí la del listado de establecimientos."
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "Establecimientos:\n\n| id | Nombre | Superficie (ha) | Cultivo |\n|----|--------|-----------------|---------|\n| 1 | El Matorral | 540.5 | soja |\n| 2 | La Esperanza | 210 | maíz |\n| 4 | San Pedro | 120 | soja |",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {
+    "primer_delta": 3568,
+    "total": 3779
+   },
+   "tools": [
+    "consultas_recientes",
+    "listar_establecimientos"
+   ],
+   "propuestas": [],
+   "iteraciones": 3,
+   "latencia_s": 3.79,
+   "primer_token_s": 3.57,
+   "uso": {
+    "tokens_in": 19732,
+    "tokens_out": 308,
+    "tokens_in_cache": 18304
+   },
+   "costo_usd": {
+    "valle": 0.00045391199999999995,
+    "pico": 0.0009078239999999999
+   }
+  },
+  {
+   "id": "m04",
+   "categoria": "ambigua",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí una de las consultas que hice antes."
+   ],
+   "ok": false,
+   "fallos": [
+    "cifra no respaldada: 11"
+   ],
+   "respuesta": "Hay varias consultas anteriores y no sé a cuál te referís. ¿Cuál repito?\n\n- `resumen_por_cultivo` (sin filtros)\n- `listar_establecimientos` (sin filtros)\n- `resumen_establecimiento` id 2\n- `listar_establecimientos` texto «Esperanza», «Beto», «Los Ceibos», «norte», «Palmas», «Las Palmas» o «Matorral»\n\nTodas figuran con fecha 2026-10-11.",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {
+    "primer_delta": 2865,
+    "total": 3290
+   },
+   "tools": [
+    "consultas_recientes"
+   ],
+   "propuestas": [],
+   "iteraciones": 2,
+   "latencia_s": 3.3,
+   "primer_token_s": 2.87,
+   "uso": {
+    "tokens_in": 22721,
+    "tokens_out": 476,
+    "tokens_in_cache": 21248
+   },
+   "costo_usd": {
+    "valle": 0.0005702939999999998,
+    "pico": 0.0011405879999999997
+   }
+  },
+  {
+   "id": "m05",
+   "categoria": "sin_registro",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí la consulta de trigo que hice la semana pasada."
+   ],
+   "ok": false,
+   "fallos": [
+    "cifra no respaldada: 11"
+   ],
+   "respuesta": "No encuentro ninguna consulta sobre trigo la semana pasada. Lo único registrado en los últimos días son consultas de hoy (2026-10-11) y del 10-10: `resumen_por_cultivo`, listados de establecimientos, `resumen_establecimiento` (ids 1 y 2) y `listar_notas` (id 1). Ninguna corresponde a trigo.\n\n¿Querés que ejecute ahora el resumen por cultivo para ver las hectáreas de trigo?",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {
+    "primer_delta": 6215,
+    "total": 6529
+   },
+   "tools": [
+    "consultas_recientes",
+    "consultas_recientes"
+   ],
+   "propuestas": [],
+   "iteraciones": 3,
+   "latencia_s": 6.54,
+   "primer_token_s": 6.22,
+   "uso": {
+    "tokens_in": 13239,
+    "tokens_out": 761,
+    "tokens_in_cache": 11648
+   },
+   "costo_usd": {
+    "valle": 0.000730194,
+    "pico": 0.001460388
+   }
+  },
+  {
+   "id": "m06",
+   "categoria": "aislamiento",
+   "usuario": "beto",
+   "turnos": [
+    "Hacé lo mismo que la última vez que te consulté."
+   ],
+   "ok": true,
+   "fallos": [],
+   "respuesta": "Superficie total: **88,2 ha**, todas de **trigo** (1 establecimiento).",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {
+    "primer_delta": 3400,
+    "total": 3525
+   },
+   "tools": [
+    "consultas_recientes",
+    "resumen_por_cultivo"
+   ],
+   "propuestas": [],
+   "iteraciones": 3,
+   "latencia_s": 3.53,
+   "primer_token_s": 3.4,
+   "uso": {
+    "tokens_in": 11601,
+    "tokens_out": 174,
+    "tokens_in_cache": 11008
+   },
+   "costo_usd": {
+    "valle": 0.000226374,
+    "pico": 0.000452748
+   }
+  }
+ ]
+}

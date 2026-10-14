@@ -13,10 +13,9 @@ from sqlalchemy import select, update
 from asistente.core.memoria import MAX_RECUERDOS
 from asistente.core.ports import TopeMemoria
 from asistente.retencion import purgar_todos
-from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.memoria import MemoriaSql
 from asistente.store.models import MemoriaUsuario
-from conftest import entorno, entrada_sistema, escribir_registro
+from conftest import entorno, entrada_sistema, escribir_registro, registro_desde_yaml
 from test_api import sesiones, sub  # noqa: F401
 
 pytestmark = pytest.mark.skipif(
@@ -232,7 +231,7 @@ async def test_el_barrido_de_retencion_purga_la_memoria_de_un_sistema_con_la_mem
         mem, sesiones, tmp_path, ids):
     """Si un sistema deshabilita la memoria, sus filas se van al vencer (sin usarse no se renuevan)."""
     sistema, u = ids
-    registro = RegistroSistemas(escribir_registro(tmp_path / "s.yaml", [entrada_sistema(sistema)]),
+    registro = registro_desde_yaml(escribir_registro(tmp_path / "s.yaml", [entrada_sistema(sistema)]),
                                 env=entorno(sistema))
     assert registro.obtener(sistema).memoria_habilitada is False
     await mem.guardar(sistema, u, "preferencia", "decimales", 0)

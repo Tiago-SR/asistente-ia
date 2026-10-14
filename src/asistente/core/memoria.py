@@ -96,7 +96,7 @@ PARAMETROS_OLVIDAR = {
     "type": "object",
     "properties": {
         "tipo": {"enum": list(TIPOS)},
-        "clave": {"type": "string", "description": "La clave del recuerdo a olvidar, tal como figura en la lista."},
+        "clave": {"type": "string", "description": "La clave del recuerdo a olvidar, tal como aparece en la sección «Lo que el usuario pidió recordar»."},
     },
     "required": ["tipo", "clave"], "additionalProperties": False,
 }

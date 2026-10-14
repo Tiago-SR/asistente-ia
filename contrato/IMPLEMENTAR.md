@@ -32,7 +32,7 @@ Schemas: token → `token-respuesta` · manifiesto → `manifiesto` · ejecució
 ### 2.2 `GET /asistente/tools`
 - Exige `Authorization: Bearer <token_manifiesto>` (comparación en tiempo constante). Un JWT de usuario aquí es `401`.
 - Devuelve `{"contrato":"1","sistema":{"nombre","version"},"tools":[…]}`. Cada tool: `nombre` (`^[a-z][a-z0-9_]{0,63}$`), `descripcion` (≤ 1000), `parametros` (JSON Schema `type: object`, con `additionalProperties: false`), `efecto` (`lectura` | `escritura`), `timeout_s` opcional.
-- Máximo 40 tools. Nombres prohibidos: `consultas_recientes`, `recordar`, `olvidar`.
+- Máximo 40 tools. Nombres prohibidos: `consultas_recientes`, `recordar`, `olvidar`, `buscar_web`, `leer_pagina`.
 - **Las descripciones deciden la calidad del asistente.** Lee [`GUIA_TOOLS.md`](GUIA_TOOLS.md) antes de escribirlas: pocas tools, de alto nivel, que devuelvan datos agregados con unidades en el nombre del campo.
 
 ### 2.3 `POST /asistente/tools/{nombre}`
@@ -127,7 +127,7 @@ Sale con código `0` si todo cumple. Sin `--accion` se omiten las pruebas de esc
 
 ## 7. Implementaciones de referencia (copia y adapta)
 
-- PHP + SQLite, con lectura y escrituras: `ejemplos/sistema-php/` — `Controllers/AsistenteController.php` (todos los endpoints), `Auth/EmisorToken.php` y `ValidadorToken.php` (JWT), `Datos/Almacen.php` (propuestas, `jti`, idempotencia), `Tools/` (una clase por tool; `AgregarNota`, `ModificarNota`).
+- PHP + SQLite, con lectura y escrituras: `ejemplos/sistema-php/` — `src/Controllers/AsistenteController.php` (todos los endpoints), `src/Auth/EmisorToken.php` y `ValidadorToken.php` (JWT), `src/Datos/Almacen.php` (propuestas, `jti`, idempotencia), `src/Tools/` (una clase por tool; `AgregarNota`, `ModificarNota`).
 - Python/FastAPI mock: `ejemplos/sistema-mock/app.py` (huella en `_huella`, token de escritura en la ruta de token). Contiene defectos deliberados para probar el verificador; no copiar sus `DEFECTOS`.
 - Pruebas que documentan cada regla: `ejemplos/sistema-php/tests/ContratoTest.php`, `tests/test_mock_acciones.py`.
 

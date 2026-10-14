@@ -135,7 +135,7 @@ async def chat(
             res = await run_turn(ctx, llm, conector, svc.auditoria, svc.limites, historial,
                                  texto, filtrado, conv_id, config, acciones=svc.acciones,
                                  recientes=svc.recientes if sistema.consultas_recientes else None,
-                                 memoria=memoria, adjuntos=adjuntos, web=web)
+                                 memoria=memoria, adjuntos=adjuntos, web=web, metricas=svc.metricas)
             if res.completo:
                 try:
                     # la imagen no se guarda: queda la marca y la metadata (ver core/adjuntos.py)

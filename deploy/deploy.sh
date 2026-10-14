@@ -11,6 +11,11 @@ cd "$(dirname "$0")/.."
 COMPOSE_FILES=${COMPOSE_FILES:--f docker-compose.yml -f docker-compose.prod.yml}
 export COMPOSE_FILES
 [ -f .env ] || { echo "Falta .env (cp .env.example .env y completarlo)"; exit 1; }
+# El modo YAML ya no existe: con ASISTENTE_REGISTRO=yaml el contenedor no arranca (bucle de reinicio).
+modo_registro=$(sed -n 's/^ASISTENTE_REGISTRO=//p' .env | tail -1 | tr -d "\"' ")
+[ -z "$modo_registro" ] || [ "$modo_registro" = bd ] || {
+  echo "ASISTENTE_REGISTRO=$modo_registro en .env: el modo YAML se eliminó. Importa el YAML a la BD"
+  echo "(deploy/VPS.md, «Migrar desde el modo YAML») y pon ASISTENTE_REGISTRO=bd o quítala."; exit 1; }
 [ -f config/sistemas.yaml ] || { echo "Falta config/sistemas.yaml (cp config/sistemas.example.yaml config/sistemas.yaml)"; exit 1; }
 dc() { docker compose $COMPOSE_FILES "$@"; }
 

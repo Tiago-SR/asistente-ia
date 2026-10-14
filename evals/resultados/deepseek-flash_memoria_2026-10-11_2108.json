@@ -1,0 +1,236 @@
+{
+ "modelo": "deepseek-flash",
+ "fecha": "2026-10-11T21:08:18+00:00",
+ "nota": "registro=bd, antes de eliminar modo YAML",
+ "resumen": {
+  "preguntas": 6,
+  "aciertos": 0,
+  "tasa_acierto": 0.0,
+  "por_categoria": {
+   "aislamiento": "0/1",
+   "ambigua": "0/1",
+   "repetir": "0/3",
+   "sin_registro": "0/1"
+  },
+  "cifras_no_respaldadas": 0,
+  "errores_servicio": 6,
+  "iteraciones_media": 1,
+  "latencia_s": {
+   "mediana": 0.0,
+   "p95": 0.0
+  },
+  "tokens_por_pregunta": {
+   "tokens_in": 0,
+   "tokens_out": 0,
+   "tokens_in_cache": 0
+  },
+  "cache_hit_pct": 0,
+  "costo_usd_por_pregunta": {
+   "valle": 0.0,
+   "pico": 0.0
+  }
+ },
+ "resultados": [
+  {
+   "id": "m01",
+   "categoria": "repetir",
+   "usuario": "ana",
+   "turnos": [
+    "Hacé lo mismo que la última vez que te consulté."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool consultas_recientes",
+    "no llamó a la tool resumen_por_cultivo",
+    "falta la cifra 660.5"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "m02",
+   "categoria": "repetir",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí el resumen por cultivo que te pedí antes."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool consultas_recientes",
+    "no llamó a la tool resumen_por_cultivo",
+    "falta la cifra 660.5",
+    "falta la cifra 210",
+    "falta la cifra 870.5"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "m03",
+   "categoria": "repetir",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí la del listado de establecimientos."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool consultas_recientes",
+    "no llamó a la tool listar_establecimientos",
+    "no menciona ninguno de ['El Matorral']",
+    "no menciona ninguno de ['San Pedro']"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "m04",
+   "categoria": "ambigua",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí una de las consultas que hice antes."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no llamó a la tool consultas_recientes",
+    "no menciona ninguno de ['cual', 'cuales', '?']"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "m05",
+   "categoria": "sin_registro",
+   "usuario": "ana",
+   "turnos": [
+    "Repetí la consulta de trigo que hice la semana pasada."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía",
+    "no menciona ninguno de ['no encuentro', 'no tengo', 'no hay', 'no figura', 'no registr', 'ninguna', 'no veo', 'no aparece', 'no existe', 'no cuento']"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  },
+  {
+   "id": "m06",
+   "categoria": "aislamiento",
+   "usuario": "beto",
+   "turnos": [
+    "Hacé lo mismo que la última vez que te consulté."
+   ],
+   "ok": false,
+   "fallos": [
+    "error del servicio: http_401",
+    "respuesta vacía"
+   ],
+   "respuesta": "",
+   "voz": null,
+   "voz_s": null,
+   "tiempos_ms": {},
+   "tools": [],
+   "propuestas": [],
+   "iteraciones": 1,
+   "latencia_s": 0.0,
+   "primer_token_s": null,
+   "uso": {
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_in_cache": 0
+   },
+   "costo_usd": {
+    "valle": 0.0,
+    "pico": 0.0
+   }
+  }
+ ]
+}

@@ -11,3 +11,7 @@ __pycache__/
 tests_e2e/voz.wav
 .claude/worktrees/
 .claude/settings.local.json
+panel/node_modules/
+panel/dist/
+panel/*.tsbuildinfo
+src/asistente/static/panel/

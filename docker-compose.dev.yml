@@ -11,6 +11,9 @@ services:
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: DEBUG
       ASISTENTE_DOCS: "1"   # /docs y /openapi.json
+      # Destinos internos a los que el servicio puede conectarse (anti-SSRF, core/red.py): los sistemas de ejemplo,
+      # el host (stmgis, LLM local) y los servicios de apoyo. Fuera de esta lista solo se llega a IPs públicas.
+      ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-mock-a,sistema-php,host.docker.internal,searxng,whisper}
       # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
       # Búsqueda web: el SearXNG del perfil `busqueda` (si no está arriba, la búsqueda responde «no disponible»).
@@ -31,6 +34,26 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Panel de administración con HMR: http://localhost:5173/panel/  (perfil `panel`, no arranca por defecto)
+  #   docker compose -f docker-compose.dev.yml --profile panel up panel
+  # Para escribir sistemas hace falta ASISTENTE_CLAVES_MAESTRAS en .env. Si el navegador
+  # rechaza la cookie `__Host-admin` por http, poner ASISTENTE_ADMIN_COOKIE_SECURE=false en .env (solo dev).
+  panel:
+    profiles: [panel]
+    image: node:22-alpine
+    working_dir: /panel
+    command: sh -c "npm ci && npm run dev"
+    environment:
+      PANEL_API: http://asistente:8000   # Vite reenvía /admin/api: el navegador ve un solo origen
+      PANEL_POLLING: "1"                 # el bind mount no siempre emite eventos de cambio
+    volumes:
+      - ./panel:/panel
+      - panel-node-modules:/panel/node_modules
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - asistente
 
   postgres:
     image: postgres:16-alpine
@@ -59,6 +82,7 @@ services:
       MOCK_NOMBRE: Mock A
       MOCK_SECRETO: secreto-mock-a-0123456789-0123456789
       MOCK_TOKEN_MANIFIESTO: manifiesto-mock-a
+      MOCK_XSS: ${MOCK_XSS:-}
     volumes:
       - ./ejemplos/sistema-mock:/mock:ro
     ports:
@@ -114,4 +138,5 @@ services:
 
 volumes:
   pgdata-dev:
+  panel-node-modules:
   whisper-cache:

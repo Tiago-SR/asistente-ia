@@ -5,6 +5,7 @@ el campo (sin envío automático). El audio no se guarda.
 `POST /v1/voz/sintetizar`: respuesta hablada con la voz del servidor (texto -> audio)."""
 
 import logging
+import time
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
@@ -12,13 +13,29 @@ from pydantic import BaseModel, ValidationError
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
-from asistente.core.ports import LimiteExcedido
+from asistente.core.ports import EventoMetrica, LimiteExcedido
 from asistente.core.voz.base import AudioInvalido, VozError
+from asistente.precios import clave_tts
 from asistente.servicios import Servicios
 from asistente.store.uso import sumar_uso_voz
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _medir(svc: Servicios, u, tipo: str, resultado: str, *, motivo: str = "", modelo: str = "", unidades: int = 0,
+           inicio: float | None = None) -> None:
+    """Una métrica por dictado o síntesis. Nunca lanza ni espera; sin texto ni audio, solo tamaños y tiempos."""
+    if svc.metricas is None:
+        return
+    try:
+        ms = int((time.monotonic() - inicio) * 1000) if inicio is not None else None
+        svc.metricas.registrar(EventoMetrica(
+            sistema_id=u.sistema_id, usuario_ref=u.usuario_ref, tipo=tipo, resultado=resultado, motivo=motivo,
+            modelo=modelo, canal="voz", unidades=unidades, duracion_ms=ms,
+        ))
+    except Exception:
+        log.warning("no se pudo registrar la métrica de voz", exc_info=True)
 
 TIPOS_PERMITIDOS = {"audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav"}
 
@@ -74,15 +91,20 @@ async def transcribir(
     try:
         await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_max_por_min)
     except LimiteExcedido as e:
+        _medir(svc, u, "stt", "limite", motivo=e.cual)
         raise ErrorApi(429, "limite_excedido") from e
 
+    inicio = time.monotonic()
     try:
         texto = await svc.stt.transcribir(audio, tipo_mime=tipo, idioma=idioma or u.locale)
     except AudioInvalido as e:
+        _medir(svc, u, "stt", "error", motivo="audio_invalido", unidades=len(audio), inicio=inicio)
         raise ErrorApi(422, "audio_invalido") from e
     except VozError as e:
         log.warning("STT falló para %s: %s", u.sistema_id, e)
+        _medir(svc, u, "stt", "error", motivo="voz_error", unidades=len(audio), inicio=inicio)
         raise ErrorApi(502, "voz_error") from e
+    _medir(svc, u, "stt", "ok", unidades=len(audio), inicio=inicio)
 
     # Solo metadatos: ni el audio ni el texto transcrito.
     log.info("dictado sistema=%s usuario=%s bytes=%d duracion_s=%s",
@@ -123,6 +145,7 @@ async def sintetizar(
     try:
         await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_tts_max_por_min, clave="tts")
     except LimiteExcedido as e:
+        _medir(svc, u, "tts", "limite", motivo=e.cual)
         raise ErrorApi(429, "limite_excedido") from e
 
     voz = svc.voces.resolver(cuerpo.voz)
@@ -130,7 +153,11 @@ async def sintetizar(
     idioma = cuerpo.idioma or u.locale
     cabeceras = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
 
+    inicio = time.monotonic()
+    clave = clave_tts(svc.tts.proveedor, svc.tts.modelo)  # es también la clave de tarifa en precios.yaml
+
     async def contar() -> None:
+        _medir(svc, u, "tts", "ok", modelo=clave, unidades=len(texto), inicio=inicio)
         if svc.sesiones is None:
             return
         try:   # el costo es contabilidad: si falla no se pierde el audio que el usuario ya pagó
@@ -146,6 +173,7 @@ async def sintetizar(
         except (VozError, StopAsyncIteration) as e:
             await flujo.aclose()
             log.warning("TTS falló para %s: %s", u.sistema_id, e or "audio vacío")
+            _medir(svc, u, "tts", "error", motivo="voz_error", modelo=clave, inicio=inicio)
             raise ErrorApi(502, "voz_error") from e
         await contar()
         log.info("síntesis (stream) sistema=%s usuario=%s caracteres=%d", u.sistema_id, u.usuario_ref, len(texto))
@@ -166,6 +194,7 @@ async def sintetizar(
         audio = await svc.tts.sintetizar(texto, idioma=idioma, voz_id=voz_id)
     except VozError as e:
         log.warning("TTS falló para %s: %s", u.sistema_id, e)
+        _medir(svc, u, "tts", "error", motivo="voz_error", modelo=clave, inicio=inicio)
         raise ErrorApi(502, "voz_error") from e
 
     await contar()

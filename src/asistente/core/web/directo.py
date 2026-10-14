@@ -23,6 +23,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
+from asistente.core.red import ip_publica as _ip_publica
 from asistente.core.web.base import NoSoportado, PaginaIlegible, PaginaWeb, UrlNoPermitida
 
 PUERTOS = {"http": 80, "https": 443}
@@ -32,12 +33,6 @@ _REDIRECCIONES = {301, 302, 303, 307, 308}
 UA = "Mozilla/5.0 (compatible; AsistenteLector/1.0)"
 
 Resolver = Callable[[str, int], Awaitable[list[str]]]
-
-
-def _ip_publica(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    return ip.is_global and not ip.is_multicast
 
 
 def validar_url(url: str) -> str:

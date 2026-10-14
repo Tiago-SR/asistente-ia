@@ -6,7 +6,7 @@ from asistente.sistemas.manifiesto import (
     ManifiestoInvalido,
     parsear_manifiesto,
 )
-from conftest import RAIZ
+from conftest import RAIZ, entorno, entrada_sistema, escribir_registro, registro_desde_yaml
 
 
 def tool(nombre="t", **cambios):
@@ -113,10 +113,12 @@ async def test_ttl_y_recarga(registro_dos, cliente_mocks):
         assert len(llamadas) == 3
 
 
-async def test_credencial_de_manifiesto_incorrecta(registro_dos, cliente_mocks, monkeypatch):
-    monkeypatch.setitem(registro_dos._env, "mock-a_MANIFEST", "otra-cosa")
+async def test_credencial_de_manifiesto_incorrecta(tmp_path, cliente_mocks):
+    env = {**entorno("mock-a", "mock-b"), "mock-a_MANIFEST": "otra-cosa"}
+    ruta = escribir_registro(tmp_path / "s.yaml", [entrada_sistema("mock-a"), entrada_sistema("mock-b")])
+    registro = registro_desde_yaml(ruta, env=env)  # el entorno se resuelve al cargar
     with pytest.raises(ManifiestoInvalido, match="401"):
-        await CacheManifiestos(registro_dos, cliente_mocks).obtener("mock-a")
+        await CacheManifiestos(registro, cliente_mocks).obtener("mock-a")
 
 
 async def test_manifiesto_invalido_conserva_el_anterior(registro_dos):
