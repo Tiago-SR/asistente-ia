@@ -54,7 +54,7 @@ Reglas de contenido: datos compactos (< 50 KB), cada cifra con unidad, entidad y
 
 ## 3. Etapa 2: escrituras con confirmación (opcional)
 
-Solo **agregar** y **modificar**. **Nunca borrar** (una tool `destructiva: true` no se ofrece). El asistente solo *propone*; el usuario confirma con un clic en pantalla; tú ejecutas con un token de escritura que solo tú puedes emitir.
+Agregar y modificar; borrar es opcional y más estricto (ver [8.6 del contrato](CONTRATO.md#86-tools-destructivas-borrar-anular)): `destructiva: true` con `confirmacion`, una entidad por llamada, `detalle` con el estado actual y aprobación expresa de un admin del panel. El asistente solo *propone*; el usuario confirma con un clic en pantalla; tú ejecutas con un token de escritura que solo tú puedes emitir.
 
 ```
 modelo → asistente ──(1) POST …/propuesta (token lectura)──────────────► SISTEMA  valida, NO escribe,
@@ -89,8 +89,14 @@ Es el mismo `POST /asistente/tools/{nombre}` con el token de escritura y la cabe
 3. `jti` **nunca visto**: regístralo de forma atómica (insert único). Repetido → `403`.
 4. Recupera la propuesta por `ph`; sus `parametros` deben ser **idénticos** a los recibidos y su `sub` el del token. Si difieren → `403`.
 5. Modificación: la versión actual del registro debe ser la de la propuesta; si cambió → `200 {"ok":false,"error":"conflicto"}`, sin escribir.
-6. Escribe (en una sola transacción junto con el registro de `jti` e idempotencia), a nombre del `sub`.
+6. Escribe (en una sola transacción junto con el registro de `jti`, la idempotencia y el **consumo de la propuesta**: bórrala o márcala usada), a nombre del `sub`. Sin consumo, otro token con otro `cid` sobre la misma huella duplicaría el alta.
 7. Responde `{"ok":true,"datos":{"mensaje":"Nota agregada."},"fuente":"…","ui":[…]}`. `datos.mensaje` (≤ 300) lo muestra la tarjeta.
+
+**Varias propuestas a la vez.** El asistente puede dejar hasta 3 propuestas vigentes por usuario en un turno (más las de turnos previos hasta que venzan), cada una con su tarjeta, y el usuario las confirma de a una:
+- Guarda las propuestas **por huella**, nunca «la última de la sesión». Proponer de nuevo la misma huella renueva `expira` (upsert), sin error. La huella es determinista y sin nonce: el asistente descarta duplicados por huella dentro de un turno.
+- Emite un token de escritura por cada `token-url?confirmacion=…&huella=…`, sin caché por sesión ni límite de frecuencia que corte 3 seguidas.
+- La `Idempotency-Key` es independiente entre confirmaciones.
+- Dos modificaciones del mismo registro en un turno guardan la misma `version`: la segunda responde `conflicto` y no pisa la primera.
 
 Y siempre: un token de escritura en una **lectura** → `403`; un token de lectura en una escritura → `403`; token de escritura para otra tool → `403`. El asistente nunca reintenta una ejecución.
 

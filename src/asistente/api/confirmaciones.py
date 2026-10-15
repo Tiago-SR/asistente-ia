@@ -35,6 +35,8 @@ def _acciones(svc: Servicios):
 def vista_accion(a: Accion) -> dict:
     vista = {"id": str(a.id), "tool": a.tool, "estado": a.estado, "resumen": a.resumen,
              "lineas": list(a.lineas or []), "huella": a.huella, "expira": a.expira.isoformat()}
+    if a.destructiva:
+        vista["destructiva"] = True
     if a.tool in memorias.NOMBRES:
         vista["local"] = True  # se confirma con la sesión normal (`confirmar-local`), sin token del anfitrión
     return vista

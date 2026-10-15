@@ -104,7 +104,7 @@ PROPUESTAS: dict[str, dict] = {}   # huella → propuesta vigente emitida por es
 JTI_USADOS: set[str] = set()       # tokens de escritura ya gastados (un solo uso)
 IDEMPOTENCIA: dict[str, dict] = {} # Idempotency-Key → (sub, respuesta)
 TTL_PROPUESTA_S = 120
-ESCRITURAS = ("agregar_nota", "modificar_nota")
+ESCRITURAS = ("agregar_nota", "modificar_nota", "borrar_nota")
 
 MANIFIESTO = {
     "contrato": "1",
@@ -187,6 +187,24 @@ MANIFIESTO = {
                 "additionalProperties": False,
             },
             "efecto": "escritura",
+            "confirmacion": {"ttl_s": TTL_PROPUESTA_S},
+            "timeout_s": 15,
+        },
+        {
+            # Destructiva: el asistente solo la ofrece si un admin la aprobó en el panel (atada a esta definición).
+            "nombre": "borrar_nota",
+            "descripcion": (
+                "Borra una nota existente del usuario. No se puede deshacer. Obtener antes el id con "
+                "listar_notas; una nota por vez."
+            ),
+            "parametros": {
+                "type": "object",
+                "properties": {"nota_id": {"type": "string", "description": "id de la nota"}},
+                "required": ["nota_id"],
+                "additionalProperties": False,
+            },
+            "efecto": "escritura",
+            "destructiva": True,
             "confirmacion": {"ttl_s": TTL_PROPUESTA_S},
             "timeout_s": 15,
         },
@@ -355,6 +373,9 @@ def _preparar_escritura(sub: str, nombre: str, p: dict):
         return _error("no_encontrado", "No existe o no tenés acceso"), None, None, None
     est = next((e for e in DATOS.get(sub, []) if e["id"] == nota["establecimiento_id"]), None)
     donde = f" del establecimiento «{est['nombre']}»" if est else ""
+    if nombre == "borrar_nota":
+        # El detalle es el estado actual de lo que se borra: sin él el usuario confirmaría a ciegas.
+        return (None, f"Borrar la nota {nota['id']}{donde}", [f"Texto: {nota['texto']}"], nota["version"])
     return (None, f"Modificar la nota {nota['id']}{donde}",
             [f"Antes: {nota['texto']}", f"Después: {p['texto']}"], nota["version"])
 
@@ -368,6 +389,9 @@ def _aplicar(sub: str, nombre: str, p: dict) -> dict:
                    [{"tipo": "navegar", "url": f"/establecimientos/{p['establecimiento_id']}",
                      "etiqueta": "Ver establecimiento"}])
     nota = next(n for n in NOTAS[sub] if n["id"] == p["nota_id"])
+    if nombre == "borrar_nota":
+        NOTAS[sub].remove(nota)
+        return _ok({"mensaje": "Nota borrada.", "nota_id": nota["id"]}, "notas")
     nota["texto"], nota["version"] = p["texto"], nota["version"] + 1
     return _ok({"mensaje": "Nota modificada.", "nota": nota}, "notas")
 

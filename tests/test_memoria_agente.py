@@ -29,7 +29,7 @@ class AccionesFalsas:
     def __init__(self):
         self.creadas = []
 
-    async def crear(self, ctx, conv, tool, parametros, propuesta):
+    async def crear(self, ctx, conv, tool, parametros, propuesta, *, destructiva=False, inicio_turno=None):
         self.creadas.append((ctx.usuario_ref, tool, parametros, propuesta))
         return AccionCreada("accion-1", "2026-10-06T12:00:00+00:00")
 

@@ -109,7 +109,8 @@ async def chat(
     ctx = Contexto(
         sistema_id=u.sistema_id, sistema_nombre=sistema.nombre, usuario_ref=u.usuario_ref,
         jti=u.jti, request_id=request_id, modelo=modelo, prompt_system=prompt, prompt_version=version,
-        limites=LimitesUso(lim.mensajes_por_usuario_min, lim.mensajes_por_usuario_dia, lim.tokens_por_mes),
+        limites=LimitesUso(lim.mensajes_por_usuario_min, lim.mensajes_por_usuario_dia, lim.tokens_por_mes,
+                           lim.destructivas_por_usuario_hora),
         zona_horaria=zona_usuario, retencion_dias=sistema.retencion_dias, locale=u.locale,
     )
     historial = [] if nueva else await svc.repo.historial(

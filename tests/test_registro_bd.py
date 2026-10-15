@@ -215,3 +215,32 @@ async def test_acciones_habilitadas_pasan_a_tool_estado(sesiones, yaml_dos):
 def test_entradas_desde_yaml_no_expone_secretos_en_repr(yaml_dos):
     ruta, env = yaml_dos
     assert not any(v in repr(entradas_desde_yaml(ruta, env)) for v in env.values())
+
+
+DESTRUCTIVA = Tool("borrar_nota", "d", {}, "escritura", confirmacion_ttl_s=120, destructiva=True)
+
+
+async def test_el_yaml_no_enciende_una_destructiva_ni_puede_aprobarla(sesiones, tmp_path):
+    ruta = escribir_registro(tmp_path / "s.yaml", [
+        entrada_sistema("a", acciones_habilitadas=["borrar_nota"], tool_estado={"borrar_nota": True})])
+    await registro_bd.importar_yaml(sesiones, K1, ruta, entorno("a"))
+    r, _ = await _registro(sesiones)
+    assert r.obtener("a").tool_estado["borrar_nota"] is True
+    assert r.obtener("a").destructivas_aprobadas == {}
+    assert tool_permitida(r.obtener("a"), DESTRUCTIVA) is False
+
+    mala = escribir_registro(tmp_path / "m.yaml", [
+        entrada_sistema("a", destructivas_aprobadas={"borrar_nota": DESTRUCTIVA.huella})])
+    with pytest.raises(ErrorRegistro, match="destructivas_aprobadas"):
+        await registro_bd.importar_yaml(sesiones, K1, mala, entorno("a"), reemplazar=True)
+
+
+async def test_la_aprobacion_de_la_bd_vale_y_el_export_no_la_incluye(sesiones, tmp_path):
+    ruta = escribir_registro(tmp_path / "s.yaml", [entrada_sistema("a")])
+    await registro_bd.importar_yaml(sesiones, K1, ruta, entorno("a"))
+    async with sesiones() as s, s.begin():
+        s.add(ToolEstado(sistema_id="a", tool="borrar_nota", habilitada=True, aprobada_huella=DESTRUCTIVA.huella))
+    r, _ = await _registro(sesiones)
+    assert tool_permitida(r.obtener("a"), DESTRUCTIVA) is True
+    texto = yaml.safe_dump(await registro_bd.exportar_yaml(sesiones))
+    assert "destructivas_aprobadas" not in texto and DESTRUCTIVA.huella not in texto

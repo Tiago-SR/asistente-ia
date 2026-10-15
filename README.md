@@ -11,7 +11,7 @@ Principios del MVP:
 - Cifras siempre trazables a una tool (nada inventado).
 - Proveedor de LLM intercambiable (formato neutro + adaptadores).
 
-> Estado: Fases 0, 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools, referencia PHP, kit de despliegue) y la voz del navegador con el modo voz del widget (antes «manos libres»: ventana propia con resumen hablado). La Fase 5 (acciones con confirmación: agregar y modificar, nunca borrar) está implementada en el servicio, el mock, el widget y la referencia PHP. Falta el despliegue en el VPS (en espera); ver [Estado y pendientes](#estado-y-pendientes).
+> Estado: Fases 0, 1 y 2 completas (asistente de texto de solo lectura, widget, verificador, guía de tools, referencia PHP, kit de despliegue) y la voz del navegador con el modo voz del widget (antes «manos libres»: ventana propia con resumen hablado). La Fase 5 (acciones con confirmación: agregar y modificar; borrar solo como tool destructiva aprobada por un admin del panel) está implementada en el servicio, el mock, el widget y la referencia PHP. Falta el despliegue en el VPS (en espera); ver [Estado y pendientes](#estado-y-pendientes).
 
 ## Stack
 

@@ -165,12 +165,24 @@ async def test_una_escritura_sin_declarar_confirmacion_no_se_ofrece(construir_ap
 # --- una por turno, reemplazo y límite -----------------------------------------------------------
 
 
-async def test_dos_escrituras_en_un_turno_solo_proponen_la_primera(acc, llm, ana):
-    llm.usar(pide(agregar(id_="c1"), agregar("otra", id_="c2")), texto("Una a la vez."))
-    ev = sse(await chatear(acc, "dos notas", usuario=ana))
+async def test_varias_escrituras_en_un_turno_proponen_una_tarjeta_cada_una(acc, llm, ana, sesiones):
+    llm.usar(pide(agregar("a", id_="c1"), agregar("b", id_="c2"), agregar("c", id_="c3"),
+                  agregar("d", id_="c4")), texto("Listo."))
+    ev = sse(await chatear(acc, "cuatro notas", usuario=ana))
+    assert [e for e, _ in ev].count("confirmacion") == 3
+    msgs = [json.loads(m.texto) for m in llm.actual.llamadas[1].messages if m.rol == "tool"]
+    assert [m.get("error") for m in msgs] == [None, None, None, "tope_propuestas_turno"]
+    conv = ev[-1][1]["conversacion_id"]
+    r = await acc.get(f"/v1/conversaciones/{conv}", headers=auth(usuario=ana))
+    assert len(r.json()["pendientes"]) == 3 and r.json()["pendiente"] == r.json()["pendientes"][-1]
+
+
+async def test_la_misma_propuesta_dos_veces_en_el_turno_se_rechaza(acc, llm, ana):
+    llm.usar(pide(agregar("igual", id_="c1"), agregar("igual", id_="c2")), texto("Listo."))
+    ev = sse(await chatear(acc, "dos iguales", usuario=ana))
     assert [e for e, _ in ev].count("confirmacion") == 1
-    msgs = [m for m in llm.actual.llamadas[1].messages if m.rol == "tool"]
-    assert json.loads(msgs[1].texto)["error"] == "una_accion_a_la_vez"
+    msgs = [json.loads(m.texto) for m in llm.actual.llamadas[1].messages if m.rol == "tool"]
+    assert msgs[1]["error"] == "propuesta_duplicada"
 
 
 async def test_una_propuesta_nueva_reemplaza_a_la_pendiente(acc, llm, ana, cliente_mocks, sesiones):

@@ -28,7 +28,7 @@ from asistente.core.red import resolver_dns
 from asistente.servicios import Servicios, reglas_red
 from asistente.sistemas import escritura
 from asistente.sistemas.escritura import ErrorEscritura
-from asistente.sistemas.manifiesto import ManifiestoInvalido
+from asistente.sistemas.manifiesto import NOMBRE_DESTRUCTIVO_RE, ManifiestoInvalido
 from asistente.sistemas.permisos import tool_permitida
 from asistente.store.admin import DURACION_MAX, AdminSql, ErrorAdmin, SesionAdmin
 from asistente.store.lectura_metricas import (
@@ -182,6 +182,7 @@ class _Secreto(BaseModel):
 class _EstadoTool(BaseModel):
     model_config = ConfigDict(extra="forbid")
     habilitada: bool
+    confirmo_nombre: str | None = Field(default=None, max_length=128)  # obligatorio para encender una destructiva
 
 
 class _UsuarioNuevo(BaseModel):
@@ -529,13 +530,17 @@ async def tools(sistema_id: str, request: Request, refrescar: bool = False,
     except ErrorEscritura as e:
         raise _fallo(e) from None
     excepciones: dict[str, bool] = vista["tool_estado"]
+    aprobadas = await escritura.aprobaciones(svc.sesiones, sistema_id)
     activo = svc.registro.obtener(sistema_id)
-    salida: dict = {"manifiesto_ok": False, "error": None, "tools": [], "huerfanas": []}
+    limite = (vista["config"].get("limites") or {}).get("destructivas_por_usuario_hora", 5)
+    salida: dict = {"manifiesto_ok": False, "error": None, "tools": [], "huerfanas": [],
+                    "destructivas_hora": {**await escritura.destructivas_hora(svc.sesiones, sistema_id),
+                                          "limite": limite}}
     conocidas: set[str] = set()
     if activo is None:
         salida["error"] = svc.registro.errores.get(sistema_id) or "sistema_deshabilitado"
     else:
-        activo = activo.model_copy(update={"tool_estado": excepciones})
+        activo = activo.model_copy(update={"tool_estado": excepciones, "destructivas_aprobadas": aprobadas})
         try:
             m = await (svc.manifiestos.recargar(sistema_id) if refrescar else svc.manifiestos.obtener(sistema_id))
             salida["manifiesto_ok"] = True
@@ -544,7 +549,10 @@ async def tools(sistema_id: str, request: Request, refrescar: bool = False,
                 salida["tools"].append({
                     "nombre": t.nombre, "descripcion": t.descripcion, "efecto": t.efecto,
                     "accionable": t.efecto == "lectura" or t.accionable, "destructiva": t.destructiva,
-                    "habilitada": tool_permitida(activo, t), "excepcion": excepciones.get(t.nombre)})
+                    "habilitada": tool_permitida(activo, t), "excepcion": excepciones.get(t.nombre),
+                    # vigente: coincide con la definición actual; obsoleta: el sistema la cambió y requiere reaprobación
+                    "aprobacion": None if t.nombre not in aprobadas
+                    else ("vigente" if aprobadas[t.nombre] == t.huella else "obsoleta")})
         except ManifiestoInvalido as e:
             salida["error"] = str(e)
     salida["huerfanas"] = [{"nombre": n, "habilitada": v} for n, v in excepciones.items() if n not in conocidas]
@@ -557,6 +565,7 @@ async def fijar_tool(sistema_id: str, tool: str, datos: _EstadoTool, request: Re
     a = request.state.actor
     assert svc.sesiones is not None
     defecto = False  # tool desconocida (aún no está en el manifiesto): se trata como escritura
+    t = None
     if svc.registro.obtener(sistema_id) is not None:
         try:
             t = (await svc.manifiestos.obtener(sistema_id)).tools.get(tool)
@@ -566,9 +575,20 @@ async def fijar_tool(sistema_id: str, tool: str, datos: _EstadoTool, request: Re
             if datos.habilitada and t.efecto == "escritura" and not t.accionable:
                 raise ErrorApi(409, "tool_no_accionable")
             defecto = _defecto(t.efecto)
+    destructiva = t.destructiva if t is not None else bool(NOMBRE_DESTRUCTIVO_RE.search(tool))
+    huella = None
+    if datos.habilitada and destructiva:
+        # Encender una destructiva es una decisión explícita de un admin sobre la definición que ve ahora.
+        if t is None:
+            raise ErrorApi(409, "manifiesto_requerido")
+        if a.rol != "admin":
+            raise ErrorApi(403, "permiso_insuficiente")
+        if datos.confirmo_nombre != tool:
+            raise ErrorApi(422, "confirmacion_nombre")
+        huella = t.huella
     try:
         estado = await escritura.fijar_tool(svc.sesiones, sistema_id, tool, datos.habilitada, defecto,
-                                            por=a.nombre, ip=_ip(request))
+                                            huella=huella, por=a.nombre, ip=_ip(request))
     except ErrorEscritura as e:
         raise _fallo(e) from None
     return await _tras_escribir(svc, {"tool_estado": estado})

@@ -1,9 +1,10 @@
 """Descarga, validación y cache del manifiesto de tools (sección 2 del contrato)."""
 
+import hashlib
+import json
 import logging
 import re
 import time
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import httpx
@@ -23,6 +24,8 @@ MAX_BYTES_MANIFIESTO = 256 * 1024
 MAX_DESCRIPCION = 1000
 MAX_TTL_CONFIRMACION_S = 300
 NOMBRE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+# No se fía de la declaración: un nombre así cuenta como destructiva aunque el sistema no lo diga.
+NOMBRE_DESTRUCTIVO_RE = re.compile(r"(^|_)(borrar|eliminar|delete|remove|baja|anular|purgar|vaciar)")
 
 
 class ManifiestoInvalido(Exception):
@@ -42,9 +45,19 @@ class Tool:
 
     @property
     def accionable(self) -> bool:
-        """Escritura que se puede ofrecer al modelo: soporta confirmación y no es destructiva
-        (el borrado no se admite en esta fase)."""
-        return self.efecto == "escritura" and self.confirmacion_ttl_s is not None and not self.destructiva
+        """Escritura que se puede ofrecer al modelo: soporta el flujo de confirmación. Las destructivas
+        además necesitan la aprobación atada a `huella` (ver `permisos.tool_permitida`)."""
+        return self.efecto == "escritura" and self.confirmacion_ttl_s is not None
+
+    @property
+    def huella(self) -> str:
+        """Identidad de la definición: si el sistema cliente la cambia, la aprobación deja de valer."""
+        canon = json.dumps(
+            {"nombre": self.nombre, "descripcion": self.descripcion, "parametros": self.parametros,
+             "efecto": self.efecto, "confirmacion_ttl_s": self.confirmacion_ttl_s},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        return hashlib.sha256(canon.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -56,11 +69,6 @@ class Manifiesto:
     def tools_lectura(self) -> list[Tool]:
         """Lo único que se expone al modelo en el MVP."""
         return [t for t in self.tools.values() if t.efecto == "lectura"]
-
-    def tools_accion(self, habilitadas: Iterable[str]) -> list[Tool]:
-        """Escrituras que el operador habilitó para este sistema (`acciones_habilitadas`)."""
-        permitidas = set(habilitadas)
-        return [t for t in self.tools.values() if t.accionable and t.nombre in permitidas]
 
 
 def parsear_manifiesto(crudo: object) -> Manifiesto:
@@ -145,6 +153,11 @@ def _parsear_tool(t: object) -> Tool:
     destructiva = t.get("destructiva", False)
     if not isinstance(destructiva, bool):
         raise ManifiestoInvalido(f"{nombre}: `destructiva` debe ser booleano")
+    destructiva = destructiva or bool(NOMBRE_DESTRUCTIVO_RE.search(nombre))
+    if efecto == "escritura" and any(
+        isinstance(p, dict) and p.get("type") == "array" for p in (params.get("properties") or {}).values()
+    ):
+        raise ManifiestoInvalido(f"{nombre}: una escritura opera sobre una entidad; sin parámetros array")
     return Tool(nombre, desc, params, efecto, float(timeout) if timeout is not None else None,
                 ttl, destructiva)
 

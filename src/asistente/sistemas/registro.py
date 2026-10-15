@@ -124,6 +124,8 @@ class LimitesConfig(_Modelo):
     mensajes_por_usuario_min: int = Field(default=10, gt=0)
     mensajes_por_usuario_dia: int = Field(default=200, gt=0)
     tokens_por_mes: int = Field(default=5_000_000, gt=0)
+    # Propuestas de tools destructivas por usuario y hora (aparte del tope general de acciones). 0 las bloquea.
+    destructivas_por_usuario_hora: int = Field(default=5, ge=0, le=1000)
 
 
 class Sistema(_Modelo):
@@ -146,6 +148,9 @@ class Sistema(_Modelo):
     # está habilitada salvo que aquí diga `false`; la escritura, deshabilitada salvo `true` (o `acciones_habilitadas`).
     # Ver `sistemas/permisos.py`; es el hueco donde la tabla `tool_estado` entrega sus filas.
     tool_estado: dict[str, bool] = Field(default_factory=dict)
+    # Tools destructivas aprobadas desde el panel (nombre → huella de la definición aprobada). Solo la escribe
+    # `escritura.fijar_tool`; el YAML no puede traerla (ver `desde_yaml`). Ver `sistemas/permisos.py`.
+    destructivas_aprobadas: dict[str, str] = Field(default_factory=dict)
     # Zona (IANA, p. ej. `America/Montevideo`) de los usuarios cuyo navegador no la informa: fija qué día es «hoy».
     zona_horaria: str | None = None
     # Tool local `consultas_recientes` («lo mismo que ayer»): lee las consultas que ya se auditan, sin guardar nada nuevo.
@@ -212,6 +217,8 @@ def validar_sistema(config: Mapping, secretos: Mapping[str, str]) -> Sistema:
 def desde_yaml(entrada: Mapping, env: Mapping[str, str]) -> tuple[dict, dict[str, str]]:
     """Adaptador del YAML: traduce `*_env` a (config canónica, secretos). Las variables que faltan se
     reportan por nombre (nunca su valor)."""
+    if "destructivas_aprobadas" in entrada:
+        raise ValueError("destructivas_aprobadas solo se fija desde el panel, no desde el YAML")
     cfg = copy.deepcopy(dict(entrada))
     secretos: dict[str, str] = {}
     faltan: list[str] = []

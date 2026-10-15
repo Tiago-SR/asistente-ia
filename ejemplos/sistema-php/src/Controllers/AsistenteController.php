@@ -192,6 +192,7 @@ final class AsistenteController
         // Ojo en un sistema real: comprobar la versión y escribir en una sola sentencia
         // (UPDATE … WHERE version = ?), no en dos pasos como aquí.
         $resultado = $tool->ejecutar($parametros, $sub);
+        $this->almacen->consumirPropuesta($claims['ph']);
         $this->almacen->guardarResultado($clave, $sub, $nombre, $claims['ph'], $resultado);
         return Respuesta::json($resultado);
     }

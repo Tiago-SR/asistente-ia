@@ -136,7 +136,7 @@ class ConectorHttp:
         permitidas = [t for t in manifiesto.tools.values() if tool_permitida(sistema, t)]
         return [
             *(ToolDef(t.nombre, t.descripcion, t.parametros) for t in permitidas if t.efecto == "lectura"),
-            *(ToolDef(t.nombre, t.descripcion, t.parametros, escritura=True)
+            *(ToolDef(t.nombre, t.descripcion, t.parametros, escritura=True, destructiva=t.destructiva)
               for t in permitidas if t.efecto != "lectura"),
         ]
 

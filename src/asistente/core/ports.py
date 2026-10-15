@@ -38,6 +38,7 @@ class LimitesUso:
     mensajes_por_usuario_min: int
     mensajes_por_usuario_dia: int
     tokens_por_mes: int
+    destructivas_por_hora: int = 5
 
 
 @dataclass(frozen=True)
@@ -200,10 +201,13 @@ class Acciones(Protocol):
 
     async def crear(
         self, ctx: Contexto, conversacion_id: Any, tool: str, parametros: dict,
-        propuesta: ResultadoPropuesta,
+        propuesta: ResultadoPropuesta, *, destructiva: bool = False,
+        inicio_turno: datetime | None = None,
     ) -> AccionCreada:
-        """Guarda la propuesta; reemplaza la pendiente anterior de la conversación.
-        Lanza `LimiteExcedido("acciones_hora")` si el usuario propone demasiado."""
+        """Guarda la propuesta; reemplaza las pendientes de la conversación anteriores a `inicio_turno`
+        (todas, si no se indica). Lanza `LimiteExcedido("propuesta_duplicada")` si el turno ya propuso lo mismo.
+        Lanza `LimiteExcedido("acciones_hora")` si el usuario propone demasiado, o
+        `LimiteExcedido("destructivas_hora")` si supera su tope de destructivas."""
 
 
 class Auditoria(Protocol):

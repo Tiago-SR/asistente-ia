@@ -3,6 +3,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -34,7 +35,9 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
   const [nuevos, setNuevos] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
-  const [tools, setTools] = useState<{ manifiesto_ok: boolean; error: string | null; tools: ToolVista[]; huerfanas: { nombre: string; habilitada: boolean }[] } | null>(null)
+  const [tools, setTools] = useState<{ manifiesto_ok: boolean; error: string | null; tools: ToolVista[]; huerfanas: { nombre: string; habilitada: boolean }[]; destructivas_hora: { total: number; maximo_usuario: number; usuarios: number; limite: number } } | null>(null)
+  const [aprobar, setAprobar] = useState<ToolVista | null>(null)
+  const [nombreConf, setNombreConf] = useState('')
   const puede = yo.rol === 'admin'
 
   const cargarTools = useCallback(
@@ -155,6 +158,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
               {campo('limites.mensajes_por_usuario_min', 'Mensajes/usuario/min', 'number')}
               {campo('limites.mensajes_por_usuario_dia', 'Mensajes/usuario/día', 'number')}
               {campo('limites.tokens_por_mes', 'Tokens/mes', 'number')}
+              {campo('limites.destructivas_por_usuario_hora', 'Destructivas/usuario/hora (0 = bloqueadas)', 'number')}
             </div>
             {campo('retencion_dias', 'Retención (días)', 'number')}
             <div className="grid gap-2">
@@ -227,16 +231,30 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3">
+          {tools && (
+            <p className="text-sm text-muted-foreground">
+              Destructivas en la última hora: {tools.destructivas_hora.total} en total
+              ({tools.destructivas_hora.usuarios} usuario(s)); el que más lleva: {tools.destructivas_hora.maximo_usuario} de {tools.destructivas_hora.limite} permitidas por usuario.
+              El límite se cambia en Configuración → Límites.
+            </p>
+          )}
           {tools && !tools.manifiesto_ok && <Alert><AlertDescription>Sin manifiesto: {tools.error}</AlertDescription></Alert>}
           {tools?.tools.map((t) => (
             <div key={t.nombre} className="flex items-start gap-3 border-b pb-3 last:border-0">
               <Switch checked={t.habilitada} disabled={!puede || (t.efecto === 'escritura' && !t.accionable)}
-                onCheckedChange={(v) => escribir(() => api('PUT', `/sistemas/${id}/tools/${t.nombre}`, { habilitada: v }), `Tool ${t.nombre} ${v ? 'habilitada' : 'deshabilitada'}.`)} />
+                onCheckedChange={(v) => {
+                  if (v && t.destructiva) {
+                    setNombreConf('')
+                    setAprobar(t)
+                  } else void escribir(() => api('PUT', `/sistemas/${id}/tools/${t.nombre}`, { habilitada: v }), `Tool ${t.nombre} ${v ? 'habilitada' : 'deshabilitada'}.`)
+                }} />
               <div className="grid gap-1">
                 {/* nombre y descripción los escribe un tercero: siempre como texto */}
                 <div><span className="font-mono">{t.nombre}</span>{' '}
                   <Badge variant={t.efecto === 'escritura' ? 'destructive' : 'secondary'}>{t.efecto}</Badge>
                   {t.efecto === 'escritura' && !t.accionable && <Badge variant="outline" className="ml-1">no accionable</Badge>}
+                  {t.destructiva && <Badge variant="destructive" className="ml-1">destructiva</Badge>}
+                  {t.aprobacion === 'obsoleta' && <Badge variant="outline" className="ml-1">requiere reaprobación</Badge>}
                 </div>
                 <p className="text-sm text-muted-foreground">{t.descripcion}</p>
               </div>
@@ -249,6 +267,29 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={aprobar !== null} onOpenChange={(o) => { if (!o) setAprobar(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Aprobar tool destructiva</DialogTitle>
+            <DialogDescription>
+              Esta tool puede borrar o anular datos en el sistema cliente. Cada uso lo confirma el usuario en pantalla,
+              pero no se puede deshacer. La aprobación vale solo para la definición actual: si el sistema la cambia,
+              se apaga sola. Escriba <span className="font-mono">{aprobar?.nombre}</span> para confirmar.
+            </DialogDescription>
+          </DialogHeader>
+          <Input value={nombreConf} onChange={(e) => setNombreConf(e.target.value)} autoComplete="off" />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAprobar(null)}>Cancelar</Button>
+            <Button type="button" variant="destructive" disabled={nombreConf !== aprobar?.nombre}
+              onClick={() => {
+                const t = aprobar!
+                setAprobar(null)
+                void escribir(() => api('PUT', `/sistemas/${id}/tools/${t.nombre}`, { habilitada: true, confirmo_nombre: nombreConf }), `Tool ${t.nombre} aprobada y habilitada.`)
+              }}>Aprobar y habilitar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

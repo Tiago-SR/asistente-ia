@@ -29,12 +29,14 @@ async def mensajes(
     visibles = await svc.repo.visibles(u.sistema_id, u.usuario_ref, conv_id)
     if visibles is None:
         raise ErrorApi(404, "conversacion_no_encontrada")
-    # La propuesta pendiente (si hay), para que el widget restaure la tarjeta tras recargar la página.
-    pendiente = None
+    # Las propuestas pendientes, para que el widget restaure las tarjetas tras recargar la página.
+    # `pendiente` (la más reciente) se conserva por compatibilidad con widgets anteriores.
+    pendientes = []
     if svc.acciones is not None:
-        accion = await svc.acciones.pendiente_de(u.sistema_id, u.usuario_ref, conv_id)
-        pendiente = vista_accion(accion) if accion else None
-    return {"id": str(conv_id), "mensajes": visibles, "pendiente": pendiente}
+        acciones = await svc.acciones.pendientes_de(u.sistema_id, u.usuario_ref, conv_id)
+        pendientes = [vista_accion(a) for a in acciones]
+    return {"id": str(conv_id), "mensajes": visibles, "pendientes": pendientes,
+            "pendiente": pendientes[-1] if pendientes else None}
 
 
 @router.delete("/v1/conversaciones/{conv_id}", status_code=204)

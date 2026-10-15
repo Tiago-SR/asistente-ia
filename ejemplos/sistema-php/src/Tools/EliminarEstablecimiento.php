@@ -6,7 +6,8 @@ namespace Ejemplo\Tools;
 /**
  * Tool de ESCRITURA de ejemplo, solo para demostrar la capa de solo lectura: aparece en el manifiesto
  * (efecto "escritura") y el controlador la rechaza con 403 si llega con scope de lectura.
- * Aunque se ejecutara, no hace nada: no hay nada que borrar.
+ * Aunque se ejecutara, no hace nada: no hay nada que borrar. Declara `destructiva` y no `confirmacion`: aun si
+ * un admin la encendiera en el panel, sin propuesta y confirmación el asistente no la ofrece.
  */
 final class EliminarEstablecimiento implements Herramienta
 {
@@ -30,6 +31,7 @@ final class EliminarEstablecimiento implements Herramienta
                 'additionalProperties' => false,
             ],
             'efecto' => 'escritura',
+            'destructiva' => true,
             'timeout_s' => 15,
         ];
     }

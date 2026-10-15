@@ -44,6 +44,8 @@ AVISO_MS = 3000  # por encima, la respuesta se siente lenta en un chat
 MAX_TOOLS_PARAMETROS = 5
 
 OK, FALLA, AVISO, OMITIDO = "OK", "FALLA", "AVISO", "OMITIDO"
+# Mismo criterio que el asistente (sistemas/manifiesto.py): el nombre basta para tratarla como destructiva.
+NOMBRE_DESTRUCTIVO_RE = re.compile(r"(^|_)(borrar|eliminar|delete|remove|baja|anular|purgar|vaciar)")
 
 
 def _schema(nombre: str) -> Draft202012Validator:
@@ -336,6 +338,19 @@ class Verificador:
                     if any(not p.get("description") for p in t.get("parametros", {}).get("properties", {}).values())]
         if sin_desc:
             self._nota(AVISO, "parámetros sin `description`", ", ".join(sin_desc))
+        parece = [t["nombre"] for t in tools if t.get("destructiva") is not True
+                  and NOMBRE_DESTRUCTIVO_RE.search(str(t.get("nombre", "")))]
+        if parece:
+            self._nota(AVISO, "el nombre parece destructivo pero no declara `destructiva: true` (el asistente "
+                       "igual la trata como destructiva)", ", ".join(parece))
+        destructivas = [t for t in tools if t.get("destructiva") is True]
+        sin_conf = [t["nombre"] for t in destructivas if not t.get("confirmacion")]
+        self._chk(not sin_conf, "toda tool destructiva declara `confirmacion`", ", ".join(sin_conf))
+        con_array = [t["nombre"] for t in tools if t.get("efecto") == "escritura" and any(
+            isinstance(p, dict) and p.get("type") == "array"
+            for p in (t.get("parametros", {}).get("properties") or {}).values())]
+        self._chk(not con_array, "ninguna escritura recibe parámetros array (una entidad por acción)",
+                  ", ".join(con_array))
         if not [t for t in tools if t.get("efecto") == "lectura"]:
             self._chk(False, "hay al menos una tool de lectura")
             raise _Corte
@@ -526,6 +541,9 @@ class Verificador:
         self._chk(r.status == 200 and isinstance(r.cuerpo, dict) and r.cuerpo.get("ok") is False
                   and r.cuerpo.get("error") == "parametros_invalidos",
                   f"{nombre}: propuesta con parámetros inválidos → parametros_invalidos", self._estado(r))
+        if elegida.get("destructiva") is True and not propuesta.get("detalle"):
+            self._nota(AVISO, f"{nombre}: la propuesta destructiva no trae `detalle`",
+                       "sin el estado actual de lo que se borra, el asistente la rechaza (propuesta_sin_detalle)")
         huella = propuesta["huella"]
 
         self._huella_desconocida()

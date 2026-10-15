@@ -111,6 +111,8 @@ final class ContratoTest extends TestCase
         foreach (array_diff_key($efectos, array_flip([...$acciones, 'eliminar_establecimiento'])) as $efecto) {
             $this->assertSame('lectura', $efecto);
         }
+        $destructivas = array_column(array_filter($r->cuerpo['tools'], fn($t) => ($t['destructiva'] ?? false) === true), 'nombre');
+        $this->assertSame(['eliminar_establecimiento'], $destructivas);
         // solo las acciones con propuesta declaran `confirmacion`; borrar no se ofrece
         $con = array_column(array_filter($r->cuerpo['tools'], fn($t) => isset($t['confirmacion'])), 'nombre');
         $this->assertSame($acciones, $con);

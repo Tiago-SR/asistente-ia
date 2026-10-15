@@ -15,6 +15,7 @@ Reglas que protegen el acceso a terceros (ver PLAN_PANEL_ADMIN.md, sección 4):
 
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
@@ -25,9 +26,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from asistente.sistemas.cifrado import Cifrador, huella
 from asistente.sistemas.registro import CAMPOS_SECRETOS, Sistema, validar_sistema
 from asistente.sistemas.registro_bd import config_json, incrementar_version
-from asistente.store.models import AdminAuditoria, SistemaRegistro, SistemaSecreto, ToolEstado
+from asistente.store.models import (
+    Accion,
+    AdminAuditoria,
+    SistemaRegistro,
+    SistemaSecreto,
+    ToolEstado,
+)
 
-RESERVADOS = {"id", "tool_estado", "acciones_habilitadas"}  # no se editan con el PUT de configuración
+# No se editan con el PUT de configuración.
+RESERVADOS = {"id", "tool_estado", "acciones_habilitadas", "destructivas_aprobadas"}
 TOOL_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 SECRETO_MAX = 4096
 HS256_MIN = 32  # bytes
@@ -84,6 +92,25 @@ async def _tools(s: AsyncSession, sistema_id: str) -> dict[str, bool]:
     filas = (await s.execute(select(ToolEstado).where(ToolEstado.sistema_id == sistema_id)
                              .execution_options(populate_existing=True))).scalars()
     return {f.tool: f.habilitada for f in filas}
+
+
+async def aprobaciones(sesiones: async_sessionmaker[AsyncSession], sistema_id: str) -> dict[str, str]:
+    """Huella aprobada por tool destructiva, leída de la BD (no del registro en memoria, que puede ir 5 s atrás)."""
+    async with sesiones() as s:
+        filas = (await s.execute(select(ToolEstado.tool, ToolEstado.aprobada_huella).where(
+            ToolEstado.sistema_id == sistema_id, ToolEstado.aprobada_huella.is_not(None)))).all()
+    return dict(filas)
+
+
+async def destructivas_hora(sesiones: async_sessionmaker[AsyncSession], sistema_id: str) -> dict[str, int]:
+    """Propuestas destructivas de la última hora (cualquier estado, igual que lo que cuenta el tope):
+    el total del sistema y lo que lleva el usuario más activo, que es el que choca con el límite."""
+    desde = datetime.now(UTC) - timedelta(hours=1)
+    async with sesiones() as s:
+        filas = (await s.execute(
+            select(func.count()).where(Accion.sistema_id == sistema_id, Accion.destructiva.is_(True),
+                                       Accion.creada > desde).group_by(Accion.usuario_ref))).scalars().all()
+    return {"total": sum(filas), "maximo_usuario": max(filas, default=0), "usuarios": len(filas)}
 
 
 def _config_visible(f: SistemaRegistro) -> dict:
@@ -144,7 +171,7 @@ async def leer(sesiones: async_sessionmaker[AsyncSession], sistema_id: str) -> d
 async def crear_sistema(sesiones: async_sessionmaker[AsyncSession], config: Mapping, *, por: str,
                         ip: str | None = None) -> dict:
     """Siempre deshabilitado: un sistema habilitado exige `token_manifiesto`, que se carga cuando la fila ya existe."""
-    if {"tool_estado", "acciones_habilitadas"} & set(config):
+    if RESERVADOS - {"id"} & set(config):
         raise ErrorEscritura(422, "campo_reservado")
     sistema = _validar({**config, "habilitado": False})
     try:
@@ -299,9 +326,10 @@ async def borrar_secreto(
 
 async def fijar_tool(
     sesiones: async_sessionmaker[AsyncSession], sistema_id: str, tool: str, habilitada: bool, defecto: bool,
-    *, por: str, ip: str | None = None,
+    *, huella: str | None = None, por: str, ip: str | None = None,
 ) -> dict[str, bool]:
-    """Guarda solo excepciones: si `habilitada` coincide con el valor por defecto de la tool, borra la fila.
+    """Guarda solo excepciones: si `habilitada` coincide con el valor por defecto de la tool, borra la fila
+    (y con ella la aprobación). `huella` es la definición que aprueba un admin al encender una destructiva.
     No exige `version` (no toca la config) para que un interruptor no choque con una edición en curso."""
     if not TOOL_RE.match(tool):
         raise ErrorEscritura(422, "tool_invalida")
@@ -312,9 +340,12 @@ async def fijar_tool(
                 ToolEstado.sistema_id == sistema_id, ToolEstado.tool == tool))
         else:
             await s.execute(pg_insert(ToolEstado).values(
-                sistema_id=sistema_id, tool=tool, habilitada=habilitada, actualizado_por=por
+                sistema_id=sistema_id, tool=tool, habilitada=habilitada, aprobada_huella=huella,
+                actualizado_por=por
             ).on_conflict_do_update(index_elements=["sistema_id", "tool"], set_={
-                "habilitada": habilitada, "actualizado_por": por, "actualizado_en": func.now()}))
+                "habilitada": habilitada, "aprobada_huella": huella, "actualizado_por": por,
+                "actualizado_en": func.now()}))
         await incrementar_version(s)
-        _auditar(s, por, "tool_fijar", sistema_id, despues={"tool": tool, "habilitada": habilitada}, ip=ip)
+        _auditar(s, por, "tool_fijar", sistema_id, despues={"tool": tool, "habilitada": habilitada, "destructiva": huella is not None, "huella": huella},
+                  ip=ip)
         return await _tools(s, sistema_id)

@@ -68,6 +68,7 @@ export type ToolVista = {
   accionable: boolean
   destructiva: boolean
   habilitada: boolean
+  aprobacion: 'vigente' | 'obsoleta' | null
 }
 export type Usuario = { id: string; email: string; rol: string; activo: boolean; bloqueado: boolean; ultimo_login: string | null }
 export type EventoAuditoria = {
@@ -97,7 +98,9 @@ const MENSAJES: Record<string, string> = {
   secreto_corto: 'El secreto HS256 debe tener al menos 32 bytes.',
   secreto_no_aplica: 'Ese secreto no aplica al algoritmo de autenticación actual.',
   sin_claves_maestras: 'El servidor no tiene ASISTENTE_CLAVES_MAESTRAS: no puede cifrar secretos.',
-  tool_no_accionable: 'Esa escritura no declara confirmación o es destructiva: no se puede habilitar.',
+  tool_no_accionable: 'Esa escritura no declara confirmación: no se puede habilitar.',
+  manifiesto_requerido: 'Para aprobar una tool destructiva hace falta el manifiesto disponible: relea el manifiesto.',
+  confirmacion_nombre: 'Para encender una tool destructiva hay que escribir su nombre exacto.',
   ultimo_admin: 'Debe quedar al menos un admin activo.',
   auto_cambio: 'No puede quitarse a sí mismo el acceso de admin.',
   usuario_invalido: 'Datos de usuario inválidos.',

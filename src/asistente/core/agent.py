@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any
 
 from asistente.core import events
@@ -37,6 +38,7 @@ from asistente.core.web import herramientas as webtools
 log = logging.getLogger(__name__)
 
 # Descripción legible para el evento `tool`; sin parámetros, que pueden ser datos de negocio.
+MAX_PROPUESTAS_TURNO = 3  # tarjetas independientes por turno (solo escrituras normales)
 _LEGIBLE = "Consultando {nombre}"
 _LEGIBLE_ACCION = "Preparando {nombre}"
 _LEGIBLE_WEB = {webtools.BUSCAR: "Buscando en la web", webtools.LEER: "Leyendo una página web"}
@@ -163,6 +165,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 adjuntos=(), web=None) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
+    destructivas = {t.nombre for t in tools if t.destructiva}
     lectura = {t.nombre for t in tools if not t.escritura}
     if recientes is not None:
         tools = [*tools, consultas.TOOL]  # tool local del asistente: no existe en el sistema
@@ -170,7 +173,10 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         tools = [*tools, *memorias.TOOLS]  # `recordar` y `olvidar`: locales, siempre con botón
     if web is not None:
         tools = [*tools, *webtools.TOOLS]  # `buscar_web` y `leer_pagina`: internet, aparte de los datos del sistema
-    propuesta_hecha = False  # una sola propuesta por turno
+    propuestas = 0  # propuestas de este turno (cruza las iteraciones)
+    exclusiva = False  # una destructiva o local va sola: nada más se propone en el turno
+    guardar = asyncio.Lock()  # las `crear` del turno corren en serie: así el duplicado y el tope horario se ven
+    inicio_turno = datetime.now(UTC)  # las pendientes anteriores a él se reemplazan; las del turno conviven
     web_usadas = 0  # búsquedas y lecturas web de este turno
     reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
     nuevos = [Mensaje("user", texto, adjuntos=adjuntos)]
@@ -261,13 +267,18 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
             local = memoria is not None and c.nombre in memorias.NOMBRES
             if c.nombre in escrituras or local:
                 # Se decide antes de cualquier await: dos escrituras en la misma iteración no compiten.
-                if propuesta_hecha:
-                    atenciones.append(_rechazar_extra(c))
+                solitaria = local or c.nombre in destructivas
+                if exclusiva or (solitaria and propuestas) or propuestas >= MAX_PROPUESTAS_TURNO:
+                    atenciones.append(_rechazar_extra(c, exclusiva or solitaria))
                     continue
-                propuesta_hecha = True
+                propuestas += 1
+                exclusiva = solitaria
+                # Una destructiva no se propone en un turno que ya leyó la web (ni en la misma tanda que una).
+                con_web = web_usadas > 0 or any(x.nombre in webtools.NOMBRES for x in llamadas)
                 turno = TurnoMemoria(tuple(nuevos), frozenset(lectura), conector) if local else None
                 atenciones.append(_proponer(ctx, conector, acciones, auditoria, conversacion_id,
-                                            c, config, emit, memoria if local else None, turno))
+                                            c, config, emit, memoria if local else None, turno,
+                                            c.nombre in destructivas, con_web, inicio_turno, guardar))
             elif web is not None and c.nombre in webtools.NOMBRES:
                 web_usadas += 1
                 if web_usadas > config.web_max_por_turno:
@@ -379,13 +390,19 @@ async def _tope_web(config) -> ResultadoTool:
                                  "responde con lo que tienes")
 
 
-async def _rechazar_extra(c: LlamadaTool) -> ResultadoTool:
-    return ResultadoTool(False, error="una_accion_a_la_vez",
-                         detalle="solo se puede proponer una acción por turno; propón la siguiente después")
+async def _rechazar_extra(c: LlamadaTool, sola: bool) -> ResultadoTool:
+    if sola:
+        return ResultadoTool(False, error="una_accion_a_la_vez",
+                             detalle="un borrado o un recuerdo se propone solo; propón lo demás después")
+    return ResultadoTool(False, error="tope_propuestas_turno",
+                         detalle=f"solo se pueden proponer {MAX_PROPUESTAS_TURNO} acciones por turno; "
+                                 "propón las demás después")
 
 
 async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: LlamadaTool, config,
-                    emit, memoria: Memoria | None = None, turno: TurnoMemoria | None = None) -> ResultadoTool:
+                    emit, memoria: Memoria | None = None, turno: TurnoMemoria | None = None,
+                    destructiva: bool = False, con_web: bool = False,
+                    inicio_turno: datetime | None = None, guardar: asyncio.Lock | None = None) -> ResultadoTool:
     """Una tool de escritura nunca se ejecuta aquí: se pide al sistema un resumen, se guarda como
     pendiente y se avisa al widget para que el usuario confirme. El modelo recibe «pendiente».
     Con `memoria` (tools locales `recordar` y `olvidar`) el resumen lo redacta el servidor, no el sistema."""
@@ -393,6 +410,9 @@ async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: Llam
     inicio = time.monotonic()
     if acciones is None:
         r = ResultadoTool(False, error="no_disponible", detalle="las acciones no están habilitadas")
+    elif destructiva and con_web:
+        r = ResultadoTool(False, error="destructiva_tras_web",
+                          detalle="no se puede proponer un borrado en un turno con contenido de la web")
     elif c.argumentos_invalidos:
         r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
     else:
@@ -409,12 +429,20 @@ async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: Llam
         else:
             if not p.ok:
                 r = ResultadoTool(False, error=p.error, detalle=p.detalle_error, status_http=p.status_http)
+            elif destructiva and not p.lineas:
+                # Sin el estado actual de la entidad el usuario confirmaría a ciegas.
+                r = ResultadoTool(False, error="propuesta_sin_detalle",
+                                  detalle="el sistema no informó qué se va a borrar")
             else:
                 try:
                     guardados = p.parametros_finales if p.parametros_finales is not None else c.parametros
-                    creada = await acciones.crear(ctx, conversacion_id, c.nombre, guardados, p)
+                    async with guardar or asyncio.Lock():
+                        creada = await acciones.crear(ctx, conversacion_id, c.nombre, guardados, p,
+                                                      destructiva=destructiva, inicio_turno=inicio_turno)
                 except LimiteExcedido as e:
-                    r = ResultadoTool(False, error=e.cual, detalle="demasiadas propuestas; intenta más tarde")
+                    r = ResultadoTool(False, error=e.cual, detalle=(
+                        "ya está propuesta en este turno" if e.cual == "propuesta_duplicada"
+                        else "demasiadas propuestas; intenta más tarde"))
                 except Exception:
                     log.exception("[%s] no se pudo guardar la propuesta de %s", ctx.request_id, c.nombre)
                     r = ResultadoTool(False, error="error_sistema", detalle="no se pudo preparar la acción")
@@ -423,6 +451,8 @@ async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: Llam
                         "id": creada.id, "tool": c.nombre, "resumen": p.resumen,
                         "lineas": list(p.lineas), "huella": p.huella, "expira": creada.expira,
                     }
+                    if destructiva:
+                        tarjeta["destructiva"] = True
                     if local:
                         tarjeta["local"] = True  # el widget no pide token al anfitrión: confirma con su sesión
                     await emit(events.CONFIRMACION, tarjeta)

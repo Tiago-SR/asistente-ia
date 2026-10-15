@@ -98,7 +98,7 @@
         },
         "destructiva": {
           "type": "boolean",
-          "description": "Marca un borrado o cambio irreversible. El asistente no la ofrece al modelo en esta versión."
+          "description": "Marca un borrado o cambio irreversible. Exige `confirmacion`. Queda apagada hasta que un admin del panel la apruebe, y la aprobación vale solo para esta definición."
         }
       },
       "additionalProperties": true

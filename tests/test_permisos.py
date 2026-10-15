@@ -7,9 +7,10 @@ from asistente.sistemas.registro import Sistema, desde_yaml
 from conftest import entorno, entrada_sistema
 
 
-def _sistema(**cambios) -> Sistema:
+def _sistema(destructivas_aprobadas=None, **cambios) -> Sistema:
     config, _ = desde_yaml(entrada_sistema("a", **cambios), entorno("a"))
-    return Sistema.model_validate(config)
+    # No viene del YAML (`desde_yaml` lo rechaza): lo pone el registro desde la BD.
+    return Sistema.model_validate({**config, "destructivas_aprobadas": destructivas_aprobadas or {}})
 
 
 LECTURA = Tool("ver", "d", {}, "lectura")
@@ -27,7 +28,12 @@ DESTRUCTIVA = Tool("agregar", "d", {}, "escritura", confirmacion_ttl_s=120, dest
     ({"tool_estado": {"agregar": True}}, ESCRITURA, True),
     ({"tool_estado": {"agregar": False}, "acciones_habilitadas": ["agregar"]}, ESCRITURA, False),
     ({"tool_estado": {"agregar": True}}, SIN_CONFIRMACION, False),  # encenderla no salta las reglas del contrato
-    ({"tool_estado": {"agregar": True}}, DESTRUCTIVA, False),
+    ({"tool_estado": {"agregar": True}}, DESTRUCTIVA, False),  # sin huella aprobada
+    ({"acciones_habilitadas": ["agregar"]}, DESTRUCTIVA, False),
+    ({"acciones_habilitadas": ["agregar"], "destructivas_aprobadas": {"agregar": DESTRUCTIVA.huella}}, DESTRUCTIVA, False),
+    ({"tool_estado": {"agregar": True}, "destructivas_aprobadas": {"agregar": DESTRUCTIVA.huella}}, DESTRUCTIVA, True),
+    ({"tool_estado": {"agregar": True}, "destructivas_aprobadas": {"agregar": "otra"}}, DESTRUCTIVA, False),
+    ({"tool_estado": {"agregar": False}, "destructivas_aprobadas": {"agregar": DESTRUCTIVA.huella}}, DESTRUCTIVA, False),
 ])
 def test_tool_permitida(cambios, tool, esperado):
     assert tool_permitida(_sistema(**cambios), tool) is esperado

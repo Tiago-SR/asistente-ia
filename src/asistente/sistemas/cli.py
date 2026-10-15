@@ -67,6 +67,9 @@ async def _ejecutar(args: argparse.Namespace) -> int:
         except ClaveAusente:
             cifrador = None
         if args.comando == "importar-yaml":
+            if args.reemplazar:
+                print("aviso: --reemplazar borra las aprobaciones de tools destructivas; hay que volver a "
+                      "aprobarlas desde el panel", file=sys.stderr)
             n = await registro_bd.importar_yaml(sesiones, cifrador, args.ruta, reemplazar=args.reemplazar)
             print(f"importados {n} sistema(s)")
         elif args.comando == "exportar-yaml":

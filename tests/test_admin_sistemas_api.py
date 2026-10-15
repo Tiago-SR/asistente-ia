@@ -273,3 +273,67 @@ async def test_destino_privado_de_la_lista_de_permitidos_se_acepta(limpio, tmp_p
         r = await c.post("/admin/api/sistemas", json={"config": {**CONFIG, "id": "otro",
                                                                   "base_url": "http://10.0.6.7:8000"}}, headers=h)
         assert r.status_code == 422
+
+
+async def test_destructiva_exige_nombre_manifiesto_y_se_apaga_si_cambia(cliente, limpio, monkeypatch):
+    from asistente.sistemas.manifiesto import (
+        CacheManifiestos,
+        ManifiestoInvalido,
+        parsear_manifiesto,
+    )
+
+    def manifiesto(descripcion):
+        return parsear_manifiesto({"contrato": "1", "sistema": {"nombre": "S"}, "tools": [
+            {"nombre": "borrar_nota", "descripcion": descripcion, "efecto": "escritura",
+             "parametros": {"type": "object", "properties": {}}, "confirmacion": {"ttl_s": 60}}]})
+
+    actual = {"m": None}
+
+    async def obtener(self, sistema_id):
+        if actual["m"] is None:
+            raise ManifiestoInvalido("sin manifiesto")
+        return actual["m"]
+
+    monkeypatch.setattr(CacheManifiestos, "obtener", obtener)
+    monkeypatch.setattr(CacheManifiestos, "recargar", obtener)
+    url = "/admin/api/sistemas/acme/tools/borrar_nota"
+    async with cliente() as c:
+        h = await _sesion(c, limpio, "admin")
+        r = await c.post("/admin/api/sistemas", json={"config": CONFIG}, headers=h)
+        cuerpo = {"version": 1, "config": {**r.json()["config"], "habilitado": True},
+                  "secretos": {"token_manifiesto": SECRETO}}
+        assert (await c.put("/admin/api/sistemas/acme", json=cuerpo, headers=h)).status_code == 200
+
+        # sin manifiesto no se puede saber qué se aprueba
+        r = await c.put(url, json={"habilitada": True, "confirmo_nombre": "borrar_nota"}, headers=h)
+        assert (r.status_code, r.json()["error"]) == (409, "manifiesto_requerido")
+
+        actual["m"] = manifiesto("v1")
+        r = await c.put(url, json={"habilitada": True}, headers=h)
+        assert (r.status_code, r.json()["error"]) == (422, "confirmacion_nombre")
+        r = await c.put(url, json={"habilitada": True, "confirmo_nombre": "otra"}, headers=h)
+        assert r.status_code == 422
+
+        op = await _sesion(c, limpio, "operador")
+        r = await c.put(url, json={"habilitada": True, "confirmo_nombre": "borrar_nota"}, headers=op)
+        assert r.status_code == 403
+
+        r = await c.put(url, json={"habilitada": True, "confirmo_nombre": "borrar_nota"}, headers=h)
+        assert r.status_code == 200
+        t = (await c.get("/admin/api/sistemas/acme/tools", headers=h)).json()["tools"][0]
+        assert (t["destructiva"], t["habilitada"], t["aprobacion"]) == (True, True, "vigente")
+
+        # el sistema cliente cambia la definición: se apaga sola y pide reaprobación
+        actual["m"] = manifiesto("v2, ahora borra todo")
+        t = (await c.get("/admin/api/sistemas/acme/tools", headers=h)).json()["tools"][0]
+        assert (t["habilitada"], t["aprobacion"]) == (False, "obsoleta")
+
+        # deshabilitar borra la fila (y con ella la aprobación)
+        r = await c.put(url, json={"habilitada": False}, headers=h)
+        assert r.status_code == 200 and r.json()["tool_estado"] == {}
+        t = (await c.get("/admin/api/sistemas/acme/tools", headers=h)).json()["tools"][0]
+        assert (t["habilitada"], t["aprobacion"]) == (False, None)
+    async with limpio() as s:
+        fijar = [f.despues for f in (await s.execute(select(AdminAuditoria))).scalars() if f.accion == "tool_fijar"]
+    assert {"tool": "borrar_nota", "habilitada": True, "destructiva": True}.items() <= fijar[0].items()
+    assert fijar[0]["huella"]

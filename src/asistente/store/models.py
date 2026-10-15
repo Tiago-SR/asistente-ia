@@ -246,6 +246,7 @@ class Accion(Base):
     ok: Mapped[bool | None] = mapped_column(Boolean)
     error: Mapped[str | None] = mapped_column(String(500))
     status_http: Mapped[int | None] = mapped_column(Integer)
+    destructiva: Mapped[bool] = mapped_column(Boolean, server_default="false")
 
 
 class MemoriaUsuario(Base):
@@ -314,6 +315,8 @@ class ToolEstado(Base):
     )
     tool: Mapped[str] = mapped_column(String(128), primary_key=True)
     habilitada: Mapped[bool] = mapped_column(Boolean)
+    # Solo destructivas: huella de la definición que aprobó un admin del panel (nunca viene del YAML).
+    aprobada_huella: Mapped[str | None] = mapped_column(String(64))
     actualizado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
     actualizado_por: Mapped[str | None] = mapped_column(String(200))
 

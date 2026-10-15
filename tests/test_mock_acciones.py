@@ -204,3 +204,17 @@ async def test_defecto_token_escritura_largo(monkeypatch):
                                      "token_otra_tool", "sin_idempotencia", "token_escritura_largo"])
 def test_los_defectos_de_la_fase_5_estan_declarados(monkeypatch, defecto):
     assert defecto in montar(monkeypatch, defecto)[0].DEFECTOS
+
+
+async def test_borrar_nota_muestra_el_estado_actual_y_borra_solo_con_el_token(monkeypatch):
+    m, c = montar(monkeypatch)
+    nota = m.NOTAS[ANA][0]
+    params = {"nota_id": nota["id"]}
+    manifiesto = (await c.get("/asistente/tools", headers={"Authorization": f"Bearer {m.TOKEN_MANIFIESTO}"})).json()
+    tool = next(t for t in manifiesto["tools"] if t["nombre"] == "borrar_nota")
+    assert tool["destructiva"] is True and "confirmacion" in tool
+    p = await proponer(c, "borrar_nota", params)
+    assert p["ok"] and nota["texto"] in p["detalle"][0] and len(m.NOTAS[ANA]) == 1  # sin efectos
+    tok = (await token_escritura(c, p["huella"])).json()["token"]
+    r = await ejecutar(c, "borrar_nota", tok, params)
+    assert r.status_code == 200 and r.json()["ok"] and m.NOTAS[ANA] == []

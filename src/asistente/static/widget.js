@@ -162,9 +162,11 @@
     cancelar: "Cancelar",
     confirmarTitulo: "Confirmá esta acción",
     confirmar: "Confirmar",
+    noDeshacer: "No se puede deshacer.",
     vence: "Vence en {t}",
     ejecutando: "Ejecutando…",
     mhConfirmarPantalla: "Te pido confirmar en pantalla: {r}",
+    mhConfirmarVarias: "Te pido confirmar en pantalla {n} acciones.",
     pie: "Las respuestas pueden contener errores; verificá los datos importantes.",
     memoria: "Lo que recuerdo",
     memoriaTitulo: "Lo que recuerdo de vos",
@@ -798,6 +800,9 @@
     .msg.confirmacion.cerrada { border-color: var(--b); opacity: .85; }
     .accion-titulo { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--apagado); margin-bottom: 4px; }
     .accion-resumen { font-weight: 600; }
+    .msg.confirmacion.destructiva { border-color: var(--p-rec); border-width: 2px; }
+    .msg.confirmacion.destructiva .accion-titulo, .accion-aviso { color: var(--p-rec); font-weight: 600; }
+    .msg.confirmacion.destructiva .accion-botones button.primario { background: var(--p-rec); border-color: var(--p-rec); color: var(--p-rec-t); }
     .msg.confirmacion ul { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
     .accion-botones { display: flex; gap: 8px; margin-top: 10px; }
     .accion-botones button { padding: 6px 16px; border-radius: 999px; border: 1px solid var(--c); background: var(--f); color: var(--c); font: inherit; cursor: pointer; }
@@ -1005,6 +1010,7 @@
       super();
       this._token = null;        // {valor, expiraMs}; solo en memoria, nunca en storage
       this._convId = null;
+      this._tarjetas = new Set();   // tarjetas de confirmación vigentes (varias por turno)
       this._ocupado = false;
       this._abort = null;
       this._iniciado = false;
@@ -1353,13 +1359,13 @@
         const r = await this._conToken((h) => fetch(`${this._servidor}/v1/conversaciones/${id}`, { headers: h }));
         if (!r.ok) throw new Error(r.status);
         const d = await r.json();
-        this._convId = id; this._mensajes.replaceChildren(); this._mostrarBienvenida();
+        this._convId = id; this._mensajes.replaceChildren(); this._tarjetas.clear(); this._propuestaTurno = false; this._mostrarBienvenida();
         for (const m of d.mensajes) {
           const b = this._burbuja(m.rol);
           if (m.rol === "assistant") { markdown(m.texto, b); this._botonEscuchar(b, m.texto); } else b.textContent = m.texto;
         }
         // Una propuesta que sigue vigente vuelve a mostrarse con su cuenta regresiva (el servidor es la fuente).
-        if (d.pendiente) this._confirmacion(d.pendiente);
+        for (const p of d.pendientes || (d.pendiente ? [d.pendiente] : [])) this._confirmacion(p);
         this._recordar(); this._pintarHistorial(); this._menu(false); this._bajar();
       } catch {
         if (silencioso) { this._convId = null; this._recordar(); } else this._error();
@@ -2868,9 +2874,13 @@
     // El resumen y el detalle los redactó el SISTEMA (no el modelo). Todo el texto va con textContent.
     _confirmacion(d) {
       if (!d || typeof d.id !== "string" || typeof d.huella !== "string" || typeof d.resumen !== "string") return;
-      if (this._tarjetaActiva && this._tarjetaActiva.tarjeta.isConnected) this._cerrarTarjeta(this._tarjetaActiva, "reemplazada");
+      // La primera tarjeta de un turno reemplaza a las del turno anterior; las hermanas del mismo turno conviven.
+      const primera = !this._propuestaTurno;
+      if (primera) for (const x of [...this._tarjetas]) if (x.tarjeta.isConnected) this._cerrarTarjeta(x, "reemplazada");
       const lineas = Array.isArray(d.lineas) ? d.lineas.filter((x) => typeof x === "string") : [];
       const tarjeta = this._burbuja("confirmacion");
+      const destructiva = d.destructiva === true;
+      if (destructiva) tarjeta.classList.add("destructiva");
       tarjeta.setAttribute("role", "group"); tarjeta.setAttribute("aria-label", TEXTOS.confirmarTitulo);
       const confirmar = el("button", { type: "button", class: "primario", textContent: TEXTOS.confirmar });
       const cancelar = el("button", { type: "button", textContent: TEXTOS.cancelar });
@@ -2880,6 +2890,7 @@
       tarjeta.append(
         el("div", { class: "accion-titulo", textContent: TEXTOS.confirmarTitulo }),
         el("div", { class: "accion-resumen", textContent: d.resumen }),
+        ...(destructiva ? [el("div", { class: "accion-aviso", textContent: TEXTOS.noDeshacer })] : []),
         ...(lineas.length ? [el("ul", {}, ...lineas.map((l) => el("li", { textContent: l })))] : []),
         botones, estado, err,
       );
@@ -2896,14 +2907,17 @@
         estado.textContent = TEXTOS.vence.replace("{t}", Math.floor(resta / 60) + ":" + String(resta % 60).padStart(2, "0"));
       };
       if (!Number.isNaN(expiraMs)) { tick(); t.timer = setInterval(tick, 1000); }
-      this._tarjetaActiva = t;
+      this._tarjetas.add(t);
       // En manos libres la propuesta se lee en voz alta, pero se confirma siempre con un clic.
       this._propuestaTurno = true;
       if (this._mhActivo()) {
         // La tarjeta se muestra donde esté el usuario: en la vista de voz sale en la escena, sin pasar al chat. Se confirma siempre con un clic.
-        const frase = TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen);
+        // Una sola frase hablada por tanda: las hermanas solo actualizan el texto de la escena.
+        const varias = this._tarjetas.size > 1;
+        const frase = varias ? TEXTOS.mhConfirmarVarias.replace("{n}", String(this._tarjetas.size))
+          : TEXTOS.mhConfirmarPantalla.replace("{r}", d.resumen);
         this._mostrarDicho(frase);
-        if (this._hablaPosible()) this._decir(frase);
+        if (primera && this._hablaPosible()) this._decir(frase);
         this._tarjetaPosicionar();
       }
       this._bajar();
@@ -2911,12 +2925,13 @@
 
     // La tarjeta vive en el chat; en la vista de voz se lleva a la escena (el mismo nodo, con sus botones) y se devuelve a su sitio.
     _tarjetaPosicionar() {
-      const t = this._tarjetaActiva;
-      if (!t || t.cerrada || !t.tarjeta.isConnected) return;
-      if (this._mhActivo() && this._vista === "voz") {
-        if (!t.marca) { t.marca = document.createComment(""); t.tarjeta.before(t.marca); }
-        this._escena.insertBefore(t.tarjeta, this._verChat);
-      } else this._tarjetaDevolver(t);
+      for (const t of this._tarjetas) {
+        if (t.cerrada || !t.tarjeta.isConnected) continue;
+        if (this._mhActivo() && this._vista === "voz") {
+          if (!t.marca) { t.marca = document.createComment(""); t.tarjeta.before(t.marca); }
+          this._escena.insertBefore(t.tarjeta, this._verChat);
+        } else this._tarjetaDevolver(t);
+      }
     }
     _tarjetaDevolver(t) {
       if (t.marca) { t.marca.replaceWith(t.tarjeta); t.marca = null; }
@@ -2930,7 +2945,7 @@
       t.tarjeta.classList.add("cerrada", estado);
       t.estado.textContent = texto || ESTADOS_ACCION[estado] || "";
       t.estado.classList.toggle("ok", estado === "ejecutada");
-      if (this._tarjetaActiva === t) this._tarjetaActiva = null;
+      this._tarjetas.delete(t);
       if (estado !== "reemplazada" && this._mhActivo() && this._vista === "voz" && t.estado.textContent) this._mostrarDicho(t.estado.textContent);
       this.dispatchEvent(new CustomEvent("asistente:confirmacion", {
         detail: { id: t.d.id, tool: t.d.tool || "", estado }, bubbles: true, composed: true,

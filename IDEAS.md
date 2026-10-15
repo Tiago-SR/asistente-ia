@@ -5,7 +5,8 @@ Ideas sin decidir ni implementar. Lo ya hecho está en el README y el contrato.
 ## Acciones con confirmación (Fase 5)
 
 - **Deshacer (`reversible_con`).** Si una tool lo declara, la tarjeta podría ofrecer «Deshacer» con la misma maquinaria (propuesta, confirmación y token propio). Sin promesa en el contrato.
-- **No se hará:** borrar (el asistente rechaza tools destructivas), confirmar por voz (siempre en pantalla) y acciones masivas, encadenadas o iniciadas por el sistema (esto último es la Fase 6).
+- **Borrar** ya existe como tool destructiva, apagada por defecto y aprobada por un admin del panel (contrato 8.6). Sigue fuera: borrado masivo, papelera o deshacer del lado del asistente.
+- **No se hará:** confirmar por voz (siempre en pantalla) y acciones masivas, encadenadas o iniciadas por el sistema (esto último es la Fase 6).
 
 ## Panel de ajustes del widget
 

@@ -22,6 +22,8 @@ class ToolDef:
     parametros: dict  # JSON Schema de tipo object
     # Tool con efectos: el agente no la ejecuta, la propone y el usuario confirma (Fase 5).
     escritura: bool = False
+    # Escritura que borra o anula: el agente la trata con más cautela (ver `core/agent._proponer`).
+    destructiva: bool = False
 
 
 @dataclass(frozen=True)

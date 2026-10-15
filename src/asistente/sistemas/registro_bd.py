@@ -28,7 +28,8 @@ from asistente.store.models import RegistroVersion, SistemaRegistro, SistemaSecr
 log = logging.getLogger(__name__)
 
 # Columnas propias: no se repiten dentro de `config` (JSONB), así hay una sola fuente para cada dato.
-_FUERA_DE_CONFIG = {"id", "nombre", "habilitado", "acciones_habilitadas", "tool_estado"}
+_FUERA_DE_CONFIG = {"id", "nombre", "habilitado", "acciones_habilitadas", "tool_estado",
+                   "destructivas_aprobadas"}
 INTERVALO_SONDEO_S = 5.0
 
 
@@ -72,13 +73,17 @@ async def leer_registro(
     for x in secretos:
         por_secreto.setdefault(x.sistema_id, []).append(x)
     por_tool: dict[str, dict[str, bool]] = {}
+    aprobadas: dict[str, dict[str, str]] = {}
     for t in tools:
         por_tool.setdefault(t.sistema_id, {})[t.tool] = t.habilitada
+        if t.aprobada_huella:
+            aprobadas.setdefault(t.sistema_id, {})[t.tool] = t.aprobada_huella
 
     entradas = []
     for f in filas:
         config = {**f.config, "id": f.id, "nombre": f.nombre, "habilitado": f.habilitado,
-                  "tool_estado": por_tool.get(f.id, {})}
+                  "tool_estado": por_tool.get(f.id, {}),
+                  "destructivas_aprobadas": aprobadas.get(f.id, {})}
         claves: dict[str, str] = {}
         error = None
         for x in por_secreto.get(f.id, []):

@@ -17,6 +17,7 @@ from asistente.core.ports import AccionCreada, Contexto, LimiteExcedido, Resulta
 from asistente.store.models import Accion
 
 MAX_PROPUESTAS_POR_HORA = 20
+TTL_DESTRUCTIVA_S = 60  # una destructiva se decide ya: no queda esperando en pantalla
 
 
 class AccionesSql:
@@ -38,30 +39,44 @@ class AccionesSql:
 
     async def crear(
         self, ctx: Contexto, conversacion_id: Any, tool: str, parametros: dict,
-        propuesta: ResultadoPropuesta,
+        propuesta: ResultadoPropuesta, *, destructiva: bool = False,
+        inicio_turno: datetime | None = None,
     ) -> AccionCreada:
         ahora = self._reloj()
         async with self._sesiones.begin() as s:
-            recientes = (await s.execute(
-                select(func.count()).select_from(Accion).where(
-                    Accion.sistema_id == ctx.sistema_id, Accion.usuario_ref == ctx.usuario_ref,
-                    Accion.creada > ahora - timedelta(hours=1),
-                )
-            )).scalar_one()
+            ultima_hora = (Accion.sistema_id == ctx.sistema_id, Accion.usuario_ref == ctx.usuario_ref,
+                           Accion.creada > ahora - timedelta(hours=1))
+            recientes = (await s.execute(select(func.count()).select_from(Accion).where(*ultima_hora))).scalar_one()
             if recientes >= self._max_por_hora:
                 raise LimiteExcedido("acciones_hora")
-            # Una sola pendiente por conversación: la nueva reemplaza a la anterior.
+            if destructiva:
+                n = (await s.execute(select(func.count()).select_from(Accion).where(
+                    *ultima_hora, Accion.destructiva.is_(True)))).scalar_one()
+                if n >= ctx.limites.destructivas_por_hora:
+                    raise LimiteExcedido("destructivas_hora")
+            de_conversacion = (Accion.sistema_id == ctx.sistema_id, Accion.usuario_ref == ctx.usuario_ref,
+                               Accion.conversacion_id == conversacion_id, Accion.estado == "pendiente")
+            if inicio_turno is not None:
+                # La misma propuesta dos veces en el turno se ejecutaría dos veces en el anfitrión.
+                igual = (await s.execute(select(func.count()).select_from(Accion).where(
+                    *de_conversacion, Accion.creada >= inicio_turno, Accion.tool == tool[:64],
+                    Accion.huella == propuesta.huella))).scalar_one()
+                if igual:
+                    raise LimiteExcedido("propuesta_duplicada")
+            # La tanda de un turno nuevo reemplaza a la anterior; las hermanas del mismo turno conviven.
+            # shortcut: el agente serializa las `crear` de un turno; dos pestañas a la vez aún pueden pasar el tope por 1.
             await s.execute(
                 update(Accion)
-                .where(Accion.sistema_id == ctx.sistema_id, Accion.usuario_ref == ctx.usuario_ref,
-                       Accion.conversacion_id == conversacion_id, Accion.estado == "pendiente")
+                .where(*de_conversacion, *((Accion.creada < inicio_turno,) if inicio_turno is not None else ()))
                 .values(estado="reemplazada", decidida=ahora)
             )
             fila = Accion(
                 id=uuid.uuid4(), sistema_id=ctx.sistema_id, usuario_ref=ctx.usuario_ref,
                 conversacion_id=conversacion_id, tool=tool[:64], parametros=parametros,
                 huella=propuesta.huella, resumen=propuesta.resumen, lineas=list(propuesta.lineas),
-                estado="pendiente", creada=ahora, expira=ahora + timedelta(seconds=propuesta.expira_s),
+                estado="pendiente", creada=ahora, destructiva=destructiva,
+                expira=ahora + timedelta(seconds=min(propuesta.expira_s, TTL_DESTRUCTIVA_S)
+                                         if destructiva else propuesta.expira_s),
             )
             s.add(fila)
         return AccionCreada(str(fila.id), fila.expira.isoformat())
@@ -80,19 +95,20 @@ class AccionesSql:
                 select(Accion).where(*self._propia(sistema_id, usuario_ref, accion_id))
             )).scalar_one_or_none()
 
-    async def pendiente_de(
+    async def pendientes_de(
         self, sistema_id: str, usuario_ref: str, conversacion_id: uuid.UUID
-    ) -> Accion | None:
-        """La acción pendiente y vigente de la conversación (para restaurar la tarjeta al recargar)."""
+    ) -> list[Accion]:
+        """Las acciones pendientes y vigentes de la conversación, de la más antigua a la más reciente
+        (para restaurar las tarjetas al recargar)."""
         ahora = self._reloj()
         async with self._sesiones.begin() as s:
-            return (await s.execute(
+            return list((await s.execute(
                 select(Accion)
                 .where(Accion.sistema_id == sistema_id, Accion.usuario_ref == usuario_ref,
                        Accion.conversacion_id == conversacion_id, Accion.estado == "pendiente",
                        Accion.expira > ahora)
-                .order_by(Accion.creada.desc()).limit(1)
-            )).scalar_one_or_none()
+                .order_by(Accion.creada.asc())
+            )).scalars())
 
     async def reclamar(
         self, sistema_id: str, usuario_ref: str, accion_id: uuid.UUID, jti: str

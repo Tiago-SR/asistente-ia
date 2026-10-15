@@ -26,7 +26,7 @@ def manifiesto(*tools):
     return parsear_manifiesto({"contrato": "1", "sistema": {"nombre": "S"}, "tools": list(tools)})
 
 
-def test_solo_es_accionable_la_escritura_con_confirmacion_y_no_destructiva():
+def test_solo_es_accionable_la_escritura_con_confirmacion():
     m = manifiesto(
         tool("con_conf", confirmacion={"ttl_s": 60}),
         tool("sin_conf"),
@@ -34,19 +34,32 @@ def test_solo_es_accionable_la_escritura_con_confirmacion_y_no_destructiva():
         {**tool("leer"), "efecto": "lectura"},
     )
     assert m.tools["con_conf"].confirmacion_ttl_s == 60
-    assert [t.nombre for t in m.tools.values() if t.accionable] == ["con_conf"]
+    assert [t.nombre for t in m.tools.values() if t.accionable] == ["con_conf", "borrar"]
+    assert m.tools["borrar"].destructiva
+    assert manifiesto(tool("a", confirmacion={})).tools["a"].confirmacion_ttl_s == 120  # por defecto
 
 
-def test_tools_accion_respeta_la_lista_del_operador():
-    m = manifiesto(tool("a", confirmacion={}), tool("b", confirmacion={}))
-    assert m.tools_accion(()) == []
-    assert [t.nombre for t in m.tools_accion(["b", "no_existe"])] == ["b"]
-    assert m.tools["a"].confirmacion_ttl_s == 120  # por defecto
+@pytest.mark.parametrize("nombre,esperada", [
+    ("borrar_nota", True), ("eliminar_establecimiento", True), ("nota_delete", True), ("dar_de_baja", True),
+    ("dar_baja", True), ("anular", True), ("agregar_nota", False), ("trabajador", False),
+])
+def test_destructiva_por_nombre_aunque_no_la_declare(nombre, esperada):
+    assert manifiesto(tool(nombre, confirmacion={})).tools[nombre].destructiva is esperada
 
 
-def test_la_lectura_nunca_aparece_como_accion():
-    m = manifiesto({**tool("leer"), "efecto": "lectura"})
-    assert m.tools_accion(["leer"]) == []
+def test_huella_estable_ante_el_orden_de_claves_y_cambia_con_la_definicion():
+    a = tool("x", confirmacion={}, parametros={"type": "object", "properties": {"a": {}, "b": {}}})
+    b = tool("x", confirmacion={}, parametros={"properties": {"b": {}, "a": {}}, "type": "object"})
+    ha, hb = (manifiesto(t).tools["x"].huella for t in (a, b))
+    assert ha == hb
+    assert manifiesto({**a, "descripcion": "otra"}).tools["x"].huella != ha
+    assert manifiesto({**a, "confirmacion": {"ttl_s": 30}}).tools["x"].huella != ha
+
+
+def test_escritura_con_parametro_array_se_descarta_pero_la_lectura_no():
+    params = {"type": "object", "properties": {"ids": {"type": "array"}}}
+    m = manifiesto(tool("w", parametros=params), {**tool("r", parametros=params), "efecto": "lectura"})
+    assert m.tools.keys() == {"r"}
 
 
 @pytest.mark.parametrize("confirmacion", [{"ttl_s": 5}, {"ttl_s": 301}, {"ttl_s": "60"}, {"ttl_s": True}, "si"])
@@ -104,5 +117,40 @@ async def test_la_purga_borra_acciones_viejas_solo_del_sistema_indicado():
                 select(func.count()).select_from(Accion).where(Accion.sistema_id == sistema))
             assert (await quedan(sid)).scalar_one() == 1
             assert (await quedan(otro)).scalar_one() == 1  # otro sistema: intacto
+    finally:
+        await motor.dispose()
+
+
+@pytest.mark.skipif(not URL, reason="sin ASISTENTE_DATABASE_URL")
+async def test_destructivas_tienen_tope_propio_ttl_corto_y_flag():
+    from asistente.core.ports import Contexto, LimiteExcedido, LimitesUso, ResultadoPropuesta
+
+    motor = create_async_engine(URL)
+    async with motor.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+    sesiones = async_sessionmaker(motor, expire_on_commit=False)
+    sid = f"t-{uuid.uuid4().hex[:10]}"
+    ctx = Contexto(sistema_id=sid, sistema_nombre="S", usuario_ref="ana", jti="j", request_id="r", modelo="m",
+                   prompt_system="s", prompt_version="v", limites=LimitesUso(10, 10, 10, destructivas_por_hora=2))
+    p = ResultadoPropuesta(ok=True, resumen="r", lineas=("l",), huella="h" * 16, expira_s=300)
+    acciones = AccionesSql(sesiones)
+    try:
+        for _ in range(2):
+            creada = await acciones.crear(ctx, uuid.uuid4(), "borrar_nota", {}, p, destructiva=True)
+        vida = datetime.fromisoformat(creada.expira) - datetime.now(UTC)
+        assert vida <= timedelta(seconds=60)
+        with pytest.raises(LimiteExcedido) as e:
+            await acciones.crear(ctx, uuid.uuid4(), "borrar_nota", {}, p, destructiva=True)
+        assert e.value.cual == "destructivas_hora"
+        # las escrituras normales no gastan ni sufren ese tope, y conservan su TTL
+        normal = await acciones.crear(ctx, uuid.uuid4(), "agregar_nota", {}, p)
+        assert datetime.fromisoformat(normal.expira) - datetime.now(UTC) > timedelta(seconds=200)
+        # otro usuario tiene su propio cupo
+        otro = ctx.__class__(**{**ctx.__dict__, "usuario_ref": "beto"})
+        await acciones.crear(otro, uuid.uuid4(), "borrar_nota", {}, p, destructiva=True)
+        async with sesiones() as s:
+            n = (await s.execute(select(func.count()).select_from(Accion).where(
+                Accion.sistema_id == sid, Accion.destructiva.is_(True)))).scalar_one()
+        assert n == 3
     finally:
         await motor.dispose()

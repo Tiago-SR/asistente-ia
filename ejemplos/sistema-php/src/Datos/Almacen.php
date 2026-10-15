@@ -85,6 +85,12 @@ final class Almacen
             ->execute([$huella, $sub, $tool, self::canonico($parametros), $version, $exp]);
     }
 
+    /** Una propuesta se usa una sola vez: sin esto, otro token sobre la misma huella duplicaría el alta. */
+    public function consumirPropuesta(string $huella): void
+    {
+        $this->db->prepare('DELETE FROM propuestas WHERE huella = ?')->execute([$huella]);
+    }
+
     /** @return array{sub: string, tool: string, parametros: array, version: ?int, exp: int}|null solo si sigue vigente */
     public function propuestaVigente(string $huella): ?array
     {

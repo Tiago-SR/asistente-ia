@@ -265,6 +265,35 @@ async (page) => {
     await p.close();
   }
 
+  // — Destructiva: tarjeta reforzada, sin foco por defecto; confirmar y cancelar siguen siendo un clic real —
+  {
+    const destructiva = (n) => prop(n, { tool: "borrar_nota", destructiva: true, resumen: "Borrar la nota n1", lineas: ["Texto: Revisar el alambrado"] });
+    const { p, visto, enviar, tarjeta } = await nueva({
+      prop: destructiva, confirmar: () => ({ status: 200, json: { estado: "ejecutada", ok: true, mensaje: "Nota borrada." } }),
+    });
+    await enviar();
+    await caso("la destructiva se marca (clase, aviso «No se puede deshacer.») y su detalle es el estado actual", async () => {
+      const t = tarjeta();
+      afirma((await t.getAttribute("class")).split(/\s+/).includes("destructiva"), "sin la clase destructiva");
+      afirma((await t.locator(".accion-aviso").textContent()).includes("No se puede deshacer"), "sin el aviso");
+      afirma((await t.locator("li").first().textContent()).includes("alambrado"), "sin el detalle");
+    });
+    await caso("el borde y el botón van en rojo (variable de paleta, no heredan el color del anfitrión)", async () => {
+      const [borde, boton] = await tarjeta().evaluate((e) => [getComputedStyle(e).borderTopColor, getComputedStyle(e.querySelector("button.primario")).backgroundColor]);
+      afirma(borde === boton && borde !== "rgb(0, 0, 0)", `borde=${borde} boton=${boton}`);
+    });
+    await caso("no toma el foco al aparecer", async () => {
+      const f = await p.locator("asistente-chat").evaluate((e) => e.shadowRoot.activeElement?.closest?.(".confirmacion") ? "tarjeta" : "otro");
+      afirma(f === "otro", "el foco quedó en la tarjeta");
+    });
+    await caso("Confirmar la ejecuta con el token de escritura de ESA propuesta", async () => {
+      await tarjeta().locator("button.primario").click();
+      await tarjeta().locator(".accion-estado", { hasText: "Nota borrada." }).waitFor();
+      afirma(visto.confirmar.length === 1 && visto.confirmar[0].auth === "Bearer tok-escritura", "POST sin el token");
+    });
+    await p.close();
+  }
+
   const ok = resultados.filter((r) => r.ok).length;
   return { resultados, resumen: `${ok}/${resultados.length} ok` };
 }
