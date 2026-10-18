@@ -122,8 +122,10 @@
     dictar: "Dictar",
     adjuntar: "Adjuntar imagen",
     quitarImagen: "Quitar imagen",
-    avisoImagen: "La imagen se envía al proveedor del modelo para responderte y no se guarda.",
+    avisoImagen: "Las imágenes viajan a un servicio externo de procesamiento para responderte y no se guardan.",
     imagenIlegible: "No pude leer esa imagen.",
+    imagenPesada: "La imagen es demasiado pesada, aun reducida.",
+    soloImagenes: "Por ahora solo se pueden adjuntar imágenes.",
     imagenMax: "Máximo {n} imágenes por mensaje.",
     detener: "Detener grabación",
     transcribiendo: "Transcribiendo…",
@@ -1141,6 +1143,15 @@
       this._adjBtn = el("button", { type: "button", class: "adjuntar", hidden: true, title: TEXTOS.adjuntar, "aria-label": TEXTOS.adjuntar }, icono("adjuntar"));
       this._adjBtn.addEventListener("click", () => this._adjInput.click());
       this._imgChips = el("div", { class: "imagenes" });
+      r.addEventListener("dragover", (e) => { if (this._imgInfo && e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
+      r.addEventListener("drop", (e) => {
+        if (!this._imgInfo || !e.dataTransfer?.files.length) return;
+        e.preventDefault(); this._imgSoltados([...e.dataTransfer.files]);
+      });
+      r.addEventListener("paste", (e) => {
+        const f = [...(e.clipboardData?.files || [])];
+        if (f.length) { e.preventDefault(); this._imgSoltados(f); }
+      });
       this._imgAviso = el("div", { class: "aviso-voz", role: "status" });
       const form = el("form", {}, this._adjBtn, this._adjInput, this._entrada, this._mic, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
@@ -2459,9 +2470,17 @@
         try {
           const blob = await reducirImagen(f, this._imgInfo.maxKb * 1024);
           this._imgPend.push({ url: URL.createObjectURL(blob), tipo: "image/jpeg", datos: await base64De(blob) });
-        } catch { error = TEXTOS.imagenIlegible; }
+        } catch (e) { error = e.message === "imagen_grande" ? TEXTOS.imagenPesada : TEXTOS.imagenIlegible; }
       }
       this._imgPintar(error);
+    }
+
+    // arrastrar y pegar reutilizan _imgElegir; el servidor es quien decide qué tipos valen
+    _imgSoltados(archivos) {
+      if (!this._imgInfo || this._ocupado) return;
+      const imgs = archivos.filter((f) => f.type.startsWith("image/"));
+      if (imgs.length) this._imgElegir(imgs);
+      else if (archivos.length) this._imgPintar(TEXTOS.soloImagenes);
     }
 
     _imgQuitar(i) {
