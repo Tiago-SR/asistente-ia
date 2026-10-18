@@ -337,3 +337,17 @@ async def test_destructiva_exige_nombre_manifiesto_y_se_apaga_si_cambia(cliente,
         fijar = [f.despues for f in (await s.execute(select(AdminAuditoria))).scalars() if f.accion == "tool_fijar"]
     assert {"tool": "borrar_nota", "habilitada": True, "destructiva": True}.items() <= fijar[0].items()
     assert fijar[0]["huella"]
+
+
+async def test_los_limites_de_adjuntos_no_superan_el_techo_global(cliente, limpio):
+    async with cliente() as c:
+        h = await _sesion(c, limpio, "admin")
+        r = await c.post("/admin/api/sistemas", json={"config": CONFIG}, headers=h)
+        cfg = r.json()["config"]
+        for campo, valor in (("max_archivos", 99), ("max_kb", 99_999)):
+            r = await c.put("/admin/api/sistemas/acme", headers=h, json={
+                "version": 1, "config": {**cfg, "adjuntos": {campo: valor}}})
+            assert (r.status_code, r.json()["error"]) == (422, f"adjuntos_{campo}_sobre_el_techo")
+        r = await c.put("/admin/api/sistemas/acme", headers=h, json={
+            "version": 1, "config": {**cfg, "adjuntos": {"max_archivos": 2, "max_kb": 300}, "exportar_excel": True}})
+        assert r.status_code == 200 and r.json()["config"]["adjuntos"]["max_kb"] == 300

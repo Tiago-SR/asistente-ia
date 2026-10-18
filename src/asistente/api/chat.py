@@ -73,11 +73,12 @@ async def chat(
 
     adjuntos: tuple = ()
     if body.imagenes:
-        if not llm.capacidades.soporta_imagenes:
+        if not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
             raise ErrorApi(422, "imagenes_no_soportadas")
         try:
             adjuntos = adj.decodificar([(i.tipo, i.datos) for i in body.imagenes],
-                                       max_imagenes=cfg.max_imagenes, max_bytes=cfg.max_imagen_kb * 1024)
+                                       max_imagenes=min(sistema.adjuntos.max_archivos or cfg.max_imagenes, cfg.max_imagenes),
+                                       max_bytes=min(sistema.adjuntos.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb) * 1024)
         except adj.AdjuntoInvalido as e:
             raise ErrorApi(413 if e.codigo == "imagen_demasiado_grande" else 422, e.codigo) from e
 

@@ -39,7 +39,8 @@ async def estado(
         admite = llm.capacidades.soporta_imagenes
     except LLMNoConfigurado:
         admite = False
-    if admite:
-        cfg = svc.settings
-        resp["imagenes"] = {"max": cfg.max_imagenes, "max_kb": cfg.max_imagen_kb, "tipos": list(adjuntos.TIPOS)}
+    if admite and sesion.sistema.adjuntos.habilitado:
+        cfg, lim = svc.settings, sesion.sistema.adjuntos
+        resp["imagenes"] = {"max": min(lim.max_archivos or cfg.max_imagenes, cfg.max_imagenes),
+                            "max_kb": min(lim.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb), "tipos": list(adjuntos.TIPOS)}
     return resp

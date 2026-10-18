@@ -333,6 +333,18 @@ async def _sistemas_bd(svc: Servicios) -> dict:
 _DNS_TOPE_S = 3.0
 
 
+def _verificar_adjuntos(config: dict, svc: Servicios) -> None:
+    """Los límites de imágenes del sistema no pueden superar el techo global (env); el modelo no lo exige para que
+    bajar el env no impida cargar sistemas ya guardados."""
+    adj, cfg = config.get("adjuntos"), svc.settings
+    if not isinstance(adj, dict):
+        return
+    for campo, techo in (("max_archivos", cfg.max_imagenes), ("max_kb", cfg.max_imagen_kb)):
+        v = adj.get(campo)
+        if isinstance(v, int) and not isinstance(v, bool) and v > techo:
+            raise ErrorApi(422, f"adjuntos_{campo}_sobre_el_techo")
+
+
 async def _verificar_destinos(config: dict, svc: Servicios) -> None:
     """Rechaza al guardar una URL que el servicio no podría usar (loopback, red privada o metadatos que no figuren
     en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS) para dar un error claro. No es el control: ese ocurre al conectar
@@ -369,6 +381,7 @@ async def crear_sistema(request: Request, datos: _Crear,
     """Crea el sistema DESHABILITADO: los secretos se cargan después y entonces se habilita (PUT)."""
     a = request.state.actor
     assert svc.sesiones is not None
+    _verificar_adjuntos(datos.config, svc)
     await _verificar_destinos(datos.config, svc)
     try:
         r = await escritura.crear_sistema(svc.sesiones, datos.config, por=a.nombre, ip=_ip(request))
@@ -394,6 +407,7 @@ async def actualizar_sistema(sistema_id: str, datos: _Actualizar, request: Reque
                              svc: Servicios = _ESCRIBIR) -> dict:
     a = request.state.actor
     assert svc.sesiones is not None
+    _verificar_adjuntos(datos.config, svc)
     await _verificar_destinos(datos.config, svc)
     try:
         r = await escritura.actualizar_sistema(

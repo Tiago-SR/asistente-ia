@@ -128,6 +128,13 @@ class LimitesConfig(_Modelo):
     destructivas_por_usuario_hora: int = Field(default=5, ge=0, le=1000)
 
 
+class AdjuntosConfig(_Modelo):
+    """Imágenes adjuntas. None = el techo global (env); el panel nunca puede superarlo (se valida al guardar)."""
+    habilitado: bool = True
+    max_archivos: int | None = Field(default=None, ge=1)
+    max_kb: int | None = Field(default=None, ge=1)
+
+
 class Sistema(_Modelo):
     id: str = Field(pattern=ID_RE)
     nombre: str = Field(min_length=1, max_length=200)
@@ -161,6 +168,9 @@ class Sistema(_Modelo):
     # Búsqueda web: tools locales `buscar_web` y `leer_pagina` y la capa `prompts/web.md`. Apagada por defecto: la
     # consulta sale a un proveedor externo (ver `core/web/herramientas.py`). Requiere `WEB_*` configurado.
     busqueda_web: bool = False
+    adjuntos: AdjuntosConfig = AdjuntosConfig()
+    # Tool local `generar_excel`: el modelo arma un .xlsx descargable con datos de la conversación.
+    exportar_excel: bool = False
     # Cómo se llama el asistente en el widget (título, avisos, ajustes). Es el valor por defecto: cada usuario puede
     # ponerle otro desde el panel de ajustes. Sin él el widget dice «Asistente».
     nombre_asistente: str | None = Field(default=None, min_length=1, max_length=40)

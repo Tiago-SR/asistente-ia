@@ -99,7 +99,11 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
     ev.preventDefault()
     const secretos: Record<string, string> = {}
     for (const [k, v] of Object.entries(nuevos)) if (v) secretos[k] = v
-    void escribir(() => api('PUT', `/sistemas/${id}`, { version: vista.version, config, secretos }), 'Configuración guardada.')
+    // un número vacío en los límites de adjuntos significa «techo global»
+    const adj = { ...(config.adjuntos as Record<string, unknown> | undefined) }
+    for (const k of ['max_archivos', 'max_kb']) if (adj[k] === '') adj[k] = null
+    const cfg = config.adjuntos ? { ...config, adjuntos: adj } : config
+    void escribir(() => api('PUT', `/sistemas/${id}`, { version: vista.version, config: cfg, secretos }), 'Configuración guardada.')
   }
 
   return (
@@ -154,6 +158,12 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             {interruptor('memoria_habilitada', 'Memoria por usuario')}
             {interruptor('busqueda_web', 'Búsqueda web')}
             {interruptor('consultas_recientes', 'Consultas recientes')}
+            {interruptor('exportar_excel', 'Exportar a Excel')}
+            {interruptor('adjuntos.habilitado', 'Adjuntar imágenes (además requiere un modelo con visión)')}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {campo('adjuntos.max_archivos', 'Imágenes por mensaje (vacío = máximo global)', 'number')}
+              {campo('adjuntos.max_kb', 'KB por imagen (vacío = máximo global)', 'number')}
+            </div>
             <div className="grid gap-4 sm:grid-cols-3">
               {campo('limites.mensajes_por_usuario_min', 'Mensajes/usuario/min', 'number')}
               {campo('limites.mensajes_por_usuario_dia', 'Mensajes/usuario/día', 'number')}

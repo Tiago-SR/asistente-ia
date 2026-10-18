@@ -87,6 +87,8 @@ const MENSAJES: Record<string, string> = {
   demasiados_intentos: 'Demasiados intentos. Espere unos minutos.',
   permiso_insuficiente: 'Su rol no permite esta acción.',
   version_obsoleta: 'Alguien cambió este sistema mientras lo editaba. Se recargó la versión actual.',
+  adjuntos_max_archivos_sobre_el_techo: 'Las imágenes por mensaje superan el máximo global del servidor.',
+  adjuntos_max_kb_sobre_el_techo: 'Los KB por imagen superan el máximo global del servidor.',
   sistema_existente: 'Ya existe un sistema con ese id.',
   sistema_inexistente: 'El sistema no existe.',
   config_invalida: 'La configuración no es válida.',
