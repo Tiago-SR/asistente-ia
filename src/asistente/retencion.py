@@ -41,6 +41,12 @@ async def purgar_todos(
                 await resumen.purgar_eventos(sistema.id, sistema.retencion_dias)
         except Exception:
             log.exception("purga de %s fallida", sistema.id)
+    if acciones is not None:  # no es de ningún sistema: fuera del bucle
+        try:
+            if n := await acciones.cerrar_interrumpidas():
+                log.warning("%d acciones confirmadas quedaron sin finalizar y pasaron a fallida", n)
+        except Exception:
+            log.exception("cierre de acciones interrumpidas fallido")
     if admin is not None and admin_auditoria_dias > 0:  # no es de ningún sistema: fuera del bucle
         try:
             n = await admin.purgar_auditoria(admin_auditoria_dias)

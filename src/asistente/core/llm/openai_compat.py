@@ -90,6 +90,8 @@ class OpenAICompat:
                     detalle = (await r.aread()).decode(errors="replace")[:300]
                     raise LLMError(f"el proveedor respondió HTTP {r.status_code}: {detalle}")
                 async for evento in _eventos(r):
+                    if evento.get("error"):
+                        raise LLMError("el proveedor envió un error en mitad del stream")
                     if evento.get("usage"):
                         u = evento["usage"]
                         uso = Uso(u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, _cache(u))
@@ -105,6 +107,8 @@ class OpenAICompat:
         except httpx.HTTPError as e:
             raise LLMError(f"fallo de red con el proveedor: {type(e).__name__}") from e
 
+        if motivo is None:  # el stream se cortó sin cerrar: no se guarda media respuesta como completa
+            raise LLMError("el stream terminó sin finish_reason")
         llamadas = tuple(_cerrar(i, p) for i, p in sorted(parciales.items()))
         fin: MotivoFin = "tool" if llamadas else _MOTIVOS.get(motivo, "fin")
         return Respuesta("".join(texto), llamadas, fin, uso)

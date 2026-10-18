@@ -147,6 +147,17 @@ class AccionesSql:
                         error=(error or None) and error[:500], status_http=status_http)
             )
 
+    async def cerrar_interrumpidas(self, minutos: int = 15) -> int:
+        """`confirmada` que nadie finalizó (el proceso cayó entre `reclamar` y `finalizar`) → `fallida`. Sin reintento:
+        la escritura pudo ejecutarse, así que el usuario debe verificarla en el sistema."""
+        limite = self._reloj() - timedelta(minutes=minutos)
+        async with self._sesiones.begin() as s:
+            r = await s.execute(
+                update(Accion).where(Accion.estado == "confirmada", Accion.decidida < limite)
+                .values(estado="fallida", ok=False, error="interrumpida")
+            )
+            return r.rowcount
+
     async def purgar(self, sistema_id: str, retencion_dias: int, ahora: datetime | None = None) -> int:
         limite = (ahora or self._reloj()) - timedelta(days=retencion_dias)
         async with self._sesiones.begin() as s:

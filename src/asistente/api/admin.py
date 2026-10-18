@@ -112,15 +112,18 @@ async def admin(request: Request, svc: Servicios = Depends(servicios)) -> Servic
 # Permisos por rol. Las escrituras exigen una sesión de usuario (el token estático es solo automatización:
 # recargar y leer). Abrir algo al operador es cambiar esta tabla, no cada endpoint.
 PERMISOS: dict[str, frozenset[str]] = {
-    "admin": frozenset({"sistemas.escribir", "usuarios.gestionar", "auditoria.leer", "metricas.leer"}),
+    "admin": frozenset({"sistemas.escribir", "sistemas.leer", "usuarios.gestionar", "auditoria.leer", "metricas.leer"}),
     "operador": frozenset({"metricas.leer"}),
 }
 
 
-def requiere(permiso: str):
+def requiere(permiso: str, token_ok: bool = False):
     async def dependencia(request: Request, svc: Servicios = Depends(servicios)) -> Servicios:
         a = await actor(request, svc)
-        if a.nombre == "token" or permiso not in PERMISOS.get(a.rol, frozenset()):
+        if a.nombre == "token":
+            if not token_ok:
+                raise ErrorApi(403, "permiso_insuficiente")
+        elif permiso not in PERMISOS.get(a.rol, frozenset()):
             raise ErrorApi(403, "permiso_insuficiente")
         if svc.sesiones is None:
             raise ErrorApi(503, "sin_base_de_datos")
@@ -148,6 +151,7 @@ def _fallo(e: ErrorEscritura) -> ErrorApi:
 
 
 _ESCRIBIR = Depends(requiere("sistemas.escribir"))
+_LEER = Depends(requiere("sistemas.leer", token_ok=True))  # el token de automatización puede leer, no escribir
 _ESPERA_MANIFIESTO_S = 3.0  # tope por sistema al listar
 _USUARIOS = Depends(requiere("usuarios.gestionar"))
 _AUDITORIA = Depends(requiere("auditoria.leer"))
@@ -243,10 +247,10 @@ async def login(datos: _Login, request: Request, response: Response,
     if contar_ip and len(fallos) >= _FALLOS_IP_MAX:
         raise ErrorApi(429, "demasiados_intentos")
     store = _store(svc)
+    if contar_ip:
+        fallos.append(ahora)  # se cuenta antes del await: así los intentos en paralelo también suman
     res = await store.login(datos.email, datos.clave)
     if res is None:
-        if contar_ip:
-            fallos.append(ahora)
         await store.auditar(datos.email.strip().lower()[:320], "login_fallido", ip=_ip(request))
         raise ErrorApi(401, "credenciales_invalidas")  # mismo mensaje en todos los casos
     token, ses = res
@@ -290,7 +294,7 @@ async def recargar(request: Request, a: Actor = Depends(actor), svc: Servicios =
 
 
 @router.get("/sistemas")
-async def sistemas(svc: Servicios = Depends(admin)) -> dict:
+async def sistemas(svc: Servicios = _LEER) -> dict:
     """Lista del registro sin tocar la red: el estado de los manifiestos va aparte (`/manifiestos`)."""
     if svc.sesiones is None:
         return {"sistemas": [{"id": s.id, "nombre": s.nombre, "habilitado": True, "activo": True}
@@ -311,7 +315,7 @@ async def _estado_manifiesto(svc: Servicios, sistema_id: str) -> dict:
 
 
 @router.get("/manifiestos")
-async def manifiestos(svc: Servicios = Depends(admin)) -> dict:
+async def manifiestos(svc: Servicios = _LEER) -> dict:
     """Estado del manifiesto de cada sistema activo, en paralelo: tarda lo que el más lento (con tope)."""
     ids = [s.id for s in svc.registro.todos()]
     estados = await asyncio.gather(*(_estado_manifiesto(svc, i) for i in ids))
@@ -391,7 +395,7 @@ async def crear_sistema(request: Request, datos: _Crear,
 
 
 @router.get("/sistemas/{sistema_id}")
-async def sistema(sistema_id: str, svc: Servicios = Depends(admin)) -> dict:
+async def sistema(sistema_id: str, svc: Servicios = _LEER) -> dict:
     if svc.sesiones is None:
         raise ErrorApi(503, "sin_base_de_datos")
     try:
@@ -540,7 +544,7 @@ def _defecto(efecto: str) -> bool:
 
 @router.get("/sistemas/{sistema_id}/tools")
 async def tools(sistema_id: str, request: Request, refrescar: bool = False,
-                svc: Servicios = Depends(admin)) -> dict:
+                svc: Servicios = _LEER) -> dict:
     if refrescar:
         _solo_admin_o_token(await actor(request, svc))
     """Tools del manifiesto en vivo y su estado. Los nombres y descripciones los escribe un tercero: el panel
@@ -739,6 +743,14 @@ async def metricas_usuarios(
             cuota_mes.append({"sistema_id": i, "usados": usados, "limite": lim, "restante": max(0, lim - usados)})
     return _sobre(d, h, {**r, "cuota_mes": cuota_mes, "reinicia_dia": cont["reinicia_dia"],
                          "reinicia_mes": cont["reinicia_mes"]})
+
+
+@router.get("/metricas/sistemas")
+async def metricas_sistemas(svc: Servicios = _METRICAS) -> dict:
+    """Solo id y nombre, para el selector de Métricas: el operador no ve la configuración de los sistemas."""
+    if svc.sesiones is None:
+        return {"sistemas": [{"id": s.id, "nombre": s.nombre} for s in svc.registro.todos()]}
+    return {"sistemas": [{"id": f["id"], "nombre": f["nombre"]} for f in await escritura.listar(svc.sesiones)]}
 
 
 @router.get("/metricas/tools")

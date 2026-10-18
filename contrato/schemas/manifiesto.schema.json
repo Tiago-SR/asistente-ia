@@ -101,6 +101,22 @@
           "description": "Marca un borrado o cambio irreversible. Exige `confirmacion`. Queda apagada hasta que un admin del panel la apruebe, y la aprobación vale solo para esta definición."
         }
       },
+      "allOf": [
+        {
+          "if": { "properties": { "efecto": { "const": "escritura" } }, "required": ["efecto"] },
+          "then": {
+            "properties": {
+              "parametros": {
+                "properties": {
+                  "properties": {
+                    "additionalProperties": { "not": { "properties": { "type": { "const": "array" } }, "required": ["type"] } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": true
     }
   }

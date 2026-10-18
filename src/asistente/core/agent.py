@@ -188,6 +188,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
     guardar = asyncio.Lock()  # las `crear` del turno corren en serie: así el duplicado y el tope horario se ven
     inicio_turno = datetime.now(UTC)  # las pendientes anteriores a él se reemplazan; las del turno conviven
     web_usadas = 0  # búsquedas y lecturas web de este turno
+    datos_sistema = False  # el turno ya trajo resultados de tools del sistema (o de recientes)
     reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
     nuevos = [Mensaje("user", texto, adjuntos=adjuntos)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
@@ -233,7 +234,10 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         finally:
             estado.latencia_llm_ms += (time.monotonic_ns() - t_llm) // 1_000_000
         estado.uso += resp.uso
-        await limites.registrar_uso(ctx, resp.uso)
+        try:  # contabilidad: si falla no se pierde la respuesta ya generada
+            await limites.registrar_uso(ctx, resp.uso)
+        except Exception:
+            log.warning("[%s] no se pudo registrar el uso de tokens", ctx.request_id, exc_info=True)
         if filtro is not None:
             resto = filtro.cerrar()
             if resto:
@@ -295,6 +299,9 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 if web_usadas > config.web_max_por_turno:
                     atenciones.append(_tope_web(config))
                     continue
+                if c.nombre == webtools.BUSCAR and (datos_sistema or any(_es_dato_sistema(x.nombre, excel, recientes, memoria) for x in llamadas)):
+                    atenciones.append(_web_tras_datos())
+                    continue
                 atenciones.append(_web(ctx, web, limites, auditoria, conversacion_id, c, config, emit,
                                        [*historial, *nuevos]))
             elif excel is not None and c.nombre == excels.NOMBRE:
@@ -303,6 +310,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
                 atenciones.append(_ejecutar(ctx, conector, auditoria, conversacion_id, c, sem, config))
+        datos_sistema = datos_sistema or any(_es_dato_sistema(c.nombre, excel, recientes, memoria) for c in llamadas)
         resultados = await asyncio.gather(*atenciones)
         for c, r in zip(llamadas, resultados, strict=True):
             if r.token_expirado:
@@ -425,6 +433,18 @@ async def _tope_web(config) -> ResultadoTool:
     return ResultadoTool(False, error="tope_web_turno",
                          detalle=f"ya se hicieron {config.web_max_por_turno} búsquedas o lecturas web en este turno: "
                                  "responde con lo que tienes")
+
+
+def _es_dato_sistema(nombre: str, excel, recientes, memoria) -> bool:
+    """Una tool que devuelve datos del sistema: ni web, ni Excel, ni memoria local."""
+    return not (nombre in webtools.NOMBRES or (excel is not None and nombre == excels.NOMBRE)
+                or (memoria is not None and nombre in memorias.NOMBRES))
+
+
+async def _web_tras_datos() -> ResultadoTool:
+    return ResultadoTool(False, error="web_tras_datos",
+                         detalle="no se busca en la web en un turno con datos del sistema: la consulta saldría "
+                                 "a un tercero; responde con lo que tienes")
 
 
 async def _rechazar_extra(c: LlamadaTool, sola: bool) -> ResultadoTool:

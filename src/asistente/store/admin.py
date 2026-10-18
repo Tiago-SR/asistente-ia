@@ -108,11 +108,7 @@ class AdminSql:
         if u.bloqueado_hasta is not None and u.bloqueado_hasta > ahora:
             raise ErrorAdmin("cuenta bloqueada temporalmente", "clave_actual_incorrecta")
         if not await self._verificar(u.hash, actual):
-            fallos = u.fallos + 1
-            async with self._sesiones.begin() as s:
-                await s.execute(update(AdminUsuario).where(AdminUsuario.id == u.id).values(
-                    fallos=0 if fallos >= FALLOS_MAX else fallos,
-                    bloqueado_hasta=ahora + BLOQUEO if fallos >= FALLOS_MAX else None))
+            await self._registrar_fallo(u.id, ahora)
             raise ErrorAdmin("la contraseña actual no es correcta", "clave_actual_incorrecta")
         hash_ = await asyncio.to_thread(_hasher.hash, nueva)
         async with self._sesiones.begin() as s:
@@ -174,11 +170,7 @@ class AdminSql:
         if bloqueado or not u.activo:
             return None
         if not ok:
-            fallos = u.fallos + 1
-            async with self._sesiones.begin() as s:
-                await s.execute(update(AdminUsuario).where(AdminUsuario.id == u.id).values(
-                    fallos=0 if fallos >= FALLOS_MAX else fallos,
-                    bloqueado_hasta=ahora + BLOQUEO if fallos >= FALLOS_MAX else None))
+            await self._registrar_fallo(u.id, ahora)
             return None
         token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         async with self._sesiones.begin() as s:
@@ -189,6 +181,16 @@ class AdminSql:
             await s.execute(delete(AdminSesion).where(  # limpieza oportunista de las vencidas
                 AdminSesion.expira < ahora))
         return token, SesionAdmin(u.id, u.email, u.rol, csrf)
+
+    async def _registrar_fallo(self, usuario_id: uuid.UUID, ahora: datetime) -> None:
+        """Cuenta el fallo con un UPDATE atómico: leer-y-escribir dejaba que intentos en paralelo no sumaran."""
+        async with self._sesiones.begin() as s:
+            fallos = (await s.execute(
+                update(AdminUsuario).where(AdminUsuario.id == usuario_id)
+                .values(fallos=AdminUsuario.fallos + 1).returning(AdminUsuario.fallos))).scalar_one()
+            if fallos >= FALLOS_MAX:
+                await s.execute(update(AdminUsuario).where(AdminUsuario.id == usuario_id)
+                                .values(fallos=0, bloqueado_hasta=ahora + BLOQUEO))
 
     @staticmethod
     async def _verificar(hash_: str, clave: str) -> bool:

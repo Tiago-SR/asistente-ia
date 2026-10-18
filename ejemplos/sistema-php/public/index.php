@@ -24,9 +24,10 @@ function emitir(Respuesta $r): never
 }
 
 /** Login de la sesión del sistema. Demo: cookie simulada; un sistema real usa su propia sesión. */
-function usuarioDeSesion(): ?string
+function usuarioDeSesion(Config $cfg): ?string
 {
-    return isset($_COOKIE['usuario']) && is_string($_COOKIE['usuario']) ? $_COOKIE['usuario'] : null;
+    // La cookie `usuario` es solo de la demo: fuera de `local` cualquiera podría decir quién es.
+    return $cfg->local && isset($_COOKIE['usuario']) && is_string($_COOKIE['usuario']) ? $_COOKIE['usuario'] : null;
 }
 
 $ctl = Fabrica::controlador($cfg);
@@ -38,7 +39,7 @@ if ($ruta === '/asistente/token' && $metodo === 'GET') {
     $prueba = isset($_GET['usuario']) && is_string($_GET['usuario']) ? $_GET['usuario'] : null;
     $conf = isset($_GET['confirmacion']) && is_string($_GET['confirmacion']) ? $_GET['confirmacion'] : null;
     $huella = isset($_GET['huella']) && is_string($_GET['huella']) ? $_GET['huella'] : null;
-    emitir($ctl->token(usuarioDeSesion(), $prueba, $conf, $huella));
+    emitir($ctl->token(usuarioDeSesion($cfg), $prueba, $conf, $huella));
 }
 if ($ruta === '/asistente/tools' && $metodo === 'GET') {
     emitir($ctl->manifiesto($auth));
@@ -54,7 +55,7 @@ if (str_starts_with($ruta, '/asistente/')) {
 }
 
 // ── Páginas de demostración (HTML con el widget) ──
-$usuario = isset($_GET['usuario']) && is_string($_GET['usuario']) ? $_GET['usuario'] : (usuarioDeSesion() ?? 'ana');
+$usuario = isset($_GET['usuario']) && is_string($_GET['usuario']) ? $_GET['usuario'] : (usuarioDeSesion($cfg) ?? 'ana');
 if ($cfg->local && isset($_GET['usuario'])) {
     setcookie('usuario', $usuario, ['path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
 }

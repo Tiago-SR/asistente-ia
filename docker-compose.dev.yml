@@ -11,6 +11,8 @@ services:
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: DEBUG
       ASISTENTE_DOCS: "1"   # /docs y /openapi.json
+      # Dev: el puerto solo se publica en 127.0.0.1 y el Host cambia (8100, Vite en 5173); sin restricción de Host.
+      ASISTENTE_ADMIN_HOSTS: ${ASISTENTE_ADMIN_HOSTS:-}
       # Destinos internos a los que el servicio puede conectarse (anti-SSRF, core/red.py): los sistemas de ejemplo,
       # el host (stmgis, LLM local) y los servicios de apoyo. Fuera de esta lista solo se llega a IPs públicas.
       ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-mock-a,sistema-php,host.docker.internal,searxng,whisper}
@@ -30,7 +32,7 @@ services:
       - ./evals:/app/evals
       - ./config:/config:ro
     ports:
-      - "8100:8000"
+      - "127.0.0.1:8100:8000"
     depends_on:
       postgres:
         condition: service_healthy

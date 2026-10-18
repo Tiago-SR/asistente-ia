@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     admin_cookie_secure: bool = _env("ASISTENTE_ADMIN_COOKIE_SECURE", True)
     admin_origenes: str = _env("ASISTENTE_ADMIN_ORIGENES", "")
     # `Host` (coma, con puerto) con que se sirven /admin y /panel; además se rechazan las peticiones con cabeceras
-    # de proxy (X-Forwarded-*). En prod lo fija docker-compose.prod.yml (túnel ssh); vacío = sin restricción.
-    admin_hosts: str = _env("ASISTENTE_ADMIN_HOSTS", "")
+    # de proxy (X-Forwarded-*). En prod lo fija docker-compose.yml (túnel ssh). Vacío = sin restricción (hay que pedirlo).
+    admin_hosts: str = _env("ASISTENTE_ADMIN_HOSTS", "localhost:8000,127.0.0.1:8000")
     precios_path: str = _env("ASISTENTE_PRECIOS_PATH", "/config/precios.yaml")
     log_level: str = _env("ASISTENTE_LOG_LEVEL", "INFO")
 

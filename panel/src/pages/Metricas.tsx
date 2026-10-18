@@ -19,7 +19,6 @@ import {
   type RespSeries,
   type RespTools,
   type RespUsuarios,
-  type Resumen,
 } from '@/lib/api'
 
 const DIAS = [7, 30, 90] as const
@@ -69,7 +68,7 @@ function Tile({ titulo, valor, nota }: { titulo: string; valor: string; nota?: s
 const ejeX = (d: string) => d.slice(5) // MM-DD
 
 export function Metricas() {
-  const [sistemas, setSistemas] = useState<Resumen[]>([])
+  const [sistemas, setSistemas] = useState<{ id: string; nombre: string }[]>([])
   const [sistema, setSistema] = useState('')
   const [dias, setDias] = useState<(typeof DIAS)[number]>(30)
   const [tabla, setTabla] = useState(false)
@@ -80,7 +79,7 @@ export function Metricas() {
   const [cargando, setCargando] = useState(false)
 
   useEffect(() => {
-    api<{ sistemas: Resumen[] }>('GET', '/sistemas').then((r) => setSistemas(r.sistemas), () => undefined)
+    api<{ sistemas: { id: string; nombre: string }[] }>('GET', '/metricas/sistemas').then((r) => setSistemas(r.sistemas), () => undefined)
   }, [])
 
   useEffect(() => {

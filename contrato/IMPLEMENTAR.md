@@ -65,7 +65,7 @@ asistente ──(3) POST /asistente/tools/{nombre} (token escritura + Idempotenc
 ```
 
 ### 3.1 Manifiesto
-La tool lleva `"efecto":"escritura"` y `"confirmacion":{"ttl_s":120}` (10–300). Sin `confirmacion`, el asistente no la ofrece. Además el operador del asistente la habilita en su `config/sistemas.yaml` (`acciones_habilitadas`); tú no controlas eso.
+La tool lleva `"efecto":"escritura"` y `"confirmacion":{"ttl_s":120}` (10–300). Sin `confirmacion`, el asistente no la ofrece. **Sus `parametros` no pueden tener ninguna propiedad de primer nivel de tipo `array`** (una entidad por llamada): si la tiene, el asistente descarta la tool entera y el panel de admin la lista como rechazada. El verificador lo comprueba. Además el operador del asistente la habilita en su `config/sistemas.yaml` (`acciones_habilitadas`); tú no controlas eso.
 
 ### 3.2 `POST …/propuesta` (sin efectos)
 Mismo cuerpo que la ejecución, token de **lectura** (token de escritura aquí → `403`). Debes:
