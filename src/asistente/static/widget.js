@@ -123,9 +123,11 @@
     adjuntar: "Adjuntar imagen",
     quitarImagen: "Quitar imagen",
     avisoImagen: "Las imágenes viajan a un servicio externo de procesamiento para responderte y no se guardan.",
+    avisoImagenLee: "Las imágenes viajan a un servicio externo que lee su texto. La imagen no se guarda, pero el texto leído queda en la conversación hasta que la borres o venza su retención.",
     imagenIlegible: "No pude leer esa imagen.",
     imagenPesada: "La imagen es demasiado pesada, aun reducida.",
     soloImagenes: "Por ahora solo se pueden adjuntar imágenes.",
+    soltarImagenes: "Suelta las imágenes aquí para adjuntarlas",
     imagenMax: "Máximo {n} imágenes por mensaje.",
     detener: "Detener grabación",
     transcribiendo: "Transcribiendo…",
@@ -885,11 +887,17 @@
     form button.adjuntar[hidden] { display: none; }
     .imagenes { max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 8px; }
     .imagenes:empty { display: none; }
+    .soltar { display: none; position: absolute; inset: 8px; z-index: 30; align-items: center; justify-content: center; text-align: center; padding: 16px;
+      border: 2px dashed var(--c); border-radius: calc(var(--r) * 1.8); pointer-events: none; font-weight: 600; color: var(--c);
+      background: color-mix(in srgb, var(--f) 88%, transparent); }
+    .raiz.arrastrando .soltar { display: flex; }
     .imagenes .mini { position: relative; width: 56px; height: 56px; }
     .imagenes .mini img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--b); }
     .imagenes .mini button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; font-size: 12px; line-height: 1;
       border: 0; border-radius: 50%; background: var(--c); color: var(--ct); cursor: pointer; }
     .msg.user img.adjunta { display: block; max-width: 160px; max-height: 120px; margin-top: 6px; border-radius: 10px; }
+    .msg.user.solo-imagen { padding: 8px; }
+    .msg.user.solo-imagen img.adjunta:first-child { margin-top: 0; }
     .aviso-voz { font-size: 12px; color: var(--apagado); text-align: center; padding-top: 4px; min-height: 16px; }
     .aviso-voz:empty { display: none; }
     .aviso-voz.err { color: var(--p-err-t); }
@@ -1143,8 +1151,16 @@
       this._adjBtn = el("button", { type: "button", class: "adjuntar", hidden: true, title: TEXTOS.adjuntar, "aria-label": TEXTOS.adjuntar }, icono("adjuntar"));
       this._adjBtn.addEventListener("click", () => this._adjInput.click());
       this._imgChips = el("div", { class: "imagenes" });
-      r.addEventListener("dragover", (e) => { if (this._imgInfo && e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
+      // el aviso «suelta aquí» sigue al arrastre; el contador evita el parpadeo de dragenter/dragleave entre elementos hijos
+      this._soltar = el("div", { class: "soltar", "aria-hidden": "true", textContent: TEXTOS.soltarImagenes });
+      let dentro = 0;
+      const arrastraArchivos = (e) => this._imgInfo && !this._ocupado && e.dataTransfer?.types.includes("Files");
+      const finArrastre = () => { dentro = 0; r.classList.remove("arrastrando"); };
+      r.addEventListener("dragenter", (e) => { if (arrastraArchivos(e)) { dentro++; r.classList.add("arrastrando"); } });
+      r.addEventListener("dragleave", (e) => { if (arrastraArchivos(e) && --dentro <= 0) finArrastre(); });
+      r.addEventListener("dragover", (e) => { if (arrastraArchivos(e)) e.preventDefault(); });
       r.addEventListener("drop", (e) => {
+        finArrastre();
         if (!this._imgInfo || !e.dataTransfer?.files.length) return;
         e.preventDefault(); this._imgSoltados([...e.dataTransfer.files]);
       });
@@ -1188,7 +1204,7 @@
       const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada, this._memPanel, this._ajPanel);
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
-      r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso);
+      r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso, this._soltar);
       this._mostrarBienvenida();
       this._aplicarNombre();
     }
@@ -1261,7 +1277,7 @@
           this._vozSrvDefecto = typeof voz.voz_defecto === "string" ? voz.voz_defecto : "";
           const im = e.imagenes;
           this._imgInfo = (this.getAttribute("imagenes") || "auto").toLowerCase() !== "no" && im && Number(im.max) > 0 && Number(im.max_kb) > 0
-            ? { max: Number(im.max), maxKb: Number(im.max_kb) } : null;
+            ? { max: Number(im.max), maxKb: Number(im.max_kb), lee: im.lee === true } : null;
           this._nombreServidor = nombreLimpio(e.nombre_asistente);
           this._aplicarNombre();
         }
@@ -2495,7 +2511,7 @@
         x.addEventListener("click", () => this._imgQuitar(i));
         return el("div", { class: "mini" }, el("img", { src: im.url, alt: "" }), x);
       }));
-      this._imgAviso.textContent = error || (this._imgPend.length ? TEXTOS.avisoImagen : "");
+      this._imgAviso.textContent = error || (this._imgPend.length ? (this._imgInfo.lee ? TEXTOS.avisoImagenLee : TEXTOS.avisoImagen) : "");
       this._imgAviso.classList.toggle("err", !!error);
     }
 
@@ -2524,6 +2540,7 @@
       this._bloquear(true);
       const mia = this._burbuja("user");
       mia.textContent = texto;
+      mia.classList.toggle("solo-imagen", !texto && imagenes.length > 0);
       for (const im of imagenes) mia.append(el("img", { class: "adjunta", src: im.url, alt: "" }));
       const burbuja = this._burbuja("assistant");
       const estado = el("div", { class: "estado", textContent: TEXTOS.pensando });

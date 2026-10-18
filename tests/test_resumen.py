@@ -151,3 +151,16 @@ async def test_purga_de_contadores_conserva_el_mes_y_lo_reciente(sesiones):
     async with sesiones() as ses:
         r = await ses.execute(select(ContadorUso.ventana).where(ContadorUso.sistema_id == s))
         assert sorted(r.scalars()) == ["dia", "mes"]
+
+
+async def test_resumen_suma_imagenes_y_conserva_los_maximos(sesiones):
+    s = sid()
+    async with sesiones.begin() as ses:
+        ses.add_all([
+            evento(s, 1, imagenes=2, imagen_max_kb=300),
+            evento(s, 1, imagenes=1, imagen_max_kb=900),
+            evento(s, 1),
+        ])
+    await ResumenSql(sesiones).resumir(s, 30, AHORA)
+    ok = next(f for f in await diario(sesiones, s) if f.resultado == "ok")
+    assert (ok.imagenes, ok.imagenes_max_turno, ok.imagen_max_kb) == (3, 2, 900)

@@ -189,6 +189,8 @@ class EventoUso(Base):
     duracion_ms: Mapped[int | None] = mapped_column(Integer)
     costo_valle_usd: Mapped[float | None] = mapped_column(Float)
     costo_pico_usd: Mapped[float | None] = mapped_column(Float)
+    imagenes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # adjuntas en el turno
+    imagen_max_kb: Mapped[int | None] = mapped_column(Integer)  # la mayor del turno
 
 
 class UsoDiario(Base):
@@ -219,6 +221,9 @@ class UsoDiario(Base):
     latencia_max_ms: Mapped[int | None] = mapped_column(Integer)
     p50_ms: Mapped[int | None] = mapped_column(Integer)
     p95_ms: Mapped[int | None] = mapped_column(Integer)
+    imagenes: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    imagenes_max_turno: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    imagen_max_kb: Mapped[int | None] = mapped_column(Integer)
 
 
 class Accion(Base):

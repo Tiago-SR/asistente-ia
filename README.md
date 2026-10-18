@@ -53,8 +53,8 @@ automatización (recargar, leer) y **no** puede escribir.
 # Requisito en .env: ASISTENTE_CLAVES_MAESTRAS (ver .env.example)
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml   # una vez
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli crear-admin tu@correo.com --rol admin   # primer usuario
-# Panel con HMR (perfil `panel`): http://localhost:5173/panel/
-docker compose -f docker-compose.dev.yml --profile panel up panel
+# Panel con HMR (arranca con el `up` de dev): http://localhost:5173/panel/
+docker compose -f docker-compose.dev.yml up -d panel
 ```
 
 Sin Docker: `cd panel && npm install && npm run dev` (Vite reenvía `/admin/api` a `PANEL_API`, por defecto

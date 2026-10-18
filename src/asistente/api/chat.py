@@ -18,8 +18,9 @@ from asistente.api.errores import ErrorApi
 from asistente.core import adjuntos as adj
 from asistente.core import events, zona
 from asistente.core.agent import ConfigTurno, run_turn
+from asistente.core.llm.base import Uso
 from asistente.core.memoria import ServicioMemoria
-from asistente.core.ports import Contexto, LimitesUso
+from asistente.core.ports import Contexto, EventoMetrica, LimitesUso
 from asistente.servicios import LLMNoConfigurado, Servicios
 
 log = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ async def chat(
                                        max_imagenes=min(sistema.adjuntos.max_archivos or cfg.max_imagenes, cfg.max_imagenes),
                                        max_bytes=min(sistema.adjuntos.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb) * 1024)
         except adj.AdjuntoInvalido as e:
+            if svc.metricas is not None:
+                svc.metricas.registrar(EventoMetrica(sistema_id=u.sistema_id, usuario_ref=u.usuario_ref,
+                                                     tipo="llm", resultado="limite", motivo=e.codigo, modelo=modelo))
             raise ErrorApi(413 if e.codigo == "imagen_demasiado_grande" else 422, e.codigo) from e
 
     if body.conversacion_id is not None:
@@ -105,6 +109,7 @@ async def chat(
         sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
         usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
         canal=body.canal, memoria=recuerdos, web=web is not None,
+        leer_imagenes=sistema.leer_imagenes,
     )
     lim = sistema.limites
     ctx = Contexto(
@@ -128,6 +133,11 @@ async def chat(
     async def emit(evento: str, datos) -> None:
         await cola.put((evento, datos))
 
+    # Con `leer_imagenes`, el texto de la imagen se lee en paralelo al turno (llamada aparte, sin tools) y se guarda
+    # junto al mensaje: así los turnos siguientes pueden usarlo sin reenviar la imagen.
+    lectura = (asyncio.create_task(adj.leer(llm, modelo, adjuntos, cfg.max_output_tokens))
+               if adjuntos and sistema.leer_imagenes else None)
+
     async def turno() -> None:
         try:
             async def filtrado(evento: str, datos) -> None:
@@ -140,12 +150,13 @@ async def chat(
                                  memoria=memoria, adjuntos=adjuntos, web=web, metricas=svc.metricas)
             if res.completo:
                 try:
-                    # la imagen no se guarda: queda la marca y la metadata (ver core/adjuntos.py)
-                    nuevos = [await adj.para_guardar(m, svc.adjuntos, u.sistema_id, u.usuario_ref)
+                    leidos, uso_lectura = await lectura if lectura else ([], Uso())
+                    # la imagen no se guarda: queda la marca, la metadata y, si se leyó, su texto (core/adjuntos.py)
+                    nuevos = [await adj.para_guardar(m, svc.adjuntos, u.sistema_id, u.usuario_ref, leidos)
                               for m in res.nuevos]
                     await asyncio.shield(svc.repo.guardar_turno(
                         u.sistema_id, u.usuario_ref, conv_id, (texto or "Imagen")[:60], nuevos,
-                        res.uso, modelo, version))
+                        res.uso + uso_lectura, modelo, version))
                 except Exception:
                     log.exception("[%s] no se pudo guardar el turno", request_id)
                     await emit(events.ERROR, "no_se_pudo_guardar")
@@ -162,6 +173,8 @@ async def chat(
             log.exception("[%s] error inesperado en el turno", request_id)
             await emit(events.ERROR, "error_interno")
         finally:
+            if lectura and not lectura.done():  # turno cortado o fallido: no se sigue gastando en leer la imagen
+                lectura.cancel()
             await cola.put(None)
 
     async def flujo():

@@ -35,12 +35,10 @@ services:
       postgres:
         condition: service_healthy
 
-  # Panel de administración con HMR: http://localhost:5173/panel/  (perfil `panel`, no arranca por defecto)
-  #   docker compose -f docker-compose.dev.yml --profile panel up panel
+  # Panel de administración con HMR: http://localhost:5173/panel/  (arranca siempre con el `up`)
   # Para escribir sistemas hace falta ASISTENTE_CLAVES_MAESTRAS en .env. Si el navegador
   # rechaza la cookie `__Host-admin` por http, poner ASISTENTE_ADMIN_COOKIE_SECURE=false en .env (solo dev).
   panel:
-    profiles: [panel]
     image: node:22-alpine
     working_dir: /panel
     command: sh -c "npm ci && npm run dev"

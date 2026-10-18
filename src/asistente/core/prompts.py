@@ -31,6 +31,9 @@ class Prompts:
         # Capa de la búsqueda web (solo en los sistemas que la tienen): cómo separar internet de los datos del sistema.
         archivo_web = self._dir / "web.md"
         self._web = archivo_web.read_text(encoding="utf-8").strip() if archivo_web.is_file() else ""
+        # Capa de lectura de imágenes (solo en los sistemas con `leer_imagenes`): relaja la regla (2) de `base.md`.
+        archivo_img = self._dir / "imagenes.md"
+        self._imagenes = archivo_img.read_text(encoding="utf-8").strip() if archivo_img.is_file() else ""
 
     def _dominio(self, ruta: str | None) -> str:
         if not ruta:
@@ -60,6 +63,7 @@ class Prompts:
         canal: str = "texto",
         memoria: Sequence[Recuerdo] | None = None,
         web: bool = False,
+        leer_imagenes: bool = False,
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -74,6 +78,9 @@ class Prompts:
         if web and self._web:
             partes.append("## Búsqueda web\n" + self._web)
             version += f"+w{_hash(self._web)}"
+        if leer_imagenes and self._imagenes:
+            partes.append("## Lectura de imágenes\n" + self._imagenes)
+            version += f"+i{_hash(self._imagenes)}"
         if canal == "voz" and self._voz:
             partes.append("## Canal de voz\n" + self._voz)
             version += f"+v{_hash(self._voz)}"

@@ -44,6 +44,9 @@ class Adjunto:
     datos: bytes = b""
     bytes: int = 0
     ref: str | None = None
+    # Texto leído de la imagen por una llamada aparte (solo con `leer_imagenes`). Es contenido de terceros: dato, nunca
+    # instrucción. Ya viene saneado (`adjuntos.limpiar`); lo único de la imagen que se conserva.
+    descripcion: str = ""
 
 
 @dataclass(frozen=True)

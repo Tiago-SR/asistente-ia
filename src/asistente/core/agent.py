@@ -132,11 +132,11 @@ async def run_turn(
         return estado
     finally:
         if metricas is not None:
-            _medir(metricas, ctx, config, estado, errores, limite)
+            _medir(metricas, ctx, config, estado, errores, limite, adjuntos)
 
 
 def _medir(metricas: Metricas, ctx: Contexto, config: ConfigTurno, estado: ResultadoTurno,
-           errores: list[str], limite: str | None) -> None:
+           errores: list[str], limite: str | None, adjuntos: tuple[Adjunto, ...] = ()) -> None:
     """Un evento por turno. Nunca lanza: observar no puede romper la respuesta."""
     try:
         if limite is not None:
@@ -154,7 +154,8 @@ def _medir(metricas: Metricas, ctx: Contexto, config: ConfigTurno, estado: Resul
             tokens_in=estado.uso.tokens_in, tokens_in_cache=estado.uso.tokens_in_cache,
             tokens_out=estado.uso.tokens_out, llamadas_llm=estado.llamadas_llm,
             latencia_llm_ms=estado.latencia_llm_ms if estado.llamadas_llm else None,
-            ttft_ms=estado.tiempos.get("primer_delta"), duracion_ms=duracion,
+            ttft_ms=estado.tiempos.get("primer_delta"), duracion_ms=duracion, imagenes=len(adjuntos),
+            imagen_max_kb=-(-max(a.bytes for a in adjuntos) // 1024) if adjuntos else None,
         ))
     except Exception:
         log.warning("[%s] no se pudo registrar la métrica del turno", ctx.request_id, exc_info=True)

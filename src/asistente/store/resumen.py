@@ -18,7 +18,7 @@ _DIA = "(creada AT TIME ZONE 'UTC')::date"
 _COLUMNAS = (
     "dia, sistema_id, tipo, modelo, resultado, motivo, canal, n, usuarios, tokens_in, tokens_in_cache, "
     "tokens_out, unidades, costo_valle_usd, costo_pico_usd, n_sin_tarifa, latencia_sum_ms, latencia_max_ms, "
-    "p50_ms, p95_ms"
+    "p50_ms, p95_ms, imagenes, imagenes_max_turno, imagen_max_kb"
 )
 _CLAVE = "dia, sistema_id, tipo, modelo, resultado, motivo, canal"
 _ACTUALIZAR = ", ".join(
@@ -38,7 +38,9 @@ SELECT {_DIA} AS dia, sistema_id, tipo, modelo, resultado, motivo, canal,
        COALESCE(SUM(n) FILTER (WHERE costo_valle_usd IS NULL AND resultado <> 'limite'), 0) AS n_sin_tarifa,
        COALESCE(SUM(duracion_ms), 0) AS latencia_sum_ms, MAX(duracion_ms) AS latencia_max_ms,
        (percentile_cont(0.5) WITHIN GROUP (ORDER BY duracion_ms))::int AS p50_ms,
-       (percentile_cont(0.95) WITHIN GROUP (ORDER BY duracion_ms))::int AS p95_ms
+       (percentile_cont(0.95) WITHIN GROUP (ORDER BY duracion_ms))::int AS p95_ms,
+       COALESCE(SUM(imagenes), 0) AS imagenes, COALESCE(MAX(imagenes), 0) AS imagenes_max_turno,
+       MAX(imagen_max_kb) AS imagen_max_kb
 FROM evento_uso e
 WHERE sistema_id = :s AND creada >= :desde AND creada < :hasta {{extra}}
 GROUP BY {_DIA}, sistema_id, tipo, modelo, resultado, motivo, canal
@@ -57,7 +59,8 @@ SELECT {_DIA} AS dia, sistema_id, 'tool' AS tipo, tool AS modelo,
        0 AS tokens_out, 0 AS unidades, NULL::float AS costo_valle_usd, NULL::float AS costo_pico_usd,
        0 AS n_sin_tarifa, COALESCE(SUM(duracion_ms), 0) AS latencia_sum_ms, MAX(duracion_ms) AS latencia_max_ms,
        (percentile_cont(0.5) WITHIN GROUP (ORDER BY duracion_ms))::int AS p50_ms,
-       (percentile_cont(0.95) WITHIN GROUP (ORDER BY duracion_ms))::int AS p95_ms
+       (percentile_cont(0.95) WITHIN GROUP (ORDER BY duracion_ms))::int AS p95_ms,
+       0 AS imagenes, 0 AS imagenes_max_turno, NULL::int AS imagen_max_kb
 FROM llamadas_tool
 WHERE sistema_id = :s AND creada >= :desde AND creada < :hasta
 GROUP BY {_DIA}, sistema_id, tool, ok

@@ -18,7 +18,7 @@ RANGO_CRUDOS_MAX_DIAS = 90
 STATEMENT_TIMEOUT_MS = 5000
 ORDENES = {"turnos": "turnos", "tokens": "tokens", "rechazos": "rechazos"}
 
-_SUMABLES = ("n", "tokens_in", "tokens_in_cache", "tokens_out", "unidades", "n_sin_tarifa", "latencia_sum_ms")
+_SUMABLES = ("n", "tokens_in", "tokens_in_cache", "tokens_out", "unidades", "n_sin_tarifa", "latencia_sum_ms", "imagenes")
 
 
 def _ts(d: date) -> datetime:
@@ -44,7 +44,10 @@ def _agrupar_por_tipo(filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "p50_ms": fs[0]["p50_ms"] if unica else None,
                 "p95_ms": fs[0]["p95_ms"] if unica else None,
                 "latencia_max_ms": max((f["latencia_max_ms"] for f in fs if f["latencia_max_ms"] is not None),
-                                       default=None)}
+                                       default=None),
+                "imagenes_max_turno": max(f["imagenes_max_turno"] or 0 for f in fs),
+                "imagen_max_kb": max((f["imagen_max_kb"] for f in fs if f["imagen_max_kb"] is not None),
+                                     default=None)}
         for c in _SUMABLES:
             fila[c] = sum(f[c] or 0 for f in fs)
         for c in ("costo_valle_usd", "costo_pico_usd"):
@@ -90,7 +93,8 @@ class MetricasLectura:
             filas = [_fila(r, "resumen") for r in await self._ejecutar(
                 s, f"SELECT dia, sistema_id, tipo, modelo, resultado, motivo, canal, n, usuarios, tokens_in, "
                    f"tokens_in_cache, tokens_out, unidades, costo_valle_usd, costo_pico_usd, n_sin_tarifa, "
-                   f"latencia_sum_ms, latencia_max_ms, p50_ms, p95_ms FROM uso_diario WHERE {where}", p)]
+                   f"latencia_sum_ms, latencia_max_ms, p50_ms, p95_ms, imagenes, imagenes_max_turno, imagen_max_kb "
+                   f"FROM uso_diario WHERE {where}", p)]
             ultimos = {r["sistema_id"]: r["ultimo"] for r in await self._ejecutar(
                 s, "SELECT sistema_id, max(dia) AS ultimo FROM uso_diario WHERE tipo <> 'tool' "
                    "GROUP BY sistema_id", {})}

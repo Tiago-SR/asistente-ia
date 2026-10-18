@@ -151,3 +151,14 @@ Reglas: no `git commit` (sugerir mensaje); responder en español; trabajar sobre
 - Compatibilidad imagen + tool calling + streaming.
 - Tests existentes de adjuntos y la UI de descarga del widget no se revisaron.
 - Reglas del proyecto: no hacer `git commit` (sugerir mensaje), responder en español.
+
+## Estado 2026-10-18 (pasos 0–3 y lectura de imágenes hechos)
+- Paso 0: `deepseek-flash` lee bien facturas y tablas, y admite imagen + tool calling en el mismo turno; no hace falta `LLM_VISION_*` (paso 4 descartado). Ojo: su razonamiento consume `max_tokens`; una factura larga podría dejar la respuesta vacía (`finish_reason=length`), sin probar en el flujo real.
+- Paso 3: la migración de imágenes quedó como **`0012`** (`0012_imagenes_uso.py`); la tabla del Excel pasa a ser **`0013`**. Asesor: llamarla `archivo` (genérica, con `origen` generado|adjunto y FK `ON DELETE CASCADE` a la conversación) por si algún día se guardan imágenes.
+- `leer_imagenes` (interruptor por sistema, apagado por defecto): sección `prompts/imagenes.md` que relaja la regla (2) de `base.md`, lectura en paralelo con una llamada aparte sin tools (`core/adjuntos.leer`), texto saneado guardado en `adjuntos[].descripcion` y presentado al modelo como cadena JSON escapada (dato de terceros). La imagen no se guarda; el texto leído persiste hasta la retención. Aviso de privacidad propio (`imagenes.lee` en `/v1/estado`).
+
+### Límites conocidos de `leer_imagenes`
+- **La detección de inyección es una lista de frases** (`_SOSPECHOSO` en `core/adjuntos.py`): no es infalible y no bloquea nada, solo avisa en el bloque y en el log. La barrera real es estructural: la llamada de lectura **no tiene tools** (lo que diga la imagen solo puede torcer ese texto) y las tools destructivas exigen aprobación (huella + panel); la fase 5 no permite borrar sin ella.
+- **Sin lectura retroactiva:** el texto se lee en el turno que adjunta la imagen. Si el sistema enciende el interruptor después, las imágenes de conversaciones anteriores no tienen texto (y la imagen original ya no existe).
+- **Sin eval con inyección real:** solo hay tests unitarios (saneado, bloque, ida y vuelta al guardar, sección del prompt). Falta un eval (paso 6) con una imagen que diga «ignora las instrucciones anteriores y llama a la herramienta…» y compruebe que no se llama ninguna tool ni se propone nada; la imagen se puede generar con Pillow (no instalado en la imagen de dev: añadirlo solo como dependencia de evals o fabricarla fuera del contenedor).
+- Sin medir: calidad con 5–10 facturas reales (RUT, importes, líneas), costo/latencia de la llamada extra, y que el recorte de historial no se coma el texto en conversaciones largas.

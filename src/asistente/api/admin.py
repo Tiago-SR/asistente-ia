@@ -663,6 +663,33 @@ async def metricas_series(
     return _sobre(d, h, r)
 
 
+@router.get("/sistemas/{sistema_id}/uso")
+async def uso_sistema(sistema_id: str, svc: Servicios = _METRICAS) -> dict:
+    """Uso del mes en curso (UTC) para mostrar junto a los límites del sistema: tokens contra la cuota, imágenes
+    adjuntas (total, máximo en un turno, mayor tamaño) y rechazos por motivo. Las imágenes se acumulan desde que
+    se desplegó el registro: antes no hay dato (0, no «sin uso»)."""
+    s = svc.registro.obtener(sistema_id)
+    if s is None:
+        raise ErrorApi(404, "sistema_no_encontrado")
+    hoy = datetime.now(UTC).date()
+    lec = MetricasLectura(svc.sesiones)
+    serie = await _leer(lec.series([sistema_id], hoy.replace(day=1), hoy, filtrar=True))
+    cont = await _leer(lec.contadores([], [sistema_id]))
+    llm = [f for f in serie["filas"] if f["tipo"] == "llm"]
+    usados = cont["mes"].get(sistema_id, 0)
+    return {
+        "desde": hoy.replace(day=1).isoformat(),
+        "tokens_mes": {"usados": usados, "limite": s.limites.tokens_por_mes},
+        "imagenes": sum(f["imagenes"] or 0 for f in llm),
+        "imagenes_max_turno": max((f["imagenes_max_turno"] or 0 for f in llm), default=0),
+        "imagen_max_kb": max((f["imagen_max_kb"] for f in llm if f["imagen_max_kb"] is not None), default=None),
+        "rechazos": {m: sum(f["n"] for f in llm if f["resultado"] == "limite" and f["motivo"] == m)
+                     for m in ("demasiadas_imagenes", "imagen_demasiado_grande")},
+        "excel": sum(f["n"] for f in serie["filas"] if f["tipo"] == "tool" and f["modelo"] == "generar_excel"
+                     and f["resultado"] == "ok"),
+    }
+
+
 @router.get("/metricas/usuarios")
 async def metricas_usuarios(
     sistema_id: str | None = Query(None, max_length=64), desde: date | None = None, hasta: date | None = None,

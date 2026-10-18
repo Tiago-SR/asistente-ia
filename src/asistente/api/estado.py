@@ -42,5 +42,7 @@ async def estado(
     if admite and sesion.sistema.adjuntos.habilitado:
         cfg, lim = svc.settings, sesion.sistema.adjuntos
         resp["imagenes"] = {"max": min(lim.max_archivos or cfg.max_imagenes, cfg.max_imagenes),
-                            "max_kb": min(lim.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb), "tipos": list(adjuntos.TIPOS)}
+                            "max_kb": min(lim.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb), "tipos": list(adjuntos.TIPOS),
+                            # el aviso de privacidad del widget cambia: el texto leído sí queda en la conversación
+                            **({"lee": True} if sesion.sistema.leer_imagenes else {})}
     return resp

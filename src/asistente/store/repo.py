@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from asistente.core.adjuntos import contenido_leido
 from asistente.core.llm.base import Adjunto, LlamadaTool, Mensaje, Uso
 from asistente.core.web.herramientas import compactar as compactar_busqueda
 from asistente.store.models import Conversacion
@@ -25,15 +26,20 @@ def _a_json(m: Mensaje) -> dict:
         "llamadas": [{"id": c.id, "nombre": c.nombre, "parametros": c.parametros} for c in m.llamadas],
         "llamada_id": m.llamada_id,
         # solo metadata: los bytes de una imagen nunca se guardan aquí
-        **({"adjuntos": [{"tipo_mime": a.tipo_mime, "bytes": a.bytes, "ref": a.ref} for a in m.adjuntos]}
+        **({"adjuntos": [{"tipo_mime": a.tipo_mime, "bytes": a.bytes, "ref": a.ref,
+                          **({"descripcion": a.descripcion} if a.descripcion else {})} for a in m.adjuntos]}
            if m.adjuntos else {}),
     }
 
 
 def _desde_json(rol: str, c: dict) -> Mensaje:
     llamadas = tuple(LlamadaTool(x["id"], x["nombre"], x["parametros"]) for x in c.get("llamadas", []))
-    adjuntos = tuple(Adjunto(x["tipo_mime"], b"", x.get("bytes", 0), x.get("ref")) for x in c.get("adjuntos", []))
-    return Mensaje(rol, c.get("texto", ""), llamadas, c.get("llamada_id"), adjuntos)  # type: ignore[arg-type]
+    adjuntos = tuple(Adjunto(x["tipo_mime"], b"", x.get("bytes", 0), x.get("ref"), x.get("descripcion", ""))
+                     for x in c.get("adjuntos", []))
+    texto = c.get("texto", "")
+    if rol == "user" and (leido := contenido_leido(adjuntos)):  # solo para el modelo: `visibles` no lo incluye
+        texto = f"{texto}\n\n{leido}" if texto else leido
+    return Mensaje(rol, texto, llamadas, c.get("llamada_id"), adjuntos)  # type: ignore[arg-type]
 
 
 def recortar(mensajes: list[Mensaje], max_turnos: int) -> list[Mensaje]:

@@ -36,6 +36,15 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
   const [tools, setTools] = useState<{ manifiesto_ok: boolean; error: string | null; tools: ToolVista[]; huerfanas: { nombre: string; habilitada: boolean }[]; destructivas_hora: { total: number; maximo_usuario: number; usuarios: number; limite: number } } | null>(null)
+  const [uso, setUso] = useState<{
+    desde: string
+    tokens_mes: { usados: number; limite: number }
+    imagenes: number
+    imagenes_max_turno: number
+    imagen_max_kb: number | null
+    rechazos: { demasiadas_imagenes: number; imagen_demasiado_grande: number }
+    excel: number
+  } | null>(null)
   const [aprobar, setAprobar] = useState<ToolVista | null>(null)
   const [nombreConf, setNombreConf] = useState('')
   const puede = yo.rol === 'admin'
@@ -54,6 +63,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
       setConfig(v.config)
       setNuevos({})
       await cargarTools()
+      api<NonNullable<typeof uso>>('GET', `/sistemas/${id}/uso`).then(setUso).catch(() => setUso(null)) // sin permiso de métricas: no se muestra
     } catch (e) {
       setError(mensaje(e))
     }
@@ -94,6 +104,10 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
       <Label htmlFor={ruta}>{etiqueta}</Label>
     </div>
   )
+
+  // un número vacío equivale a null (techo global): borrar un campo que ya era null no es un cambio
+  const igual = (x: unknown, y: unknown) => JSON.stringify(x, (_, v) => (v === '' ? null : v)) === JSON.stringify(y, (_, v) => (v === '' ? null : v))
+  const hayCambios = !igual(config, vista.config) || ['token_manifiesto', 'llm_api_key'].some((k) => nuevos[k])
 
   const guardar = (ev: React.FormEvent) => {
     ev.preventDefault()
@@ -160,16 +174,29 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             {interruptor('consultas_recientes', 'Consultas recientes')}
             {interruptor('exportar_excel', 'Exportar a Excel')}
             {interruptor('adjuntos.habilitado', 'Adjuntar imágenes (además requiere un modelo con visión)')}
+            {interruptor('leer_imagenes', 'Leer imágenes de cualquier tema y conservar su texto en la conversación (el texto leído, no la imagen, queda guardado y se envía al proveedor del modelo)')}
             <div className="grid gap-4 sm:grid-cols-2">
               {campo('adjuntos.max_archivos', 'Imágenes por mensaje (vacío = máximo global)', 'number')}
               {campo('adjuntos.max_kb', 'KB por imagen (vacío = máximo global)', 'number')}
             </div>
+            {uso && (
+              <p className="text-sm text-muted-foreground">
+                Uso desde {uso.desde} (el registro de imágenes empieza con este despliegue): {uso.imagenes} imágenes; máximo en un
+                mensaje {uso.imagenes_max_turno}, la mayor {uso.imagen_max_kb ?? 0} KB; rechazos: {uso.rechazos.demasiadas_imagenes} por
+                cantidad y {uso.rechazos.imagen_demasiado_grande} por tamaño; Excel generados: {uso.excel}.
+              </p>
+            )}
             <div className="grid gap-4 sm:grid-cols-3">
               {campo('limites.mensajes_por_usuario_min', 'Mensajes/usuario/min', 'number')}
               {campo('limites.mensajes_por_usuario_dia', 'Mensajes/usuario/día', 'number')}
               {campo('limites.tokens_por_mes', 'Tokens/mes', 'number')}
               {campo('limites.destructivas_por_usuario_hora', 'Destructivas/usuario/hora (0 = bloqueadas)', 'number')}
             </div>
+            {uso && (
+              <p className="text-sm text-muted-foreground">
+                Tokens este mes: {uso.tokens_mes.usados.toLocaleString()} de {uso.tokens_mes.limite.toLocaleString()}.
+              </p>
+            )}
             {campo('retencion_dias', 'Retención (días)', 'number')}
             <div className="grid gap-2">
               <Label htmlFor="prompt_dominio">Prompt de dominio</Label>
@@ -194,7 +221,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
                 </AlertDescription>
               </Alert>
             )}
-            {puede && <Button type="submit" className="w-fit">Guardar</Button>}
+            {puede && <Button type="submit" className="w-fit" disabled={!hayCambios}>Guardar</Button>}
           </CardContent>
         </Card>
       </form>

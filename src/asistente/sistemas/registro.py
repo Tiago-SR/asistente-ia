@@ -169,6 +169,9 @@ class Sistema(_Modelo):
     # consulta sale a un proveedor externo (ver `core/web/herramientas.py`). Requiere `WEB_*` configurado.
     busqueda_web: bool = False
     adjuntos: AdjuntosConfig = AdjuntosConfig()
+    # Leer imágenes de cualquier tema cuando el usuario lo pide (facturas, planillas…) y conservar el texto leído en la
+    # conversación para los turnos siguientes. Apagado: solo se usan las imágenes pertinentes a las tools del sistema.
+    leer_imagenes: bool = False
     # Tool local `generar_excel`: el modelo arma un .xlsx descargable con datos de la conversación.
     exportar_excel: bool = False
     # Cómo se llama el asistente en el widget (título, avisos, ajustes). Es el valor por defecto: cada usuario puede

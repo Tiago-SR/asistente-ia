@@ -276,6 +276,8 @@ class EventoMetrica:
     # Los rellena la implementación con la tarifa vigente; NULL = el modelo no tiene tarifa.
     costo_valle_usd: float | None = None
     costo_pico_usd: float | None = None
+    imagenes: int = 0  # adjuntas en el turno
+    imagen_max_kb: int | None = None  # la mayor del turno
     n: int = 1
 
 
