@@ -169,3 +169,8 @@ Reglas: no `git commit` (sugerir mensaje); responder en español; trabajar sobre
 - El intervalo de purga NO se bajó (afectaría al resumen de métricas): el archivo vencido deja de ser descargable al instante y sus bytes se borran al generarse otro o en la purga diaria (hasta ~24 h después). El aviso no debe prometer borrado inmediato.
 - Probado con Playwright (`tests_e2e/excel.e2e.js`, LLM real): tarjeta, descarga, recarga, 404 de otro usuario, vencido; y en BD: sin filas en `mensajes`, auditoría compacta, sin `<f>` en la hoja.
 - Pendiente: evals de extracción de facturas y de inyección por imagen (paso 6); aviso de privacidad del Excel en la doc; panel: no muestra aún el uso de `generar_excel`.
+
+## Cierre del paso 6 (2026-10-18)
+- Eval de extracción de facturas: **hecho** (ya probado; se probarán muchas más facturas más adelante, con uso real).
+- Eval de inyección por imagen: **no se hará** (decisión del usuario). La barrera sigue siendo estructural: la lectura no tiene tools y las destructivas exigen aprobación.
+- Con esto se da por cerrado el Excel. Quedan solo menores opcionales: uso de `generar_excel` en el panel y aviso de privacidad del Excel en la doc (sin prometer borrado inmediato).

@@ -597,6 +597,16 @@ El usuario puede adjuntar imágenes a un mensaje (una foto, una captura, una pla
 - **Lectura del contenido (`leer_imagenes`, apagado por defecto, por sistema).** Permite leer imágenes de cualquier tema cuando el usuario lo pide (facturas, planillas) y conservar su contenido para los turnos siguientes. En ese turno, una llamada aparte al modelo, sin herramientas, transcribe la imagen; el texto se sanea (sin caracteres de control, máx. 4000 caracteres por imagen) y se guarda en la metadata del mensaje (`adjuntos[].descripcion`), no en el texto visible. La imagen sigue sin guardarse, pero **el texto leído persiste** hasta la retención del sistema o hasta borrar la conversación, y viaja al proveedor del modelo en los turnos siguientes. `GET /v1/estado` agrega `imagenes.lee: true` y el widget muestra el aviso de privacidad correspondiente. El texto leído se presenta al modelo como dato de terceros (cadena JSON escapada, con aviso si contiene frases que parecen órdenes) y nunca como instrucción.
 - **Privacidad.** La imagen sale hacia el proveedor del LLM, igual que el texto. Puede contener datos de terceros o documentos: el aviso es parte del producto. Para el modelo la imagen es un dato aportado por el usuario, nunca una instrucción, y las cifras del sistema siguen saliendo solo de las herramientas (regla en `prompts/base.md`).
 
+### 7.8 Excel descargable (opcional)
+
+Con `exportar_excel: true` en el sistema, el asistente puede armar una tabla (p. ej. los datos de una factura) y ofrecerla como archivo `.xlsx`. Es una herramienta propia del asistente: no toca el sistema del cliente.
+
+- **Tarjeta de descarga.** El widget muestra un botón con el nombre del archivo; baja con `GET /v1/descargas/{id}` (Bearer del usuario) y lo guarda desde el navegador. Sigue disponible al recargar o reabrir la conversación mientras no haya vencido; después el botón dice «Ya no está disponible». Archivo inexistente, vencido o de otro usuario o sistema: `404 archivo_no_disponible`.
+- **Vigencia.** 24 h desde que se genera. Pasado ese plazo deja de poder descargarse de inmediato, pero **los bytes pueden seguir en la base hasta ~24 h más**: se borran al generarse otro archivo o en la purga diaria. No se promete borrado inmediato.
+- **Qué se guarda.** El archivo (24 h) y, en la conversación, solo su id y nombre; las filas no quedan en el historial ni en la auditoría (solo nombre y cantidad de filas y columnas). Los datos viajan, como el resto del turno, al proveedor del modelo.
+- **Topes** (por env): `ASISTENTE_EXCEL_MAX_FILAS` (5000), `ASISTENTE_EXCEL_MAX_COLUMNAS` (50), `ASISTENTE_EXCEL_MAX_KB` (2048) y `ASISTENTE_EXCEL_MAX_POR_DIA` por usuario (20).
+- **Seguridad.** Las celdas de texto que empiezan con `=`, `+`, `-`, `@` se guardan como texto, nunca como fórmula.
+
 ## 8. Acciones con confirmación (opcional)
 
 Un sistema puede dejar que el asistente **proponga** escrituras acotadas (agregar, modificar o, con las salvaguardas de [8.6](#86-tools-destructivas-borrar-anular), borrar un dato). Nunca se ejecutan sin que el usuario las confirme con un clic en el widget. Es opcional y está apagado por defecto: un sistema que no lo implemente sigue siendo de solo lectura. El borrado es un cambio aditivo del contrato (sigue siendo la versión `"1"`): un asistente o un sistema que no lo conozca lo trata como cualquier otra escritura.
