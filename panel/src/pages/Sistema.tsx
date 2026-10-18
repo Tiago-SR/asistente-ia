@@ -29,13 +29,22 @@ function poner(o: Config, ruta: string, valor: unknown): Config {
   return c
 }
 
+type Relectura = {
+  conservado: string | null
+  primera: boolean
+  agregadas?: string[]
+  quitadas?: string[]
+  modificadas?: string[]
+  version?: { antes: string | null; ahora: string | null }
+}
+
 export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) => void }) {
   const [vista, setVista] = useState<Vista | null>(null)
   const [config, setConfig] = useState<Config>({})
   const [nuevos, setNuevos] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
-  const [tools, setTools] = useState<{ manifiesto_ok: boolean; error: string | null; tools: ToolVista[]; huerfanas: { nombre: string; habilitada: boolean }[]; destructivas_hora: { total: number; maximo_usuario: number; usuarios: number; limite: number } } | null>(null)
+  const [tools, setTools] = useState<{ manifiesto_ok: boolean; error: string | null; tools: ToolVista[]; huerfanas: { nombre: string; habilitada: boolean }[]; rechazadas: { nombre: string | null; motivo: string }[]; relectura: Relectura | null; destructivas_hora: { total: number; maximo_usuario: number; usuarios: number; limite: number } } | null>(null)
   const [uso, setUso] = useState<{
     desde: string
     tokens_mes: { usados: number; limite: number }
@@ -45,6 +54,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
     rechazos: { demasiadas_imagenes: number; imagen_demasiado_grande: number }
     excel: number
   } | null>(null)
+  const [releyendo, setReleyendo] = useState(false)
   const [aprobar, setAprobar] = useState<ToolVista | null>(null)
   const [nombreConf, setNombreConf] = useState('')
   const puede = yo.rol === 'admin'
@@ -56,6 +66,12 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         .catch((e) => setError(mensaje(e))),
     [id],
   )
+  const releer = async () => {
+    setReleyendo(true)
+    setError(null)
+    await cargarTools(true)
+    setReleyendo(false)
+  }
   const cargar = useCallback(async () => {
     try {
       const v = await api<Vista>('GET', `/sistemas/${id}`)
@@ -264,7 +280,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             Tools
-            <Button type="button" size="sm" variant="outline" onClick={() => void cargarTools(true)}>Releer manifiesto</Button>
+            <Button type="button" size="sm" variant="outline" disabled={releyendo} onClick={() => void releer()}>{releyendo ? 'Releyendo…' : 'Releer manifiesto'}</Button>
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3">
@@ -276,6 +292,17 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             </p>
           )}
           {tools && !tools.manifiesto_ok && <Alert><AlertDescription>Sin manifiesto: {tools.error}</AlertDescription></Alert>}
+          {tools?.relectura && <ResumenRelectura r={tools.relectura} />}
+          {tools && tools.rechazadas.length > 0 && (
+            <Alert>
+              <AlertDescription>
+                El sistema declara tools que el asistente descartó por inválidas:
+                <ul className="mt-1 list-disc pl-5">
+                  {tools.rechazadas.map((r, i) => <li key={i}><span className="font-mono">{r.nombre ?? '(sin nombre)'}</span>: {r.motivo}</li>)}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
           {tools?.tools.map((t) => (
             <div key={t.nombre} className="flex items-start gap-3 border-b pb-3 last:border-0">
               <Switch checked={t.habilitada} disabled={!puede || (t.efecto === 'escritura' && !t.accionable)}
@@ -328,5 +355,30 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+const lista = (xs?: string[]) => (xs ?? []).join(', ')
+
+// Los nombres y versiones los escribe un tercero: texto, nunca HTML.
+function ResumenRelectura({ r }: { r: Relectura }) {
+  const cambios = [
+    r.agregadas?.length ? `Agregadas: ${lista(r.agregadas)}.` : '',
+    r.quitadas?.length ? `Quitadas: ${lista(r.quitadas)}.` : '',
+    r.modificadas?.length ? `Modificadas (las destructivas piden reaprobación): ${lista(r.modificadas)}.` : '',
+    r.version && r.version.antes !== r.version.ahora ? `Versión: ${r.version.antes ?? '—'} → ${r.version.ahora ?? '—'}.` : '',
+  ].filter(Boolean)
+  return (
+    <Alert variant={r.conservado ? 'destructive' : 'default'}>
+      <AlertDescription>
+        {r.conservado
+          ? `El manifiesto nuevo no es válido (${r.conservado}); se conserva el anterior.`
+          : r.primera
+            ? 'Manifiesto leído (no había uno previo para comparar).'
+            : cambios.length === 0
+              ? 'Manifiesto releído: sin cambios.'
+              : `Manifiesto releído. ${cambios.join(' ')}`}
+      </AlertDescription>
+    </Alert>
   )
 }

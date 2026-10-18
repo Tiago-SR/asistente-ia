@@ -134,6 +134,24 @@ async def test_manifiesto_invalido_conserva_el_anterior(registro_dos):
         assert list(m.tools) == ["a"]
 
 
+async def test_releer_informa_anterior_error_y_rechazadas(registro_dos):
+    mala = tool("mala", efecto="escritura", parametros={"type": "object", "properties": {"x": {"type": "array"}}})
+    respuestas = [manifiesto(tool("a")), manifiesto(tool("a"), mala), {"contrato": "9"}]
+
+    def handler(request):
+        return httpx.Response(200, json=respuestas.pop(0))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+        cache = CacheManifiestos(registro_dos, c)
+        _, anterior, error = await cache.releer("mock-a")
+        assert anterior is None and error is None
+        m, anterior, error = await cache.releer("mock-a")
+        assert list(anterior.tools) == ["a"] and error is None
+        assert [n for n, _ in m.rechazadas] == ["mala"]
+        m, anterior, error = await cache.releer("mock-a")
+        assert "contrato" in error and m is anterior
+
+
 async def test_manifiesto_demasiado_grande(registro_dos):
     grande = manifiesto(tool("a", descripcion="x" * 900))
     grande["relleno"] = "y" * (300 * 1024)

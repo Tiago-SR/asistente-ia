@@ -526,6 +526,14 @@ async def auditoria(limite: int = Query(50, ge=1, le=200), antes_id: int | None 
     return await _store(svc).listar_auditoria(limite=limite, antes_id=antes_id, actor=actor, accion=accion)
 
 
+def _cambios(antes, ahora) -> dict:
+    """Diferencias entre dos manifiestos: tools agregadas, quitadas y con definición distinta (huella)."""
+    a, b = antes.tools, ahora.tools
+    return {"agregadas": sorted(b.keys() - a.keys()), "quitadas": sorted(a.keys() - b.keys()),
+            "modificadas": sorted(n for n in a.keys() & b.keys() if a[n].huella != b[n].huella),
+            "version": {"antes": antes.version_sistema, "ahora": ahora.version_sistema}}
+
+
 def _defecto(efecto: str) -> bool:
     return efecto == "lectura"  # lectura encendida salvo excepción; escritura apagada salvo excepción
 
@@ -547,7 +555,8 @@ async def tools(sistema_id: str, request: Request, refrescar: bool = False,
     aprobadas = await escritura.aprobaciones(svc.sesiones, sistema_id)
     activo = svc.registro.obtener(sistema_id)
     limite = (vista["config"].get("limites") or {}).get("destructivas_por_usuario_hora", 5)
-    salida: dict = {"manifiesto_ok": False, "error": None, "tools": [], "huerfanas": [],
+    salida: dict = {"manifiesto_ok": False, "error": None, "tools": [], "huerfanas": [], "rechazadas": [],
+                    "relectura": None,
                     "destructivas_hora": {**await escritura.destructivas_hora(svc.sesiones, sistema_id),
                                           "limite": limite}}
     conocidas: set[str] = set()
@@ -556,8 +565,14 @@ async def tools(sistema_id: str, request: Request, refrescar: bool = False,
     else:
         activo = activo.model_copy(update={"tool_estado": excepciones, "destructivas_aprobadas": aprobadas})
         try:
-            m = await (svc.manifiestos.recargar(sistema_id) if refrescar else svc.manifiestos.obtener(sistema_id))
+            if refrescar:
+                m, anterior, conservado = await svc.manifiestos.releer(sistema_id)
+                salida["relectura"] = {"conservado": conservado, "primera": anterior is None,
+                                       **(_cambios(anterior, m) if anterior is not None else {})}
+            else:
+                m = await svc.manifiestos.obtener(sistema_id)
             salida["manifiesto_ok"] = True
+            salida["rechazadas"] = [{"nombre": n, "motivo": mo} for n, mo in m.rechazadas]
             for t in m.tools.values():
                 conocidas.add(t.nombre)
                 salida["tools"].append({
@@ -569,7 +584,8 @@ async def tools(sistema_id: str, request: Request, refrescar: bool = False,
                     else ("vigente" if aprobadas[t.nombre] == t.huella else "obsoleta")})
         except ManifiestoInvalido as e:
             salida["error"] = str(e)
-    salida["huerfanas"] = [{"nombre": n, "habilitada": v} for n, v in excepciones.items() if n not in conocidas]
+    if salida["manifiesto_ok"]:  # sin manifiesto todas parecerían huérfanas
+        salida["huerfanas"] = [{"nombre": n, "habilitada": v} for n, v in excepciones.items() if n not in conocidas]
     return salida
 
 

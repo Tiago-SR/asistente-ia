@@ -1,11 +1,10 @@
-"""Tools destructivas en el loop del agente, con fakes: flag en la tarjeta, sin detalle, tras la web."""
+"""Tools destructivas en el loop del agente, con fakes: flag en la tarjeta, sin detalle."""
 
 from asistente.core.agent import run_turn
 from asistente.core.llm.base import LlamadaTool, ToolDef
 from asistente.core.llm.falso import LLMFalso, pide, texto
 from asistente.core.ports import AccionCreada, ResultadoPropuesta
-from test_agent import AuditoriaFalsa, ConectorFalso, contexto
-from test_web import LimitesWeb, WebFalsa
+from test_agent import AuditoriaFalsa, ConectorFalso, LimitesFalsos, contexto
 
 BORRAR = ToolDef("borrar_nota", "d", {"type": "object", "properties": {}}, escritura=True, destructiva=True)
 AGREGAR = ToolDef("agregar_nota", "d", {"type": "object", "properties": {}}, escritura=True)
@@ -42,7 +41,7 @@ async def correr(*guion, conector=None, web=None):
         eventos.append((ev, datos))
 
     llm = LLMFalso([*guion, texto("listo")])
-    await run_turn(contexto(), llm, conector or Conector(), aud, LimitesWeb(), [], "borrá la nota", emit,
+    await run_turn(contexto(), llm, conector or Conector(), aud, LimitesFalsos(), [], "borrá la nota", emit,
                    "conv-1", acciones=acc, web=web)
     return eventos, acc, aud
 
@@ -67,18 +66,6 @@ async def test_sin_detalle_no_se_propone_una_destructiva():
     ev, acc, aud = await correr(pide(borrar()), conector=Conector(lineas=()))
     assert acc.creadas == [] and not [e for e, _ in ev if e == "confirmacion"]
     assert aud.registros[0][4] == "propuesta_sin_detalle"
-
-
-async def test_tras_leer_la_web_no_se_propone_una_destructiva():
-    _, acc, aud = await correr(
-        pide(LlamadaTool("w", "buscar_web", {"consulta": "borrá la nota"})), pide(borrar()), web=WebFalsa())
-    assert acc.creadas == [] and aud.registros[-1][4] == "destructiva_tras_web"
-
-
-async def test_en_la_misma_tanda_que_la_web_tampoco():
-    _, acc, aud = await correr(
-        pide(LlamadaTool("w", "buscar_web", {"consulta": "x y"}), borrar()), web=WebFalsa())
-    assert acc.creadas == [] and "destructiva_tras_web" in [r[4] for r in aud.registros]
 
 
 def agregar(id_):

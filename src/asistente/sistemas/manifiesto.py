@@ -65,6 +65,7 @@ class Manifiesto:
     sistema_nombre: str
     version_sistema: str | None
     tools: dict[str, Tool] = field(default_factory=dict)  # todas las válidas
+    rechazadas: tuple[tuple[str | None, str], ...] = ()  # (nombre, motivo) de las descartadas; el panel las muestra
 
     def tools_lectura(self) -> list[Tool]:
         """Lo único que se expone al modelo en el MVP."""
@@ -92,11 +93,14 @@ def parsear_manifiesto(crudo: object) -> Manifiesto:
 
     tools: dict[str, Tool] = {}
     repetidas: set[str] = set()
+    rechazadas: list[tuple[str | None, str]] = []
     for i, t in enumerate(tools_crudas):
         try:
             tool = _parsear_tool(t)
         except ManifiestoInvalido as e:
             log.error("tool #%d rechazada: %s", i, e)
+            rechazadas.append((t.get("nombre") if isinstance(t, dict) and isinstance(t.get("nombre"), str) else None,
+                               str(e)[:200]))
             continue
         if tool.nombre in repetidas:
             continue
@@ -105,6 +109,7 @@ def parsear_manifiesto(crudo: object) -> Manifiesto:
             log.error("tool duplicada, se descartan todas: %s", tool.nombre)
             del tools[tool.nombre]
             repetidas.add(tool.nombre)
+            rechazadas.append((tool.nombre, "nombre duplicado en el manifiesto: se descartan todas"))
             continue
         tools[tool.nombre] = tool
 
@@ -113,6 +118,7 @@ def parsear_manifiesto(crudo: object) -> Manifiesto:
         sistema_nombre=info["nombre"],
         version_sistema=version if isinstance(version, str) else None,
         tools=tools,
+        rechazadas=tuple(rechazadas),
     )
 
 
@@ -187,20 +193,26 @@ class CacheManifiestos:
         return await self.recargar(sistema_id)
 
     async def recargar(self, sistema_id: str) -> Manifiesto:
+        return (await self.releer(sistema_id))[0]
+
+    async def releer(self, sistema_id: str) -> tuple[Manifiesto, Manifiesto | None, str | None]:
+        """Como `recargar`, pero informa: (vigente, anterior en caché, error si se conservó el anterior)."""
         sistema = self._registro.obtener(sistema_id)
         if sistema is None:
             self._cache.pop(sistema_id, None)
             raise ManifiestoInvalido(f"sistema desconocido o deshabilitado: {sistema_id}")
+        previo = self._cache.get(sistema_id)
+        anterior = previo[1] if previo else None
         try:
             manifiesto = await self._descargar(sistema)
-        except ManifiestoInvalido:
+        except ManifiestoInvalido as e:
             # Un manifiesto nuevo inválido no pisa al último bueno; si no hay, se propaga.
-            if sistema_id in self._cache:
+            if anterior is not None:
                 log.error("manifiesto de %s inválido; se conserva el anterior", sistema_id)
-                return self._cache[sistema_id][1]
+                return anterior, anterior, str(e)
             raise
         self._cache[sistema_id] = (self._reloj(), manifiesto)
-        return manifiesto
+        return manifiesto, anterior, None
 
     def invalidar(self, sistema_id: str | None = None) -> None:
         if sistema_id is None:
