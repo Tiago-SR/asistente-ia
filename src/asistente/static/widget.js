@@ -41,6 +41,8 @@
  *
  *   tema        "claro" | "oscuro" | "auto" (por defecto). "auto" sigue prefers-color-scheme y reacciona si el
  *               usuario cambia el tema del sistema con la página abierta. Se puede cambiar en caliente.
+ *               Si hay panel de ajustes, el usuario puede elegir el suyo ahí (claro | oscuro | automático); lo que elija
+ *               manda sobre este atributo, y "automático" vuelve a él. Cambiarlo dispara asistente:tema.
  *
  *   acuse        "auto" (por defecto) | "no": en el modo voz, si el resumen tarda más de ~0,9 s se dice una frase corta («Un
  *               momento, lo consulto») para que no haya silencio; "no" la quita.
@@ -64,13 +66,19 @@
  *   --asistente-color, --asistente-color-texto, --asistente-fondo, --asistente-texto,
  *   --asistente-borde, --asistente-fuente, --asistente-radio,
  *   --asistente-ancho-lateral (260px), --asistente-ancho-columna (760px)
+ *   --asistente-color-oscuro, --asistente-color-texto-oscuro, --asistente-fondo-oscuro, --asistente-texto-oscuro,
+ *   --asistente-borde-oscuro: lo mismo para el tema oscuro (mandan sobre las anteriores cuando está activo).
  *   Las que el anfitrión defina mandan sobre la paleta del tema (clara u oscura). Quien fije colores de
- *   fondo/texto propios debe fijar el par completo (fondo y texto, color y color-texto) y, si solo los
- *   diseñó para un tema, fijar también `tema` en consecuencia.
+ *   fondo/texto propios debe fijar el par completo (fondo y texto, color y color-texto). Si el usuario elige en los
+ *   ajustes un tema distinto del que resulta del atributo `tema` (o del sistema), los colores sueltos del anfitrión
+ *   se ignoran y se usa la paleta del widget (o los `-oscuro`, si el tema elegido es el oscuro): no se pierde contraste.
+ *   Excepción: si el anfitrión define fondo y texto `-oscuro`, se entiende que cubrió los dos temas (lo suelto es el
+ *   claro, lo `-oscuro` el oscuro) y se respeta siempre lo suyo, elija lo que elija el usuario.
  *
  * Eventos (CustomEvent, burbujean y atraviesan el Shadow DOM):
  *   asistente:accion   {detail: {tipo, url, etiqueta}} por cada sugerencia `ui` del sistema.
  *                      Si el anfitrión llama preventDefault(), el widget no muestra su botón.
+ *   asistente:tema     {detail: {tema, oscuro}} cuando el usuario cambia el tema en los ajustes (tema: claro | oscuro | auto).
  *   asistente:estado   {detail: {habilitado}} al decidir si el asistente está disponible
  *                      (si no lo está, el widget muestra un aviso en lugar del chat).
  *   asistente:metricas {detail: {canal, fuente, acuse_ms, primer_delta_ms, voz_ms, habla_ms, tts_ms, servidor}} al terminar cada turno por
@@ -188,6 +196,8 @@
     ajMotorServidor: "Del servidor (más natural)",
     ajEntrada: "Cómo hablar en el modo voz",
     ajEntradas: { auto: "Automático", tocar: "Tocar para hablar", libres: "Manos libres (palabra de activación)" },
+    ajTema: "Tema",
+    ajTemas: { auto: "Automático", claro: "Claro", oscuro: "Oscuro" },
     ajDictado: "Reconocimiento de voz",
     ajDictados: { auto: "Automático", navegador: "Del navegador", servidor: "Del servidor (sin pitido)" },
     ajVolumen: "Volumen",
@@ -312,10 +322,11 @@
   function nombreLimpio(v) {
     return typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, NOMBRE_MAX).trim() : "";
   }
-  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, velocidad: 1, voz: "", acuse: true, confirmar: true, iniciarVoz: true, entrada: "auto", dictado: "auto" };
+  const AJUSTES_BASE = { nombre: "", motor: "auto", volumen: 1, velocidad: 1, voz: "", acuse: true, confirmar: true, iniciarVoz: true, entrada: "auto", dictado: "auto", tema: "auto" };
   const VEL_MIN = 0.75, VEL_MAX = 1.5;   // velocidad de la voz (1 = normal)
   const MOTORES = ["auto", "navegador", "servidor"];
   const ENTRADAS = ["auto", "tocar", "libres"];
+  const TEMAS = ["auto", "claro", "oscuro"];
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (_) { return undefined; }
@@ -611,6 +622,20 @@
       background: var(--f); color: var(--t);
       scrollbar-color: color-mix(in srgb, var(--t) 35%, var(--f)) transparent;
       font: 15px/1.55 var(--asistente-fuente, system-ui, -apple-system, "Segoe UI", sans-serif);
+    }
+    /* Tema oscuro: el anfitrión puede dar su par propio (--asistente-*-oscuro). Si el usuario fuerza un tema distinto del
+       que diseñó el anfitrión (.ajeno), sus colores sueltos no valen y se usa la paleta (o su par -oscuro). */
+    .raiz.oscuro {
+      --c: var(--asistente-color-oscuro, var(--asistente-color, var(--p-c)));
+      --ct: var(--asistente-color-texto-oscuro, var(--asistente-color-texto, var(--p-ct)));
+      --f: var(--asistente-fondo-oscuro, var(--asistente-fondo, var(--p-f)));
+      --t: var(--asistente-texto-oscuro, var(--asistente-texto, var(--p-t)));
+      --b: var(--asistente-borde-oscuro, var(--asistente-borde, var(--p-b)));
+    }
+    .raiz.ajeno { --c: var(--p-c); --ct: var(--p-ct); --f: var(--p-f); --t: var(--p-t); --b: var(--p-b); }
+    .raiz.ajeno.oscuro {
+      --c: var(--asistente-color-oscuro, var(--p-c)); --ct: var(--asistente-color-texto-oscuro, var(--p-ct));
+      --f: var(--asistente-fondo-oscuro, var(--p-f)); --t: var(--asistente-texto-oscuro, var(--p-t)); --b: var(--asistente-borde-oscuro, var(--p-b));
     }
     [hidden] { display: none !important; }
     button { font: inherit; color: inherit; }
@@ -1133,6 +1158,7 @@
       this._ajBtn.addEventListener("click", () => (this._ajPanel.hidden ? this._ajustesAbrir() : this._ajustesCerrar()));
       this._ajBtn.hidden = !this._ajustesActivos();
       this._aj = this._ajustesLeer();
+      this._aplicarTema();
       const barra = el("header", { class: "barra" }, ...(MOSTRAR_HISTORIAL ? [menu, this._titulo] : [this._titulo, this._manos, this._memBtn, this._altavoz, this._ajBtn, otra]));
 
       this._mensajes = el("div", { class: "columna", role: "log", "aria-live": "polite" });
@@ -1232,9 +1258,15 @@
 
     _aplicarTema() {
       if (!this._raiz) return;
-      const tema = (this.getAttribute("tema") || "auto").trim().toLowerCase();
+      let tema = (this.getAttribute("tema") || "auto").trim().toLowerCase();
+      if (this._ajustesActivos() && this._aj && this._aj.tema !== "auto") tema = this._aj.tema;   // lo que eligió el usuario manda sobre el anfitrión
       const delSistema = !!(this._mqTema && this._mqTema.matches);
-      this._raiz.classList.toggle("oscuro", tema === "oscuro" || (tema !== "claro" && delSistema));
+      const oscuro = tema === "oscuro" || (tema !== "claro" && delSistema);
+      const anfitrion = (this.getAttribute("tema") || "auto").trim().toLowerCase();
+      this._raiz.classList.toggle("oscuro", oscuro);
+      // Con el par -oscuro el anfitrión cubrió los dos temas (lo suelto es el claro): no hace falta ignorarlo.
+      const tienePar = !!getComputedStyle(this).getPropertyValue("--asistente-fondo-oscuro").trim() && !!getComputedStyle(this).getPropertyValue("--asistente-texto-oscuro").trim();
+      this._raiz.classList.toggle("ajeno", !tienePar && oscuro !== (anfitrion === "oscuro" || (anfitrion !== "claro" && delSistema)));
     }
 
     _menu(abrir) {
@@ -2670,6 +2702,7 @@
         if (typeof g.iniciarVoz === "boolean") aj.iniciarVoz = g.iniciarVoz;
         if (ENTRADAS.includes(g.entrada)) aj.entrada = g.entrada;
         if (MOTORES.includes(g.dictado)) aj.dictado = g.dictado;
+        if (TEMAS.includes(g.tema)) aj.tema = g.tema;
       } catch { /* sin storage o JSON roto: valores por defecto */ }
       return aj;
     }
@@ -2705,6 +2738,9 @@
         ...grupo("entrada", ENTRADAS, TEXTOS.ajEntradas, this._ajEntradaRadios));
       this._ajFilaDictado = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajDictado }),
         ...grupo("dictado", MOTORES, TEXTOS.ajDictados, this._ajDictadoRadios));
+      this._ajTemaRadios = {};
+      this._ajFilaTema = el("fieldset", { class: "aj-fila" }, el("legend", { textContent: TEXTOS.ajTema }),
+        ...grupo("tema", TEMAS, TEXTOS.ajTemas, this._ajTemaRadios));
       this._ajVol = el("input", { type: "range", id: "aj-vol", min: "0", max: "100", step: "5" });
       this._ajVol.addEventListener("input", () => this._ajustesCambiar({ volumen: Number(this._ajVol.value) / 100 }));
       this._ajFilaVol = el("div", { class: "aj-fila" }, el("label", { class: "aj-tit", for: "aj-vol", textContent: TEXTOS.ajVolumen }), this._ajVol);
@@ -2732,14 +2768,14 @@
       this._ajProbar = el("button", { type: "button", textContent: TEXTOS.ajProbar });
       this._ajProbar.addEventListener("click", () => { this._pararVoz(); this._decir(TEXTOS.ajPrueba); });
       const restablecer = el("button", { type: "button", textContent: TEXTOS.ajRestablecer });
-      restablecer.addEventListener("click", () => { this._pararVoz(); this._vaciarCacheTts(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._ajustesPintar(); this._actualizarVoz(); this._aplicarNombre(); this._ajNombre.value = ""; });
+      restablecer.addEventListener("click", () => { this._pararVoz(); this._vaciarCacheTts(); this._aj = { ...AJUSTES_BASE }; this._ajustesGuardar(); this._aplicarTema(); this._ajustesPintar(); this._actualizarVoz(); this._aplicarNombre(); this._ajNombre.value = ""; });
       this._ajFilaAcc = el("div", { class: "aj-fila aj-acciones" }, this._ajProbar, restablecer);
       this._ajCerrar = el("button", { type: "button", textContent: TEXTOS.ajCerrar });
       this._ajCerrar.addEventListener("click", () => this._ajustesCerrar());
       this._ajPanel = el("section", { class: "ajustes-panel", hidden: true, role: "dialog", "aria-labelledby": "aj-titulo" },
         el("div", { class: "mem-cab" }, el("h2", { id: "aj-titulo", textContent: TEXTOS.ajustesTitulo }), this._ajCerrar),
         el("div", { class: "mem-cuerpo" }, el("div", { class: "mem-col" },
-          this._ajFilaNombre, this._ajFilaMotor, this._ajFilaGenero, this._ajFilaVoz, this._ajFilaVol, this._ajFilaVel, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaEntrada, this._ajFilaDictado, this._ajFilaAcc)));
+          this._ajFilaNombre, this._ajFilaTema, this._ajFilaMotor, this._ajFilaGenero, this._ajFilaVoz, this._ajFilaVol, this._ajFilaVel, this._ajFilaLeer, this._ajFilaAcuse, this._ajFilaConfirmar, this._ajFilaInicio, this._ajFilaEntrada, this._ajFilaDictado, this._ajFilaAcc)));
       this._ajPanel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ajustesCerrar(); } });
       // un clic fuera del menú (y del engranaje) lo cierra; composedPath atraviesa el Shadow DOM
       this._ajFuera = (e) => {
@@ -2755,6 +2791,10 @@
       this._ajustesGuardar();
       if (this._audio) { this._audio.volume = this._volumen(); this._audio.playbackRate = this._audio.defaultPlaybackRate = this._velocidad(); }   // se oye ya en lo que está sonando (la voz del navegador, desde la frase siguiente)
       if ("nombre" in cambio) this._aplicarNombre();
+      if ("tema" in cambio) {
+        this._aplicarTema();
+        this.dispatchEvent(new CustomEvent("asistente:tema", { detail: { tema: this._aj.tema, oscuro: this._raiz.classList.contains("oscuro") }, bubbles: true, composed: true }));
+      }
       if ("motor" in cambio) { this._pararVoz(); this._actualizarVoz(); }
       if ("voz" in cambio) { this._vaciarCacheTts(); this._pararVoz(); }
       if ("confirmar" in cambio && this._mhActivo()) this._mhPintar();
@@ -2821,6 +2861,7 @@
       // elegir el reconocimiento solo tiene sentido si hay dos y el anfitrión no fijó uno (voz-motor)
       this._ajFilaDictado.hidden = !(this._dictadoServidor && reconocimiento() && (this.getAttribute("voz-motor") || "auto").toLowerCase() === "auto");
       for (const v of MOTORES) this._ajDictadoRadios[v].checked = this._aj.dictado === v;
+      for (const v of TEMAS) this._ajTemaRadios[v].checked = this._aj.tema === v;
     }
 
     _ajustesAbrir() {

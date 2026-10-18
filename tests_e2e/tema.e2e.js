@@ -210,5 +210,33 @@ async (page) => {
   await q.screenshot({ path: `${SHOTS}/25-tema-anfitrion.png` });
   await q.close();
 
+  // El usuario elige el tema en los ajustes: manda sobre el atributo, se recuerda al recargar, avisa con asistente:tema y "automático" vuelve al atributo.
+  const u = await abrir("light", { atributos: { tema: "claro" } });
+  await caso("ajustes: el tema del usuario manda, persiste y avisa", async () => {
+    await u.evaluate(() => { window.__temas = []; document.addEventListener("asistente:tema", (e) => window.__temas.push(e.detail)); });
+    await u.locator("asistente-chat .ajustes").click();
+    await u.locator("asistente-chat input[value=tema-oscuro]").check();
+    afirma((await info(u)).oscuro, "no pasó a oscuro");
+    afirma(JSON.stringify(await u.evaluate(() => window.__temas)) === JSON.stringify([{ tema: "oscuro", oscuro: true }]), "evento asistente:tema");
+    await u.reload();
+    await u.locator("asistente-chat textarea").waitFor();
+    afirma((await info(u)).oscuro, "no persistió");
+    await u.locator("asistente-chat .ajustes").click();
+    await u.locator("asistente-chat input[value=tema-auto]").check();
+    afirma(!(await info(u)).oscuro, "automático no volvió al atributo claro");
+  });
+  await caso("ajustes: colores claros del anfitrión no se aplican si el usuario fuerza oscuro; el par -oscuro sí", async () => {
+    await u.locator("asistente-chat").evaluate((e) => { e.style.setProperty("--asistente-fondo", "#fffbe6"); e.style.setProperty("--asistente-texto", "#222"); });
+    await u.locator("asistente-chat .ajustes").click();
+    await u.locator("asistente-chat input[value=tema-oscuro]").check();
+    let i = await info(u);
+    afirma(i.oscuro && i.fondo !== "rgb(255, 251, 230)", "usó el fondo claro del anfitrión: " + JSON.stringify(i));
+    const a = await auditar(u); afirma(!a.malos.length, JSON.stringify(a));
+    await u.locator("asistente-chat").evaluate((e) => { e.style.setProperty("--asistente-fondo-oscuro", "#101820"); e.style.setProperty("--asistente-texto-oscuro", "#eef"); });
+    i = await info(u);
+    afirma(i.fondo === "rgb(16, 24, 32)" && i.texto === "rgb(238, 238, 255)", "par oscuro: " + JSON.stringify(i));
+  });
+  await u.close();
+
   return { resultados, resumen: `${resultados.filter((r) => r.ok).length}/${resultados.length} ok` };
 }
