@@ -35,6 +35,13 @@ async def mensajes(
     if svc.acciones is not None:
         acciones = await svc.acciones.pendientes_de(u.sistema_id, u.usuario_ref, conv_id)
         pendientes = [vista_accion(a) for a in acciones]
+    # Las tarjetas de descarga guardadas en los mensajes: `vigente` dice si el archivo sigue disponible.
+    pedidos = {a["id"] for m in visibles for a in m.get("archivos", [])}
+    vigentes = await svc.archivos.vigentes(u.sistema_id, u.usuario_ref, [uuid.UUID(i) for i in pedidos]) \
+        if svc.archivos else set()
+    for m in visibles:
+        for a in m.get("archivos", []):
+            a["vigente"] = a["id"] in vigentes
     return {"id": str(conv_id), "mensajes": visibles, "pendientes": pendientes,
             "pendiente": pendientes[-1] if pendientes else None}
 

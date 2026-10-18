@@ -13,6 +13,7 @@ __all__ = [
     "STT",
     "AccionCreada",
     "Acciones",
+    "Archivos",
     "Auditoria",
     "Capacidades",
     "Conector",
@@ -208,6 +209,14 @@ class Acciones(Protocol):
         (todas, si no se indica). Lanza `LimiteExcedido("propuesta_duplicada")` si el turno ya propuso lo mismo.
         Lanza `LimiteExcedido("acciones_hora")` si el usuario propone demasiado, o
         `LimiteExcedido("destructivas_hora")` si supera su tope de destructivas."""
+
+
+class Archivos(Protocol):
+    """Archivos que genera el asistente (hoy: el Excel), con vida corta."""
+
+    async def guardar(self, ctx: Contexto, conversacion_id: Any, nombre: str, datos: bytes, tipo_mime: str) -> str:
+        """Devuelve el id. Lanza `LimiteExcedido("archivos_dia")` si el usuario ya generó su tope en 24 horas."""
+        ...
 
 
 class Auditoria(Protocol):

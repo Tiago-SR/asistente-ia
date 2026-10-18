@@ -14,6 +14,7 @@ from asistente.api import (
     chat,
     confirmaciones,
     conversaciones,
+    descargas,
     estado,
     memoria,
     panel,
@@ -52,7 +53,8 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
                             svc.auditoria, svc.memoria,
                             svc.admin or (AdminSql(svc.sesiones) if svc.sesiones is not None else None),
                             svc.settings.admin_auditoria_dias,
-                            ResumenSql(svc.sesiones) if svc.sesiones is not None else None))
+                            ResumenSql(svc.sesiones) if svc.sesiones is not None else None,
+                            svc.archivos))
         escritor = None
         if propio and app.state.servicios.metricas is not None:
             escritor = asyncio.create_task(app.state.servicios.metricas.bucle())
@@ -104,7 +106,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
     app.add_middleware(CorsSistemas)
     app.add_middleware(AccesoAdmin)  # el último añadido es el más externo: corta antes que CORS
     routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
-               voz.router, admin.router, widget.router)
+               voz.router, admin.router, widget.router, descargas.router)
     for r in routers:
         app.include_router(r)
     panel.montar(app)  # solo si la imagen trae el panel compilado (prod); en dev lo sirve Vite

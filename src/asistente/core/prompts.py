@@ -34,6 +34,9 @@ class Prompts:
         # Capa de lectura de imágenes (solo en los sistemas con `leer_imagenes`): relaja la regla (2) de `base.md`.
         archivo_img = self._dir / "imagenes.md"
         self._imagenes = archivo_img.read_text(encoding="utf-8").strip() if archivo_img.is_file() else ""
+        # Capa del Excel descargable (solo en los sistemas con `exportar_excel`).
+        archivo_excel = self._dir / "excel.md"
+        self._excel = archivo_excel.read_text(encoding="utf-8").strip() if archivo_excel.is_file() else ""
 
     def _dominio(self, ruta: str | None) -> str:
         if not ruta:
@@ -64,6 +67,7 @@ class Prompts:
         memoria: Sequence[Recuerdo] | None = None,
         web: bool = False,
         leer_imagenes: bool = False,
+        excel: bool = False,
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -81,6 +85,9 @@ class Prompts:
         if leer_imagenes and self._imagenes:
             partes.append("## Lectura de imágenes\n" + self._imagenes)
             version += f"+i{_hash(self._imagenes)}"
+        if excel and self._excel:
+            partes.append("## Excel descargable\n" + self._excel)
+            version += f"+x{_hash(self._excel)}"
         if canal == "voz" and self._voz:
             partes.append("## Canal de voz\n" + self._voz)
             version += f"+v{_hash(self._voz)}"

@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     max_imagen_kb: int = _env("ASISTENTE_MAX_IMAGEN_KB", 700)
     heartbeat_s: float = _env("ASISTENTE_HEARTBEAT_S", 15.0)
 
+    # Excel descargable (tool `generar_excel`, por sistema con `exportar_excel: true`): topes por archivo, por usuario
+    # y día, y cuánto vive el archivo: vencido deja de ser descargable al instante, y sus bytes se borran al generarse el
+    # siguiente archivo o en la purga de abajo.
+    excel_max_filas: int = _env("ASISTENTE_EXCEL_MAX_FILAS", 5000)
+    excel_max_columnas: int = _env("ASISTENTE_EXCEL_MAX_COLUMNAS", 50)
+    excel_max_kb: int = _env("ASISTENTE_EXCEL_MAX_KB", 2048)
+    excel_max_por_dia: int = _env("ASISTENTE_EXCEL_MAX_POR_DIA", 20)
+    archivos_ttl_horas: int = _env("ASISTENTE_ARCHIVOS_TTL_HORAS", 24)
+
     # Purga de retención: cada cuántos segundos (0 = desactivada).
     purga_intervalo_s: float = _env("ASISTENTE_PURGA_INTERVALO_S", 86400.0)
     # Destinos internos a los que el servicio puede conectarse (nombres y/o redes CIDR, separados por coma):

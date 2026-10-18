@@ -6,6 +6,7 @@ import logging
 from asistente.sistemas.registro import RegistroSistemas
 from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
+from asistente.store.archivos import ArchivosSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
 from asistente.store.repo import Repo
@@ -18,6 +19,7 @@ async def purgar_todos(
     registro: RegistroSistemas, repo: Repo, acciones: AccionesSql | None = None,
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
     admin: AdminSql | None = None, admin_auditoria_dias: int = 0, resumen: ResumenSql | None = None,
+    archivos: ArchivosSql | None = None,
 ) -> dict[str, int]:
     """Una pasada. Un sistema que falle no impide purgar a los demás."""
     borradas: dict[str, int] = {}
@@ -46,6 +48,11 @@ async def purgar_todos(
                 log.info("purga de retención: %d registros de auditoría del panel", n)
         except Exception:
             log.exception("purga de la auditoría del panel fallida")
+    if archivos is not None:  # los vencidos no son descargables, pero sus bytes siguen en la BD hasta aquí
+        try:
+            await archivos.purgar()
+        except Exception:
+            log.exception("purga de archivos vencidos fallida")
     if resumen is not None:  # no es de ningún sistema
         try:
             await resumen.purgar_contadores()
@@ -61,9 +68,10 @@ async def bucle_purga(
     registro: RegistroSistemas, repo: Repo, intervalo_s: float, acciones: AccionesSql | None = None,
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
     admin: AdminSql | None = None, admin_auditoria_dias: int = 0, resumen: ResumenSql | None = None,
+    archivos: ArchivosSql | None = None,
 ) -> None:
     """Purga al arrancar y luego cada `intervalo_s`. Se cancela al apagar."""
     while True:
         await purgar_todos(registro, repo, acciones, auditoria, memoria, admin, admin_auditoria_dias,
-                           resumen)
+                           resumen, archivos)
         await asyncio.sleep(intervalo_s)

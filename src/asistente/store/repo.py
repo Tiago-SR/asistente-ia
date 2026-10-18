@@ -9,9 +9,10 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.adjuntos import contenido_leido
+from asistente.core.excel import compactar_parametros
 from asistente.core.llm.base import Adjunto, LlamadaTool, Mensaje, Uso
 from asistente.core.web.herramientas import compactar as compactar_busqueda
-from asistente.store.models import Conversacion
+from asistente.store.models import Archivo, Conversacion
 from asistente.store.models import Mensaje as FilaMensaje
 
 _RESULTADO_ANTIGUO = json.dumps(
@@ -20,15 +21,19 @@ _RESULTADO_ANTIGUO = json.dumps(
 )
 
 
-def _a_json(m: Mensaje) -> dict:
+def _a_json(m: Mensaje, archivos: list[dict] | None = None) -> dict:
     return {
         "texto": m.texto,
-        "llamadas": [{"id": c.id, "nombre": c.nombre, "parametros": c.parametros} for c in m.llamadas],
+        # las filas de un Excel no se guardan: ni en el historial ni se reenvían al modelo
+        "llamadas": [{"id": c.id, "nombre": c.nombre, "parametros": compactar_parametros(c.nombre, c.parametros)}
+                     for c in m.llamadas],
         "llamada_id": m.llamada_id,
         # solo metadata: los bytes de una imagen nunca se guardan aquí
         **({"adjuntos": [{"tipo_mime": a.tipo_mime, "bytes": a.bytes, "ref": a.ref,
                           **({"descripcion": a.descripcion} if a.descripcion else {})} for a in m.adjuntos]}
            if m.adjuntos else {}),
+        # referencia a los archivos generados (solo id y nombre); `_desde_json` la ignora: el modelo no la ve
+        **({"archivos": archivos} if archivos else {}),
     }
 
 
@@ -101,7 +106,8 @@ class Repo:
         if filas is None:
             return None
         return [
-            {"rol": f.rol, "texto": f.contenido["texto"], "creado": f.creado.isoformat()}
+            {"rol": f.rol, "texto": f.contenido["texto"], "creado": f.creado.isoformat(),
+             **({"archivos": [dict(a) for a in f.contenido["archivos"]]} if f.contenido.get("archivos") else {})}
             for f in filas
             if f.rol in ("user", "assistant") and f.contenido.get("texto")
         ]
@@ -115,6 +121,7 @@ class Repo:
     async def guardar_turno(
         self, sistema_id: str, usuario_ref: str, conv_id: uuid.UUID, titulo: str,
         nuevos: list[Mensaje], uso: Uso, modelo: str, prompt_version: str,
+        archivos: list[dict] | None = None,
     ) -> None:
         """Crea la conversación si es nueva y agrega los mensajes en una sola transacción."""
         async with self._sesiones.begin() as s:
@@ -130,7 +137,8 @@ class Repo:
             ultimo = max((i for i, m in enumerate(nuevos) if m.rol == "assistant"), default=-1)
             for i, m in enumerate(nuevos):
                 s.add(FilaMensaje(
-                    conversacion_id=conv_id, rol=m.rol, contenido=_a_json(m),
+                    conversacion_id=conv_id, rol=m.rol,
+                    contenido=_a_json(m, archivos if i == ultimo else None),
                     # el uso del turno completo se registra en su mensaje final
                     tokens_in=uso.tokens_in if i == ultimo else None,
                     tokens_out=uso.tokens_out if i == ultimo else None,
@@ -159,6 +167,10 @@ class Repo:
             r = await s.execute(
                 delete(Conversacion).where(*self._propia(sistema_id, usuario_ref, conv_id))
             )
+            if r.rowcount:  # los archivos no tienen FK (se crean antes que la conversación): se borran a mano
+                await s.execute(delete(Archivo).where(
+                    Archivo.conversacion_id == conv_id, Archivo.sistema_id == sistema_id,
+                    Archivo.usuario_ref == usuario_ref))
             return r.rowcount > 0
 
     async def purgar(self, sistema_id: str, retencion_dias: int, ahora: datetime | None = None) -> int:

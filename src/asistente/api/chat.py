@@ -105,11 +105,12 @@ async def chat(
         except Exception:
             log.exception("[%s] no se pudo leer la memoria del usuario", request_id)
     web = svc.web if sistema.busqueda_web else None
+    excel = sistema.exportar_excel and svc.archivos is not None
     prompt, version = svc.prompts.componer(
         sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
         usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
         canal=body.canal, memoria=recuerdos, web=web is not None,
-        leer_imagenes=sistema.leer_imagenes,
+        leer_imagenes=sistema.leer_imagenes, excel=excel,
     )
     lim = sistema.limites
     ctx = Contexto(
@@ -125,7 +126,9 @@ async def chat(
     config = ConfigTurno(max_iter=cfg.max_iter, max_output_tokens=cfg.max_output_tokens,
                          timeout_turno_s=cfg.timeout_turno_s, resumen_voz=body.canal == "voz",
                          web_max_por_min=cfg.web_max_por_min, web_max_por_dia=cfg.web_max_por_dia,
-                         web_max_pagina_chars=cfg.web_max_pagina_chars, web_max_por_turno=cfg.web_max_por_turno)
+                         web_max_pagina_chars=cfg.web_max_pagina_chars, web_max_por_turno=cfg.web_max_por_turno,
+                         excel_max_filas=cfg.excel_max_filas, excel_max_columnas=cfg.excel_max_columnas,
+                         excel_max_kb=cfg.excel_max_kb)
     conector = svc.conector.para(u, request_id)
 
     cola: asyncio.Queue = asyncio.Queue()
@@ -138,16 +141,21 @@ async def chat(
     lectura = (asyncio.create_task(adj.leer(llm, modelo, adjuntos, cfg.max_output_tokens))
                if adjuntos and sistema.leer_imagenes else None)
 
+    generados: list[dict] = []  # tarjetas de descarga del turno: se guardan en el mensaje final para rehidratarlas
+
     async def turno() -> None:
         try:
             async def filtrado(evento: str, datos) -> None:
+                if evento == events.UI:
+                    generados.extend({"id": a["id"], "nombre": a["nombre"]} for a in datos if a.get("tipo") == "descarga")
                 if evento != events.DONE:  # `done` se emite recién cuando el turno está guardado
                     await emit(evento, datos)
 
             res = await run_turn(ctx, llm, conector, svc.auditoria, svc.limites, historial,
                                  texto, filtrado, conv_id, config, acciones=svc.acciones,
                                  recientes=svc.recientes if sistema.consultas_recientes else None,
-                                 memoria=memoria, adjuntos=adjuntos, web=web, metricas=svc.metricas)
+                                 memoria=memoria, adjuntos=adjuntos, web=web, metricas=svc.metricas,
+                                 excel=svc.archivos if excel else None)
             if res.completo:
                 try:
                     leidos, uso_lectura = await lectura if lectura else ([], Uso())
@@ -156,7 +164,7 @@ async def chat(
                               for m in res.nuevos]
                     await asyncio.shield(svc.repo.guardar_turno(
                         u.sistema_id, u.usuario_ref, conv_id, (texto or "Imagen")[:60], nuevos,
-                        res.uso + uso_lectura, modelo, version))
+                        res.uso + uso_lectura, modelo, version, generados))
                 except Exception:
                     log.exception("[%s] no se pudo guardar el turno", request_id)
                     await emit(events.ERROR, "no_se_pudo_guardar")

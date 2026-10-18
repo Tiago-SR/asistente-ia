@@ -102,6 +102,29 @@ class LlamadaTool(Base):
     creada: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
 
 
+class Archivo(Base):
+    """Archivo generado por el asistente (el Excel), con vida corta: vencido deja de ser descargable (`expira_en`)."""
+
+    __tablename__ = "archivo"
+    __table_args__ = (
+        Index("ix_archivo_sistema_usuario", "sistema_id", "usuario_ref", "creado"),  # cuota diaria
+        Index("ix_archivo_expira", "expira_en"),  # purga
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    usuario_ref: Mapped[str] = mapped_column(String(256))
+    # Sin FK: el archivo se crea durante el turno y la conversación recién existe al guardarlo (ver `Repo.borrar`).
+    conversacion_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    origen: Mapped[str] = mapped_column(String(16), server_default="generado")  # generado | adjunto (futuro)
+    nombre: Mapped[str] = mapped_column(String(120))
+    tipo_mime: Mapped[str] = mapped_column(String(100))
+    bytes: Mapped[int] = mapped_column(Integer)
+    datos: Mapped[bytes] = mapped_column(LargeBinary)
+    creado: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    expira_en: Mapped[datetime] = mapped_column(_ahora())
+
+
 class ContadorUso(Base):
     """Contadores por ventana para rate limit y cuotas. `usuario_ref` vacío = total del sistema."""
 

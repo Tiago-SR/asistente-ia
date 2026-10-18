@@ -119,6 +119,9 @@
     webPagina: "Leí la página ",
     webFallo: " (sin resultados: la búsqueda no está disponible)",
     webFalloPagina: " (no se pudo leer)",
+    descargar: "Descargar ",
+    descargaNoDisponible: "Ya no está disponible",
+    descargaFallo: "No se pudo descargar; intenta de nuevo",
     dictar: "Dictar",
     adjuntar: "Adjuntar imagen",
     quitarImagen: "Quitar imagen",
@@ -796,6 +799,12 @@
       border-radius: 999px; text-decoration: none; font-size: 13px; background: var(--f);
     }
     .msg .acciones a:hover { background: var(--c); color: var(--ct); }
+    .msg .acciones button.descarga {
+      padding: 4px 12px; border: 1px solid var(--c); color: var(--c); border-radius: 999px;
+      font: inherit; font-size: 13px; background: var(--f); cursor: pointer;
+    }
+    .msg .acciones button.descarga:hover:not(:disabled) { background: var(--c); color: var(--ct); }
+    .msg .acciones button.descarga:disabled { opacity: .6; cursor: default; }
     .web { font-size: 12px; color: var(--apagado); margin-bottom: 8px; display: grid; gap: 2px; }
     .web-fuentes { display: inline; }
     .msg .web a { color: var(--apagado); margin-left: 6px; }
@@ -1390,6 +1399,7 @@
         for (const m of d.mensajes) {
           const b = this._burbuja(m.rol);
           if (m.rol === "assistant") { markdown(m.texto, b); this._botonEscuchar(b, m.texto); } else b.textContent = m.texto;
+          for (const f of m.archivos || []) this._descarga(f.id, f.nombre, b, f.vigente !== false);
         }
         // Una propuesta que sigue vigente vuelve a mostrarse con su cuenta regresiva (el servidor es la fuente).
         for (const p of d.pendientes || (d.pendiente ? [d.pendiente] : [])) this._confirmacion(p);
@@ -3076,8 +3086,32 @@
       this._bajar();
     }
 
+    // Tarjeta de un archivo generado (Excel). El `<a href>` no mandaría el Bearer: se baja con fetch y se guarda como blob.
+    _descarga(id, nombre, burbuja, vigente = true) {
+      let caja = burbuja.querySelector(".acciones");
+      if (!caja) { caja = el("div", { class: "acciones" }); burbuja.append(caja); }
+      const boton = el("button", { type: "button", class: "descarga", textContent: TEXTOS.descargar + nombre });
+      const noDisponible = () => { boton.disabled = true; boton.textContent = TEXTOS.descargaNoDisponible; };
+      if (!vigente) noDisponible();
+      boton.addEventListener("click", async () => {
+        boton.disabled = true;
+        try {
+          const r = await this._conToken((h) => fetch(`${this._servidor}/v1/descargas/${encodeURIComponent(id)}`, { headers: h }));
+          if (r.status === 404) return noDisponible();
+          if (!r.ok) throw new Error(r.status);
+          const url = URL.createObjectURL(await r.blob());
+          const a = el("a", { href: url, download: nombre });
+          document.body.append(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          boton.disabled = false;
+        } catch { boton.disabled = false; boton.textContent = TEXTOS.descargaFallo; }
+      });
+      caja.append(boton);
+    }
+
     _acciones(lista, burbuja) {
       for (const a of lista) {
+        if (a && a.tipo === "descarga" && typeof a.id === "string" && typeof a.nombre === "string") { this._descarga(a.id, a.nombre, burbuja); continue; }
         if (!a || a.tipo !== "navegar" || typeof a.url !== "string") continue;
         const ev = new CustomEvent("asistente:accion", {
           detail: { tipo: a.tipo, url: a.url, etiqueta: a.etiqueta || "" },

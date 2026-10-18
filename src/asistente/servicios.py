@@ -32,6 +32,7 @@ from asistente.sistemas.registro import RegistroSistemas, Sistema
 from asistente.sistemas.registro_bd import FuenteBD
 from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
+from asistente.store.archivos import ArchivosSql
 from asistente.store.auditoria import AuditoriaSql
 from asistente.store.memoria import MemoriaSql
 from asistente.store.metricas import MetricasSql
@@ -68,6 +69,7 @@ class Servicios:
     memoria: MemoriaSql | None = None  # None = sin memoria por usuario
     web: WebConRespaldo | None = None  # None = sin búsqueda web (aunque el sistema la tenga habilitada)
     adjuntos: AlmacenAdjuntos = field(default_factory=NoGuarda)  # dónde se conservan las imágenes (hoy: en ningún lado)
+    archivos: ArchivosSql | None = None  # None = sin Excel descargable
     admin: AdminSql | None = None  # usuarios, sesiones y auditoría del panel
     cifrador: Cifrador | None = None  # secretos de sistema (solo registro en BD); None = sin claves maestras
     metricas: Metricas | None = None  # None = sin métricas de uso (tests)
@@ -208,6 +210,7 @@ def construir(settings: Settings) -> Servicios:
         voces=voces,
         acciones=AccionesSql(sesiones, settings.acciones_max_por_hora),
         recientes=RecientesSql(sesiones),
+        archivos=ArchivosSql(sesiones, settings.archivos_ttl_horas, settings.excel_max_por_dia),
         memoria=MemoriaSql(sesiones, settings.memoria_dias_sin_uso),
         web=_fabrica_web(settings),
         admin=AdminSql(sesiones),

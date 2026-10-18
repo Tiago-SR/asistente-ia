@@ -13,12 +13,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from asistente.core import events
+from asistente.core import excel as excels
 from asistente.core import memoria as memorias
 from asistente.core import recientes as consultas
 from asistente.core.llm.base import Adjunto, LlamadaTool, LLMError, Mensaje, Uso
 from asistente.core.ports import (
     LLM,
     Acciones,
+    Archivos,
     Auditoria,
     Conector,
     Contexto,
@@ -67,6 +69,10 @@ class ConfigTurno:
     web_max_por_dia: int = 100
     web_max_pagina_chars: int = 12_000
     web_max_por_turno: int = 4  # búsquedas + lecturas: el cupo del proveedor es chico y compartido
+    # Excel descargable (tool local `generar_excel`): topes de una tabla.
+    excel_max_filas: int = 5000
+    excel_max_columnas: int = 50
+    excel_max_kb: int = 2048
 
 
 @dataclass
@@ -103,6 +109,7 @@ async def run_turn(
     adjuntos: tuple[Adjunto, ...] = (),
     web: Web | None = None,
     metricas: Metricas | None = None,
+    excel: Archivos | None = None,
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
@@ -125,7 +132,7 @@ async def run_turn(
         try:
             async with asyncio.timeout(config.timeout_turno_s):
                 await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emitir,
-                            conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web)
+                            conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web, excel)
         except TimeoutError:
             estado.motivo, estado.nuevos = "error", []
             await emitir(events.ERROR, "timeout_turno")
@@ -163,7 +170,7 @@ def _medir(metricas: Metricas, ctx: Contexto, config: ConfigTurno, estado: Resul
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 conversacion_id, config, estado, acciones=None, recientes=None, memoria=None,
-                adjuntos=(), web=None) -> None:
+                adjuntos=(), web=None, excel=None) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
     destructivas = {t.nombre for t in tools if t.destructiva}
@@ -174,6 +181,8 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         tools = [*tools, *memorias.TOOLS]  # `recordar` y `olvidar`: locales, siempre con botón
     if web is not None:
         tools = [*tools, *webtools.TOOLS]  # `buscar_web` y `leer_pagina`: internet, aparte de los datos del sistema
+    if excel is not None:
+        tools = [*tools, excels.TOOL]  # `generar_excel`: un archivo para descargar, no toca al sistema
     propuestas = 0  # propuestas de este turno (cruza las iteraciones)
     exclusiva = False  # una destructiva o local va sola: nada más se propone en el turno
     guardar = asyncio.Lock()  # las `crear` del turno corren en serie: así el duplicado y el tope horario se ven
@@ -259,6 +268,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         nuevos.append(Mensaje("assistant", resp.texto, llamadas))
         await emit(events.TOOL, [
             _LEGIBLE_WEB[c.nombre] if web is not None and c.nombre in webtools.NOMBRES
+            else "Generando el Excel" if excel is not None and c.nombre == excels.NOMBRE
             else (_LEGIBLE_ACCION if c.nombre in escrituras or (memoria is not None and c.nombre in memorias.NOMBRES)
                   else _LEGIBLE).format(nombre=c.nombre)
             for c in llamadas
@@ -287,6 +297,8 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                     continue
                 atenciones.append(_web(ctx, web, limites, auditoria, conversacion_id, c, config, emit,
                                        [*historial, *nuevos]))
+            elif excel is not None and c.nombre == excels.NOMBRE:
+                atenciones.append(_generar_excel(ctx, excel, auditoria, conversacion_id, c, config))
             elif recientes is not None and c.nombre == consultas.NOMBRE:
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
@@ -344,6 +356,30 @@ async def _consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_
     ms = int((time.monotonic() - inicio) * 1000)
     try:
         await auditoria.registrar_tool(ctx, conversacion_id, c.nombre, c.parametros, r, ms)
+    except Exception:
+        log.exception("[%s] no se pudo auditar %s", ctx.request_id, c.nombre)
+    return r
+
+
+async def _generar_excel(ctx, archivos, auditoria, conversacion_id, c: LlamadaTool, config) -> ResultadoTool:
+    """Tool local: arma el .xlsx y lo guarda. Se audita sin las filas (datos de negocio): solo nombre y tamaño."""
+    inicio = time.monotonic()
+    if c.argumentos_invalidos:
+        r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
+    else:
+        try:
+            r = await asyncio.wait_for(
+                excels.ejecutar(ctx, archivos, conversacion_id, c.parametros, max_filas=config.excel_max_filas,
+                                max_columnas=config.excel_max_columnas, max_kb=config.excel_max_kb),
+                config.timeout_tool_s)
+        except TimeoutError:
+            r = ResultadoTool(False, error="timeout", detalle="el archivo tardó demasiado en generarse")
+        except Exception:
+            log.exception("[%s] falló %s", ctx.request_id, c.nombre)
+            r = ResultadoTool(False, error="error_sistema", detalle="no se pudo generar el archivo")
+    ms = int((time.monotonic() - inicio) * 1000)
+    try:
+        await auditoria.registrar_tool(ctx, conversacion_id, c.nombre, excels.compactar_parametros(c.nombre, c.parametros), r, ms)
     except Exception:
         log.exception("[%s] no se pudo auditar %s", ctx.request_id, c.nombre)
     return r
