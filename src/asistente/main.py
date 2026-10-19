@@ -24,6 +24,7 @@ from asistente.api import (
 from asistente.api.acceso_admin import AccesoAdmin
 from asistente.api.cors import CorsSistemas
 from asistente.api.errores import ErrorApi, manejar_error_api
+from asistente.api.tope_cuerpo import TopeCuerpo
 from asistente.config import Settings
 from asistente.retencion import bucle_purga
 from asistente.servicios import Servicios, construir
@@ -65,6 +66,8 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
                 await fuente.cargar()
             except Exception as e:  # noqa: BLE001 readiness en falso (no un registro vacío); el sondeo reintenta
                 log.error("registro de sistemas no disponible al arrancar: %s", type(e).__name__)
+            for sis in app.state.servicios.registro.todos():  # un dominio roto = asistente sin sus reglas: no arrancar
+                app.state.servicios.prompts.validar_dominio(sis.prompt_dominio)
             sondeo = asyncio.create_task(fuente.bucle())
         try:
             yield
@@ -105,6 +108,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
     app.add_exception_handler(RequestValidationError, validacion)
     app.add_middleware(CorsSistemas)
     app.add_middleware(AccesoAdmin)  # el último añadido es el más externo: corta antes que CORS
+    app.add_middleware(TopeCuerpo)  # el más externo: corta antes que nadie parsee el cuerpo
     routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
                voz.router, admin.router, widget.router, descargas.router)
     for r in routers:

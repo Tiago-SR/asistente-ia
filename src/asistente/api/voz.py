@@ -84,15 +84,15 @@ async def transcribir(
     else:
         segundos = None
 
-    audio = await _leer_acotado(request, max_bytes)
-    if not audio:
-        raise ErrorApi(422, "audio_invalido")
-
     try:
         await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_max_por_min)
     except LimiteExcedido as e:
         _medir(svc, u, "stt", "limite", motivo=e.cual)
         raise ErrorApi(429, "limite_excedido") from e
+
+    audio = await _leer_acotado(request, max_bytes)
+    if not audio:
+        raise ErrorApi(422, "audio_invalido")
 
     inicio = time.monotonic()
     try:

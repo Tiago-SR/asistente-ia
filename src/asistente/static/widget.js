@@ -327,6 +327,16 @@
   const MOTORES = ["auto", "navegador", "servidor"];
   const ENTRADAS = ["auto", "tocar", "libres"];
   const TEMAS = ["auto", "claro", "oscuro"];
+  // fetch que se corta si las cabeceras no llegan en `ms`; después ya no (el cuerpo, p. ej. el SSE, puede tardar).
+  function fetchConTimeout(url, opts = {}, ms = 30000) {
+    const ac = new AbortController();
+    let vencio = false;
+    const t = setTimeout(() => { vencio = true; ac.abort(); }, ms);
+    if (opts.signal) opts.signal.addEventListener("abort", () => ac.abort(), { once: true });
+    return fetch(url, { ...opts, signal: ac.signal })
+      .catch((e) => { throw vencio ? new Error("timeout") : e; })  // un timeout no es un AbortError: se avisa al usuario
+      .finally(() => clearTimeout(t));
+  }
   // Zona del usuario (IANA, p. ej. America/Montevideo) para que «hoy» y «ayer» sean los suyos. Si el navegador no la da, se omite.
   function zonaHoraria() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (_) { return undefined; }
@@ -1303,7 +1313,7 @@
       let habilitado = false;
       try {
         await this._asegurarToken();
-        const r = await fetch(this._servidor + "/v1/estado", { headers: this._auth() });
+        const r = await fetchConTimeout(this._servidor + "/v1/estado", { headers: this._auth() });
         if (r.ok) {
           const e = await r.json();
           habilitado = e.habilitado !== false;
@@ -1341,7 +1351,7 @@
       if (this._renovando) return this._renovando;
       this._renovando = (async () => {
         try {
-          const r = await fetch(this.getAttribute("token-url"), { credentials: "same-origin", headers: { Accept: "application/json" } });
+          const r = await fetchConTimeout(this.getAttribute("token-url"), { credentials: "same-origin", headers: { Accept: "application/json" } });
           if (!r.ok) throw new Error("token-url " + r.status);
           const d = await r.json();
           const expiraMs = Date.parse(d.expira);
@@ -2610,7 +2620,7 @@
       const canalVoz = this._mhActivo();   // en el modo voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual)
       const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria(),
         ...(imagenes.length ? { imagenes: imagenes.map((i) => ({ tipo: i.tipo, datos: i.datos })) } : {}) });
-      const r = await this._conToken((h) => fetch(this._servidor + "/v1/chat", {
+      const r = await this._conToken((h) => fetchConTimeout(this._servidor + "/v1/chat", {
         method: "POST", signal: this._abort.signal, body: cuerpo,
         headers: { ...h, "Content-Type": "application/json", Accept: "text/event-stream" },
       }));
@@ -3184,7 +3194,10 @@
       try { alEvento(evento, JSON.parse(datos)); } catch (e) { console.error("<asistente-chat>: evento inválido", e); }
     };
     for (;;) {
-      const { done, value } = await lector.read();
+      // Inactividad: el servidor manda un latido (`: ping`) mientras trabaja, así que 60 s sin nada es un corte.
+      let t;
+      const corte = new Promise((_, no) => { t = setTimeout(() => { lector.cancel().catch(() => {}); no(new Error("inactividad")); }, 60000); });
+      const { done, value } = await Promise.race([lector.read(), corte]).finally(() => clearTimeout(t));
       if (done) break;
       buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
       let i;

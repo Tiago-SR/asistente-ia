@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.ports import AccionCreada, Contexto, LimiteExcedido, ResultadoPropuesta
@@ -44,6 +44,8 @@ class AccionesSql:
     ) -> AccionCreada:
         ahora = self._reloj()
         async with self._sesiones.begin() as s:
+            await s.execute(text("select pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                            {"k": f"acciones:{ctx.sistema_id}:{ctx.usuario_ref}"})
             ultima_hora = (Accion.sistema_id == ctx.sistema_id, Accion.usuario_ref == ctx.usuario_ref,
                            Accion.creada > ahora - timedelta(hours=1))
             recientes = (await s.execute(select(func.count()).select_from(Accion).where(*ultima_hora))).scalar_one()
@@ -64,7 +66,6 @@ class AccionesSql:
                 if igual:
                     raise LimiteExcedido("propuesta_duplicada")
             # La tanda de un turno nuevo reemplaza a la anterior; las hermanas del mismo turno conviven.
-            # shortcut: el agente serializa las `crear` de un turno; dos pestañas a la vez aún pueden pasar el tope por 1.
             await s.execute(
                 update(Accion)
                 .where(*de_conversacion, *((Accion.creada < inicio_turno,) if inicio_turno is not None else ()))

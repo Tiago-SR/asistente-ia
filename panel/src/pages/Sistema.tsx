@@ -305,7 +305,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
           )}
           {tools?.tools.map((t) => (
             <div key={t.nombre} className="flex items-start gap-3 border-b pb-3 last:border-0">
-              <Switch checked={t.habilitada} disabled={!puede || (t.efecto === 'escritura' && !t.accionable)}
+              <Switch aria-label={t.nombre} checked={t.habilitada} disabled={!puede || (t.efecto === 'escritura' && !t.accionable)}
                 onCheckedChange={(v) => {
                   if (v && t.destructiva) {
                     setNombreConf('')

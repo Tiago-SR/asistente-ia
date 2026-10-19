@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,19 +15,26 @@ export function Auditoria() {
   const [error, setError] = useState<string | null>(null)
   const [filtro, setFiltro] = useState({ actor: '', accion: '' })
   const [abierto, setAbierto] = useState<number | null>(null)
+  const [cargando, setCargando] = useState(false)
+  const pedido = useRef(0) // solo vale la última respuesta: cambiar el filtro descarta las anteriores
 
   async function cargar(desde: number | null, reemplazar: boolean) {
+    const mio = ++pedido.current
     setError(null)
+    setCargando(true)
     const q = new URLSearchParams({ limite: '50' })
     if (desde !== null) q.set('antes_id', String(desde))
     if (filtro.actor.trim()) q.set('actor', filtro.actor.trim())
     if (filtro.accion.trim()) q.set('accion', filtro.accion.trim())
     try {
       const r = await api<Pagina>('GET', `/auditoria?${q}`)
+      if (mio !== pedido.current) return
       setEventos((prev) => (reemplazar ? r.eventos : [...prev, ...r.eventos]))
       setSiguiente(r.siguiente)
     } catch (e) {
-      setError(mensaje(e))
+      if (mio === pedido.current) setError(mensaje(e))
+    } finally {
+      if (mio === pedido.current) setCargando(false)
     }
   }
   useEffect(() => {
@@ -112,7 +119,7 @@ export function Auditoria() {
             </TableBody>
           </Table>
           {siguiente !== null && (
-            <Button variant="outline" className="justify-self-start" onClick={() => void cargar(siguiente, false)}>
+            <Button variant="outline" className="justify-self-start" disabled={cargando} onClick={() => void cargar(siguiente, false)}>
               Cargar más
             </Button>
           )}

@@ -76,7 +76,9 @@ export function Sistemas({ yo, ir }: { yo: Yo; ir: (ruta: string) => void }) {
             <TableBody>
               {lista?.map((s) => (
                 <TableRow key={s.id} className="cursor-pointer" onClick={() => ir(`/sistemas/${s.id}`)}>
-                  <TableCell className="font-mono">{s.id}</TableCell>
+                  <TableCell className="font-mono">
+                    <a href={`#/sistemas/${s.id}`} className="underline" onClick={(e) => e.stopPropagation()}>{s.id}</a>
+                  </TableCell>
                   <TableCell>{s.nombre}</TableCell>
                   <TableCell>
                     {!s.habilitado ? (

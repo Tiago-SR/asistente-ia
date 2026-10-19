@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { ToggleTema } from '@/components/ToggleTema'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { api, onSesionCaducada, setCsrf, type Yo } from '@/lib/api'
 import { useHash } from '@/lib/hash'
@@ -16,14 +17,16 @@ const Metricas = lazy(() => import('@/pages/Metricas').then((m) => ({ default: m
 export default function App() {
   // undefined = comprobando la sesión; null = sin sesión
   const [yo, setYo] = useState<Yo | null | undefined>(undefined)
+  const [caducada, setCaducada] = useState(false) // sesión caducada con la pantalla abierta: login encima, sin desmontarla
   const [ruta, ir] = useHash()
 
   const entrar = (y: Yo | null) => {
     setCsrf(y?.csrf ?? null)
     setYo(y)
+    setCaducada(false)
   }
   useEffect(() => {
-    onSesionCaducada(() => entrar(null))
+    onSesionCaducada(() => setCaducada(true))
     api<Yo>('GET', '/yo').then(entrar, () => entrar(null))
     return () => onSesionCaducada(null)
   }, [])
@@ -38,6 +41,14 @@ export default function App() {
   const partes = ruta.split('/').filter(Boolean)
   return (
     <div className="mx-auto max-w-5xl p-4 grid gap-6">
+      {caducada && (
+        <div className="fixed inset-0 z-50 overflow-auto bg-background p-4">
+          <Alert className="mx-auto mb-4 max-w-md">
+            <AlertDescription>Sesión caducada. Vuelva a entrar: lo que estaba editando sigue en pantalla.</AlertDescription>
+          </Alert>
+          <Login onEntrar={(y) => entrar(y)} />
+        </div>
+      )}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <h1 className="text-lg font-semibold">Asistente · Administración</h1>
         <nav className="flex flex-wrap gap-2">

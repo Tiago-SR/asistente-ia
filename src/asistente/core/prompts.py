@@ -38,21 +38,27 @@ class Prompts:
         archivo_excel = self._dir / "excel.md"
         self._excel = archivo_excel.read_text(encoding="utf-8").strip() if archivo_excel.is_file() else ""
 
-    def _dominio(self, ruta: str | None) -> str:
+    def validar_dominio(self, ruta: str | None) -> str:
+        """Texto del dominio. Lanza `ValueError` si la ruta se sale de prompts/, pesa de más o no se lee."""
         if not ruta:
             return ""
-        # El archivo vive bajo prompts/: una ruta que se salga se ignora.
+        # El archivo vive bajo prompts/: una ruta que se salga no vale.
         archivo = (self._dir.parent / ruta).resolve()
         if not archivo.is_relative_to(self._dir):
-            log.error("prompt_dominio fuera de %s: %s", self._dir, ruta)
-            return ""
+            raise ValueError(f"prompt_dominio fuera de {self._dir}: {ruta}")
         try:
             if archivo.stat().st_size > MAX_DOMINIO_BYTES:
-                log.error("prompt_dominio demasiado grande: %s", ruta)
-                return ""
+                raise ValueError(f"prompt_dominio demasiado grande: {ruta}")
             return archivo.read_text(encoding="utf-8").strip()
         except OSError as e:
-            log.error("prompt_dominio ilegible (%s): %s", ruta, e)
+            raise ValueError(f"prompt_dominio ilegible ({ruta}): {e}") from e
+
+    def _dominio(self, ruta: str | None) -> str:
+        # En ejecución no se tumba el chat por un dominio que cambió en el panel; al arrancar sí (`validar_dominio`).
+        try:
+            return self.validar_dominio(ruta)
+        except ValueError as e:
+            log.error("%s", e)
             return ""
 
     def componer(

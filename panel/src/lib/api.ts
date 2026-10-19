@@ -27,6 +27,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (csrf && method !== 'GET') headers['X-CSRF'] = csrf
   const r = await fetch(`/admin/api${path}`, {
+    signal: AbortSignal.timeout(30_000), // abarca también el cuerpo: las respuestas del panel son JSON cortos
     method,
     credentials: 'same-origin',
     headers,

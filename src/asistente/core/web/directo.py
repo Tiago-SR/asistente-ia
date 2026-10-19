@@ -13,10 +13,8 @@ Defensas, en este orden:
 Si la infraestructura lo permite, restringir además el egress del contenedor (regla 11 del README).
 """
 
-import asyncio
 import ipaddress
 import re
-import socket
 from collections.abc import Awaitable, Callable
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -24,6 +22,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 
 from asistente.core.red import ip_publica as _ip_publica
+from asistente.core.red import resolver_dns as _resolver_dns
 from asistente.core.web.base import NoSoportado, PaginaIlegible, PaginaWeb, UrlNoPermitida
 
 PUERTOS = {"http": 80, "https": 443}
@@ -61,11 +60,6 @@ def validar_url(url: str) -> str:
         if not _ip_publica(ip):
             raise UrlNoPermitida("la dirección no es pública")
     return urlunsplit((p.scheme, p.netloc, p.path or "/", p.query, ""))
-
-
-async def _resolver_dns(host: str, puerto: int) -> list[str]:
-    infos = await asyncio.get_running_loop().getaddrinfo(host, puerto, type=socket.SOCK_STREAM)
-    return list(dict.fromkeys(i[4][0] for i in infos))
 
 
 class _Texto(HTMLParser):
@@ -174,7 +168,8 @@ class LectorDirecto:
         red = f"[{ip}]" if ":" in ip else ip
         destino = urlunsplit((p.scheme, red if p.port is None else f"{red}:{p.port}", p.path or "/", p.query, ""))
         return destino, {"Host": p.netloc.rsplit("@", 1)[-1], "User-Agent": UA,
-                         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9"}, (
+                         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+                         "Accept-Encoding": "identity"}, (  # sin compresión: `max_bytes` acota lo que baja de la red
             {"sni_hostname": host} if p.scheme == "https" else {})
 
     async def leer(self, url: str, *, max_chars: int) -> PaginaWeb:

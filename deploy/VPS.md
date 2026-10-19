@@ -142,7 +142,7 @@ Antes de habilitar un sistema, pasarle `herramientas/verificar_sistema.py` (ver 
 | Métricas de uso (gráficos) | en el panel, pantalla **Métricas** (admin y operador): turnos, errores y rechazos, costo (cota valle/pico), tools con p50/p95 y usuarios con cuota restante. Por API: `GET /admin/api/metricas/{series,usuarios,tools}` con sesión de usuario (el token estático no vale: `403`) |
 | Logs | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f asistente` (rotan a 5 × 10 MB) |
 | Backup | `deploy/backup.sh` (guarda los últimos 14 en `backups/`) |
-| Restaurar | `deploy/backup.sh restore backups/<archivo>.sql.gz` |
+| Restaurar | `deploy/backup.sh restore backups/<archivo>.sql.gz.gpg` (cifrado con `BACKUP_GPG_RECIPIENT`; la clave privada va fuera del host) |
 
 Backup diario con cron (`crontab -e` como `deploy`):
 

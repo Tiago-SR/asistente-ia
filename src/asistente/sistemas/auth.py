@@ -5,6 +5,7 @@ algoritmo de ese sistema. Nunca se acepta un algoritmo que no sea el configurado
 (así se rechazan `none` y los ataques de confusión de algoritmo).
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -14,6 +15,7 @@ import httpx
 import jwt
 from jwt import PyJWKSet
 
+from asistente.core.red import ReglasRed, TransporteSeguro
 from asistente.sistemas.registro import RegistroSistemas, Sistema
 
 log = logging.getLogger(__name__)
@@ -63,6 +65,7 @@ class ClienteJwks:
     _TTL_S = 300.0
     _REFRESCO_MIN_S = 30.0
     _MAX_BYTES = 256 * 1024
+    _EDAD_MAX_S = 86_400.0  # tope de edad de las claves que se siguen usando si el emisor no responde
 
     def __init__(self, url: str, cliente: httpx.AsyncClient, timeout_s: float = 5.0, reloj=time.monotonic) -> None:
         self._url = url
@@ -71,6 +74,8 @@ class ClienteJwks:
         self._reloj = reloj
         self._set: PyJWKSet | None = None
         self._descargado = float("-inf")
+        self._lock = asyncio.Lock()
+        self._no_antes = float("-inf")  # tras un fallo con claves previas, no se reintenta antes de este instante
 
     async def _descargar(self) -> None:
         cuerpo = bytearray()
@@ -91,14 +96,29 @@ class ClienteJwks:
             raise jwt.PyJWKClientError("JWKS malformado") from e
         self._descargado = self._reloj()
 
+    async def _refrescar(self, vigente) -> None:
+        """Descarga una sola vez aunque lleguen N peticiones a la vez; `vigente()` se reevalúa dentro del lock.
+        Si falla y hay claves previas más jóvenes que `_EDAD_MAX_S`, se siguen usando."""
+        async with self._lock:
+            if vigente():
+                return
+            try:
+                await self._descargar()
+            except jwt.PyJWKClientError as e:
+                if self._set is None or self._reloj() - self._descargado > self._EDAD_MAX_S:
+                    raise
+                log.warning("JWKS %s no disponible, se siguen usando las claves previas: %s", self._url, e)
+                self._no_antes = self._reloj() + self._REFRESCO_MIN_S
+
     async def clave(self, token: str):
         kid = jwt.get_unverified_header(token).get("kid")
-        edad = self._reloj() - self._descargado
-        if self._set is None or edad > self._TTL_S:
-            await self._descargar()
+        if self._set is None or self._reloj() - self._descargado > self._TTL_S:
+            await self._refrescar(lambda: self._set is not None and (
+                self._reloj() - self._descargado <= self._TTL_S or self._reloj() < self._no_antes))
         claves = {k.key_id: k for k in self._set.keys}  # type: ignore[union-attr]
         if kid not in claves and self._reloj() - self._descargado > self._REFRESCO_MIN_S:
-            await self._descargar()
+            await self._refrescar(lambda: self._reloj() - self._descargado <= self._REFRESCO_MIN_S
+                                  or self._reloj() < self._no_antes)
             claves = {k.key_id: k for k in self._set.keys}  # type: ignore[union-attr]
         if kid is None and len(claves) == 1:
             return next(iter(claves.values())).key
@@ -110,7 +130,8 @@ class ClienteJwks:
 class Autenticador:
     def __init__(self, registro: RegistroSistemas, cliente: httpx.AsyncClient | None = None) -> None:
         self._registro = registro
-        self._http = cliente or httpx.AsyncClient(follow_redirects=False)
+        # Sin cliente, uno con el control anti-SSRF (solo destinos públicos): nunca uno desnudo.
+        self._http = cliente or httpx.AsyncClient(transport=TransporteSeguro(ReglasRed()), follow_redirects=False)
         # sistema_id → (jwks_url con la que se creó, cliente). La URL va en el valor para que un cambio
         # de `jwks_url` no siga usando el cliente (y las claves) del emisor anterior.
         self._jwks: dict[str, tuple[str, ClienteJwks]] = {}

@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.ports import Contexto, LimiteExcedido
@@ -21,6 +21,8 @@ class ArchivosSql:
     async def guardar(self, ctx: Contexto, conversacion_id: Any, nombre: str, datos: bytes, tipo_mime: str) -> str:
         ahora = datetime.now(UTC)
         async with self._sesiones.begin() as s:
+            await s.execute(text("select pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                            {"k": f"archivos:{ctx.sistema_id}:{ctx.usuario_ref}"})
             await s.execute(delete(Archivo).where(Archivo.expira_en < ahora))  # los vencidos no esperan a la purga
             hoy = (await s.execute(select(func.count()).select_from(Archivo).where(
                 Archivo.sistema_id == ctx.sistema_id, Archivo.usuario_ref == ctx.usuario_ref,
