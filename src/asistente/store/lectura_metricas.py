@@ -97,7 +97,8 @@ class MetricasLectura:
                    f"FROM uso_diario WHERE {where}", p)]
             ultimos = {r["sistema_id"]: r["ultimo"] for r in await self._ejecutar(
                 s, "SELECT sistema_id, max(dia) AS ultimo FROM uso_diario WHERE tipo <> 'tool' "
-                   "GROUP BY sistema_id", {})}
+                   + ("AND sistema_id = ANY(:ids) " if ids else "") + "GROUP BY sistema_id",
+                {"ids": ids} if ids else {})}
             for sid in sistemas:
                 ultimo = ultimos.get(sid)
                 inicio = max(desde, hoy - timedelta(days=RANGO_CRUDOS_MAX_DIAS))

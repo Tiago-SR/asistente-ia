@@ -96,9 +96,6 @@ class MetricasSql:
         return e
 
     # ── escritura ──
-    def pendientes(self) -> int:
-        return len(self._cola) + len(self._limites)
-
     async def vaciar(self) -> None:
         """Escribe todo lo encolado, en lotes. Un lote que falla se descarta (no se reintenta ni se propaga)."""
         while self._cola or self._limites:

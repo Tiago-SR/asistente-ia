@@ -2112,7 +2112,6 @@
         canal: "voz", fuente: t.fuente || null, acuse_ms: ms(t.acuse), primer_delta_ms: ms(t.primer_delta), voz_ms: ms(t.voz), habla_ms: ms(t.habla),
         tts_ms: t.habla !== undefined && t.texto !== undefined ? Math.round(t.habla - t.texto) : null, servidor: t.servidor,
       };
-      try { console.debug("[asistente] tiempos del turno por voz", detalle); } catch { /* sin consola */ }
       this.dispatchEvent(new CustomEvent("asistente:metricas", { detail: detalle, bubbles: true, composed: true }));
     }
 

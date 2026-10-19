@@ -172,7 +172,7 @@ class Autenticador:
         if claims["scope"] != scope:
             raise TokenInvalido("scope insuficiente")
         sub, jti = claims["sub"], claims["jti"]
-        if not isinstance(sub, str) or not sub or not isinstance(jti, str) or not jti:
+        if not isinstance(sub, str) or not sub or len(sub) > 240 or not isinstance(jti, str) or not jti:
             raise TokenInvalido("sub/jti inválidos")
 
         accion = None

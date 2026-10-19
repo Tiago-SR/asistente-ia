@@ -41,7 +41,6 @@ class OpenAICompat:
         api_key: str | None = None,
         cliente: httpx.AsyncClient | None = None,
         timeout_s: float = 120.0,
-        contexto_max: int | None = None,
         soporta_imagenes: bool = False,
     ) -> None:
         self._url = base_url.rstrip("/") + "/chat/completions"
@@ -49,7 +48,7 @@ class OpenAICompat:
         # Sin timeout de lectura global: un stream largo es normal; se acota por chunk.
         self._cliente = cliente or httpx.AsyncClient(follow_redirects=False)
         self._timeout = httpx.Timeout(timeout_s, connect=10.0)
-        self.capacidades = Capacidades(contexto_max=contexto_max, soporta_imagenes=soporta_imagenes)
+        self.capacidades = Capacidades(soporta_imagenes=soporta_imagenes)
 
     async def stream(
         self,

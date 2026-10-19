@@ -100,7 +100,6 @@ class LimitesPostgres:
         v = _ventanas(self._reloj())
         async with self._sesiones.begin() as s:
             await _sumar(s, ctx.sistema_id, "", "mes", v["mes"], 0, uso.total)
-            await _sumar(s, ctx.sistema_id, ctx.usuario_ref, "dia", v["dia"], 0, uso.total)
             await _sumar_uso_modelo(s, ctx, v["mes"], uso)
 
     async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int, clave: str = "voz") -> None:

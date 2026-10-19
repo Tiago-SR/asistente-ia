@@ -426,7 +426,7 @@ async def test_cuota_de_tokens_es_por_sistema(construir_app, llm, cuotas_limpias
         assert sse(await chatear(c, sistema="mock-b", usuario=ana_b)) == [("error", {"codigo": "tokens_mes"})]
 
 
-async def test_el_consumo_de_tokens_se_imputa_al_sistema_y_usuario_correctos(construir_app, llm, sesiones, cuotas_limpias):
+async def test_el_consumo_de_tokens_se_imputa_solo_al_sistema_correcto(construir_app, llm, sesiones, cuotas_limpias):
     u = sub()
     async with construir_app() as c:
         llm.usar(texto("a"))
@@ -437,7 +437,7 @@ async def test_el_consumo_de_tokens_se_imputa_al_sistema_y_usuario_correctos(con
             .where(ContadorUso.tokens > 0, ContadorUso.usuario_ref.in_([u, ""]),
                    ContadorUso.sistema_id.in_(["mock-a", "mock-b"]))
         )).all()
-    assert sorted(filas) == [("mock-a", "", "mes", 15), ("mock-a", u, "dia", 15)]
+    assert filas == [("mock-a", "", "mes", 15)]
 
 
 # --- 8. borrado ------------------------------------------------------------------------------------------------

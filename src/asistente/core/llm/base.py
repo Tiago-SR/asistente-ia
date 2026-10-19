@@ -91,8 +91,5 @@ class Respuesta:
 
 @dataclass(frozen=True)
 class Capacidades:
-    soporta_cache: bool = False
     soporta_tools_paralelas: bool = True
-    soporta_streaming_tools: bool = True
     soporta_imagenes: bool = False  # el modelo acepta imágenes en el mensaje del usuario
-    contexto_max: int | None = None

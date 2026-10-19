@@ -37,7 +37,10 @@ def _ahora():
 
 class Conversacion(Base):
     __tablename__ = "conversaciones"
-    __table_args__ = (Index("ix_conv_sistema_usuario", "sistema_id", "usuario_ref", "actualizada"),)
+    __table_args__ = (
+        Index("ix_conv_sistema_usuario", "sistema_id", "usuario_ref", "actualizada"),
+        Index("ix_conv_sistema_actualizada", "sistema_id", "actualizada"),  # purga por retención
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sistema_id: Mapped[str] = mapped_column(String(64))
@@ -129,7 +132,10 @@ class ContadorUso(Base):
     """Contadores por ventana para rate limit y cuotas. `usuario_ref` vacío = total del sistema."""
 
     __tablename__ = "contadores_uso"
-    __table_args__ = (UniqueConstraint("sistema_id", "usuario_ref", "ventana", "inicio"),)
+    __table_args__ = (
+        UniqueConstraint("sistema_id", "usuario_ref", "ventana", "inicio"),
+        Index("ix_contador_ventana_inicio", "ventana", "inicio"),  # purga diaria
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     sistema_id: Mapped[str] = mapped_column(String(64))
