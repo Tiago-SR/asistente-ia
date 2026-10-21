@@ -172,6 +172,21 @@ async def test_pasar_de_hs256_a_rs256_borra_el_secreto_huerfano(sesiones):
     assert n["secretos"]["auth_hs256"] == {"configurado": False}
 
 
+async def test_pasar_a_hs256_con_secreto_en_un_solo_guardado(sesiones):
+    v = await _creado(sesiones)  # RS256 + jwks_url
+    n = await escritura.actualizar_sistema(
+        sesiones, CIFRADOR, "acme", _cuerpo(v, auth={"algoritmo": "HS256"}), v["version"],
+        auth_hs256="h" * 32, por="ana")
+    assert n["secretos"]["auth_hs256"]["configurado"]
+
+
+async def test_secreto_hs256_con_otro_algoritmo_no_aplica(sesiones):
+    v = await _creado(sesiones)
+    e = await _codigo(escritura.actualizar_sistema(
+        sesiones, CIFRADOR, "acme", _cuerpo(v), v["version"], auth_hs256="h" * 32, por="ana"))
+    assert e.codigo == "secreto_no_aplica"
+
+
 async def test_borrar_secreto_requerido_de_un_sistema_habilitado_se_rechaza(sesiones):
     v = await _habilitado(sesiones)
     e = await _codigo(escritura.borrar_secreto(sesiones, "acme", "token_manifiesto", v["version"], por="ana"))

@@ -123,7 +123,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
 
   // un número vacío equivale a null (techo global): borrar un campo que ya era null no es un cambio
   const igual = (x: unknown, y: unknown) => JSON.stringify(x, (_, v) => (v === '' ? null : v)) === JSON.stringify(y, (_, v) => (v === '' ? null : v))
-  const hayCambios = !igual(config, vista.config) || ['token_manifiesto', 'llm_api_key'].some((k) => nuevos[k])
+  const hayCambios = !igual(config, vista.config) || ['token_manifiesto', 'llm_api_key', 'auth_hs256'].some((k) => nuevos[k])
 
   const guardar = (ev: React.FormEvent) => {
     ev.preventDefault()
@@ -166,7 +166,14 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             <div className="grid gap-2">
               <Label htmlFor="auth.algoritmo">Algoritmo de los tokens</Label>
               <select id="auth.algoritmo" disabled={!puede} value={String(leer(config, 'auth.algoritmo') ?? '')}
-                onChange={(e) => setConfig(poner(config, 'auth.algoritmo', e.target.value))}
+                onChange={(e) => {
+                  const a = e.target.value
+                  let c = poner(config, 'auth.algoritmo', a)
+                  // HS256 no admite fuente de clave pública; al salir de HS256 el secreto nuevo ya no aplica
+                  if (a === 'HS256') c = poner(poner(c, 'auth.jwks_url', ''), 'auth.clave_publica', '')
+                  else setNuevos({ ...nuevos, auth_hs256: '' })
+                  setConfig(c)
+                }}
                 className="h-9 rounded-md border bg-background px-3 text-sm">
                 {['RS256', 'EdDSA', 'HS256'].map((a) => <option key={a}>{a}</option>)}
               </select>
@@ -181,6 +188,15 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
                     onChange={(e) => setConfig(poner(config, 'auth.clave_publica', e.target.value))} />
                 </div>
               </>
+            )}
+            {puede && leer(config, 'auth.algoritmo') === 'HS256' && leer(vista.config, 'auth.algoritmo') !== 'HS256' && (
+              <Alert>
+                <AlertDescription className="grid gap-2">
+                  Al pasar a HS256 cargue el secreto compartido (32 bytes o más) en este mismo guardado.
+                  <Input type="password" autoComplete="off" placeholder="Secreto HS256" value={nuevos.auth_hs256 ?? ''}
+                    onChange={(e) => setNuevos({ ...nuevos, auth_hs256: e.target.value })} />
+                </AlertDescription>
+              </Alert>
             )}
             {campo('auth.audiencia', 'Audiencia')}
             {campo('llm.modelo', 'Modelo del LLM (vacío = global)')}

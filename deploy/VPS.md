@@ -167,7 +167,7 @@ Copiar `backups/` fuera de la VPS (rsync, rclone, snapshot del proveedor): un ba
 | | Dev (`docker-compose.dev.yml`) | Prod (`docker-compose.yml` + `.prod.yml`) |
 |---|---|---|
 | Imagen | target `dev`, código montado, `--reload` | target `prod`, no-root, solo lectura |
-| Postgres | `127.0.0.1:5433`, credenciales fijas | sin puertos, `POSTGRES_PASSWORD` |
+| Postgres | `127.0.0.1:5434`, credenciales fijas | sin puertos, `POSTGRES_PASSWORD` |
 | `/docs` | sí (`ASISTENTE_DOCS=1`) | no |
 | Whisper | `--profile voz` | `COMPOSE_PROFILES=voz` |
 | Sistemas de ejemplo | mock-a, sistema-php | ninguno |

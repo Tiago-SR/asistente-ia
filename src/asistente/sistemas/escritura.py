@@ -5,7 +5,7 @@ Cada operación es UNA transacción: bloquea la fila del sistema (`FOR UPDATE`, 
 escribe, incrementa `registro_version` y deja la auditoría. Quien llama recarga el registro local tras el commit;
 las demás réplicas lo ven con el sondeo.
 
-Reglas que protegen el acceso a terceros (ver PLAN_PANEL_ADMIN.md, sección 4):
+Reglas que protegen el acceso a terceros:
 - cambiar `base_url` borra `token_manifiesto` (el conector lo reenvía a esa URL); cambiar `llm.base_url` borra
   `llm_api_key`. Un secreto nuevo en el mismo cambio los reemplaza; sin él, y con el sistema habilitado, se
   rechaza (`base_url_requiere_token`) en vez de apagarlo en silencio.

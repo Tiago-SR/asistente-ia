@@ -53,7 +53,7 @@ automatización (recargar, leer) y **no** puede escribir.
 # Requisito en .env: ASISTENTE_CLAVES_MAESTRAS (ver .env.example)
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli importar-yaml   # una vez
 docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.sistemas.cli crear-admin tu@correo.com --rol admin   # primer usuario
-# Panel con HMR (arranca con el `up` de dev): http://localhost:5173/panel/
+# Panel con HMR (arranca con el `up` de dev): http://localhost:5174/panel/
 docker compose -f docker-compose.dev.yml up -d panel
 ```
 
@@ -100,7 +100,7 @@ docker compose -f docker-compose.dev.yml down                               # pa
 docker compose -f docker-compose.dev.yml down -v                            # parar y borrar la BD de desarrollo
 ```
 
-Postgres de desarrollo se publica solo en `127.0.0.1:5433` (usuario, contraseña y base: `asistente`).
+Postgres de desarrollo se publica solo en `127.0.0.1:5434` (usuario, contraseña y base: `asistente`).
 
 ### Cambiar dependencias
 
@@ -164,7 +164,7 @@ docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.
 - **Respaldar `ASISTENTE_CLAVES_MAESTRAS` fuera del backup de la BD.** Si se pierde no hay recuperación: hay que
   re-emitir los secretos con cada sistema cliente.
 - `acciones_habilitadas` se importa como filas de `tool_estado` (solo excepciones: lectura habilitada salvo que se
-  apague, escritura apagada salvo que se encienda). Plan completo del panel en `PLAN_PANEL_ADMIN.md`.
+  apague, escritura apagada salvo que se encienda).
 
 ## Producción
 
@@ -197,7 +197,7 @@ tests_e2e/               e2e del widget en navegador (Playwright MCP)
 evals/                   preguntas (lectura y acciones), corredor y línea base por modelo (resultados/)
 herramientas/            verificador de conformidad
 PROVEEDORES_VOZ.md       referencia para el respaldo remoto de voz (opcional)
-IDEAS.md                 ideas pendientes (deshacer en acciones, ajustes del widget)
+PENDIENTES.md            lo que falta por implementar (único documento de pendientes)
 ```
 
 ## Estado y pendientes
@@ -206,7 +206,7 @@ IDEAS.md                 ideas pendientes (deshacer en acciones, ajustes del wid
 
 **Pendiente:**
 
-- **Fase 5, acciones con confirmación (implementada en servicio, mock y widget; contrato en la sección 8, ideas pendientes en [`IDEAS.md`](IDEAS.md)):** el modelo solo propone; el sistema valida y resume sin efectos, el usuario confirma con un clic y el sistema emite un token de escritura de un solo uso atado a la tool y a los parámetros. Evals propios en `evals/preguntas_acciones.yaml` (contra mock-a; propuesta sin ejecución, ambiguas que piden un dato, borrar, inyección en los datos; línea base de `deepseek-flash` 21/21). La tarjeta pendiente se restaura al recargar la página. El verificador ya comprueba la sección 8 (con `--accion`, que ejecuta una escritura real: solo entornos de pruebas). La referencia PHP (`ejemplos/sistema-php`: propuesta, token de escritura y ejecución idempotente sobre SQLite) ya pasa ese verificador y sus tests PHPUnit, y los evals de lectura contra ella siguen en 32/32. Deshacer (`reversible_con`) y borrar quedan fuera.
+- **Fase 5, acciones con confirmación (implementada en servicio, mock y widget; contrato en la sección 8, pendientes en [`PENDIENTES.md`](PENDIENTES.md)):** el modelo solo propone; el sistema valida y resume sin efectos, el usuario confirma con un clic y el sistema emite un token de escritura de un solo uso atado a la tool y a los parámetros. Evals propios en `evals/preguntas_acciones.yaml` (contra mock-a; propuesta sin ejecución, ambiguas que piden un dato, borrar, inyección en los datos; línea base de `deepseek-flash` 21/21). La tarjeta pendiente se restaura al recargar la página. El verificador ya comprueba la sección 8 (con `--accion`, que ejecuta una escritura real: solo entornos de pruebas). La referencia PHP (`ejemplos/sistema-php`: propuesta, token de escritura y ejecución idempotente sobre SQLite) ya pasa ese verificador y sus tests PHPUnit, y los evals de lectura contra ella siguen en 32/32. Deshacer (`reversible_con`) y borrar quedan fuera.
 - **Memoria por usuario (en curso, por fases):** la **Fase 0** («lo mismo que ayer») está hecha: tool local `consultas_recientes` sobre la auditoría, zona horaria del navegador guardada con cada consulta y purga de `llamadas_tool` (contrato 6.7; evals en `evals/preguntas_memoria.yaml`: 6/6, set principal 32/32). La **Fase 1** también está hecha (apagada por defecto, `memoria_habilitada: true` por sistema; contrato 6.8): tools locales `recordar` y `olvidar` para preferencias (`decimales`, `brevedad`, `entidad_principal`), alias y consultas guardadas, por sistema y usuario, siempre con el botón de confirmación (`confirmar-local`, también si se pidió por voz), tope de 20, vencimiento al mes sin usarse (se renueva al usarlos, `ASISTENTE_MEMORIA_DIAS_SIN_USO`) y panel «Lo que recuerdo» en el widget para ver y olvidar. Evals en `evals/preguntas_memoria_fase1.yaml` (15/15; set principal 32/32, `preguntas_memoria.yaml` 6/6).
 - **Búsqueda web (implementada 2026-10-10, apagada por defecto, `busqueda_web: true` por sistema; contrato 6.9):** tools locales `buscar_web` y `leer_pagina`, con Tavily mientras tenga cupo y SearXNG propio (perfil `busqueda`) como respaldo; la lectura de páginas va por Tavily o, si no, por un lector directo con defensas de SSRF (`core/web/directo.py`). Lo buscado y leído se muestra en el chat y se audita; `leer_pagina` solo abre URLs vistas en resultados o escritas por el usuario. Probado con `deepseek-flash` contra SearXNG en dev (`sistema-php`).  Los PDF no se leen.
 - **Fase 6, proactivo (a evaluar):** webhooks del sistema hacia el asistente o consultas programadas; requiere cola o cron en el contenedor.

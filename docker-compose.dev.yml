@@ -11,7 +11,7 @@ services:
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
       ASISTENTE_LOG_LEVEL: DEBUG
       ASISTENTE_DOCS: "1"   # /docs y /openapi.json
-      # Dev: el puerto solo se publica en 127.0.0.1 y el Host cambia (8100, Vite en 5173); sin restricción de Host.
+      # Dev: el puerto solo se publica en 127.0.0.1 y el Host cambia (8100, Vite en 5174); sin restricción de Host.
       ASISTENTE_ADMIN_HOSTS: ${ASISTENTE_ADMIN_HOSTS:-}
       # Destinos internos a los que el servicio puede conectarse (anti-SSRF, core/red.py): los sistemas de ejemplo,
       # el host (stmgis, LLM local) y los servicios de apoyo. Fuera de esta lista solo se llega a IPs públicas.
@@ -37,7 +37,7 @@ services:
       postgres:
         condition: service_healthy
 
-  # Panel de administración con HMR: http://localhost:5173/panel/  (arranca siempre con el `up`)
+  # Panel de administración con HMR: http://localhost:5174/panel/  (arranca siempre con el `up`)
   # Para escribir sistemas hace falta ASISTENTE_CLAVES_MAESTRAS en .env. Si el navegador
   # rechaza la cookie `__Host-admin` por http, poner ASISTENTE_ADMIN_COOKIE_SECURE=false en .env (solo dev).
   panel:
@@ -51,7 +51,7 @@ services:
       - ./panel:/panel
       - panel-node-modules:/panel/node_modules
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:5174:5173"
     depends_on:
       - asistente
 
@@ -64,7 +64,7 @@ services:
     volumes:
       - pgdata-dev:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5433:5432"   # 5432 queda libre para el proyecto de pruebas (SGAgro)
+      - "127.0.0.1:5434:5432"   # 5432 queda libre para el proyecto de pruebas (SGAgro)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U asistente"]
       interval: 5s
