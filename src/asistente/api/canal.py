@@ -48,6 +48,7 @@ async def recibir(sistema_id: str, request: Request, tareas: BackgroundTasks,
     if not canal.autenticar(str(request.url), cuerpo, dict(request.headers)):
         raise ErrorApi(403, "no_autorizado")
     entrantes, estados = canal.parsear(cuerpo)
+    log.info("canal %s: webhook firmado con %d mensajes y %d estados", sistema_id, len(entrantes), len(estados))
     for e in estados:
         if e.estado == "fallido":
             log.warning("canal %s: envío fallido id=%s codigo=%s", sistema_id, e.id, e.codigo_error)
