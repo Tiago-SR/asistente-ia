@@ -129,6 +129,7 @@ Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL
 ## Integrar un sistema (kit de integración)
 
 - [`contrato/CONTRATO.md`](contrato/CONTRATO.md): lo que debe implementar el sistema (token, manifiesto, ejecución), credenciales y widget.
+- [`contrato/CANAL_WHATSAPP.md`](contrato/CANAL_WHATSAPP.md): canal WhatsApp opcional (vinculación número-usuario en el sistema, token por mensaje).
 - [`contrato/GUIA_TOOLS.md`](contrato/GUIA_TOOLS.md): cómo diseñar las tools (elegirlas, describirlas, qué devolver, errores de negocio).
 - `ejemplos/sistema-mock/`: implementación de referencia con datos ficticios. `MOCK_DEFECTO=<nombre>` rompe una regla del contrato a propósito (lo usan los tests del verificador).
 - `ejemplos/sistema-php/`: implementación de referencia en PHP 8.2+ (router mínimo, portable a CodeIgniter 4), con tests PHPUnit y su [README](ejemplos/sistema-php/README.md). Servicio `sistema-php` en `docker-compose.dev.yml` (puerto 8203).
@@ -165,6 +166,25 @@ docker compose -f docker-compose.dev.yml run --rm asistente python -m asistente.
   re-emitir los secretos con cada sistema cliente.
 - `acciones_habilitadas` se importa como filas de `tool_estado` (solo excepciones: lectura habilitada salvo que se
   apague, escritura apagada salvo que se encienda).
+
+## Canal de mensajería (WhatsApp, en construcción)
+
+Plan en `whatsapp/whatsapp-plan.md`. Cada sistema elige su proveedor de canal (strategy, `core/canales/`) con
+`canal_mensajeria` en su config, o ninguno; hoy solo `meta` (WhatsApp Cloud API). Elegirlo habilita sus campos
+(`phone_number_id`, `graph_version`) y sus secretos cifrados (`wa_token`, `wa_app_secret`, `wa_verify_token`), todo desde
+la página del sistema en el panel. Una App de Meta por sistema.
+
+Proveedores: `meta` (oficial) y `openwa` ([OpenWA](https://www.open-wa.org/), MIT, autoalojado; **no oficial: riesgo
+de baneo del número**, solo lectura, pensado para pruebas y cobertura básica). Con OpenWA el alta es manual: levantar
+OpenWA, crear y arrancar la sesión (QR), registrar un webhook `POST /api/sessions/{id}/webhooks` a
+`https://<dominio>/canal/<sistema>/webhook` con `events:["message.received"]` y un `secret` (el mismo que se carga en el
+panel), y activar `RESOLVE_LID_TO_PHONE=true`, `SEND_PACING_ENABLED` y `SIMULATE_TYPING`. Si OpenWA está en una red
+interna, su host va en `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS`. Ojo: si el webhook trae el medio en base64 puede superar el
+tope de cuerpo (1 MB) y OpenWA reintentará; configurar OpenWA para no enviar el contenido del medio.
+
+Webhook: `GET/POST /canal/{sistema_id}/webhook` (sin sesión ni CSRF; autentica la firma del proveedor; todo fallo es 403).
+El `location /` del nginx de ejemplo ya lo deja pasar (`/admin` y `/panel` siguen cerrados). En dev, un túnel HTTPS
+(cloudflared/ngrok) hacia el puerto 8100. Por ahora un mensaje solo se registra; no se responde.
 
 ## Producción
 

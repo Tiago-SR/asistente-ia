@@ -238,3 +238,18 @@ async def test_cada_escritura_sube_la_version_del_registro(sesiones):
     assert await version() == v1 + 1
     await escritura.guardar_secreto(sesiones, CIFRADOR, "acme", "token_manifiesto", TOKEN, v["version"], por="ana")
     assert await version() == v1 + 2
+
+
+async def test_secretos_del_canal_siguen_al_proveedor(sesiones):
+    v = await _creado(sesiones)
+    assert "wa_token" not in v["secretos"]
+    e = await _codigo(escritura.guardar_secreto(sesiones, CIFRADOR, "acme", "wa_token", "t", v["version"], por="ana"))
+    assert e.codigo == "secreto_no_aplica"  # sin proveedor elegido
+    canal = {"proveedor": "meta", "phone_number_id": "1234567890"}
+    v = await escritura.actualizar_sistema(
+        sesiones, CIFRADOR, "acme", _cuerpo(v, canal_mensajeria=canal), v["version"], por="ana")
+    v = await escritura.guardar_secreto(sesiones, CIFRADOR, "acme", "wa_token", "t", v["version"], por="ana")
+    assert v["secretos"]["wa_token"]["configurado"]
+    v = await escritura.actualizar_sistema(sesiones, CIFRADOR, "acme", _cuerpo(v, canal_mensajeria=None),
+                                           v["version"], por="ana")
+    assert "wa_token" not in v["secretos"]  # quitar el canal borra sus secretos

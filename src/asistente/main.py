@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from asistente.api import (
     admin,
+    canal,
     chat,
     confirmaciones,
     conversaciones,
@@ -110,7 +111,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
     app.add_middleware(AccesoAdmin)  # el último añadido es el más externo: corta antes que CORS
     app.add_middleware(TopeCuerpo)  # el más externo: corta antes que nadie parsee el cuerpo
     routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
-               voz.router, admin.router, widget.router, descargas.router)
+               voz.router, admin.router, widget.router, descargas.router, canal.router)
     for r in routers:
         app.include_router(r)
     panel.montar(app)  # solo si la imagen trae el panel compilado (prod); en dev lo sirve Vite

@@ -14,6 +14,11 @@ const CAMPOS_SECRETOS: Record<string, string> = {
   token_manifiesto: 'Token del manifiesto (el conector lo envía a base_url)',
   auth_hs256: 'Secreto HS256 (solo si el algoritmo es HS256, 32 bytes o más)',
   llm_api_key: 'API key del LLM propio (solo con llm.base_url propio)',
+  wa_token: 'WhatsApp (Meta): token permanente del System User',
+  wa_app_secret: 'WhatsApp (Meta): App Secret (valida la firma del webhook)',
+  wa_verify_token: 'WhatsApp (Meta): verify token (handshake del webhook)',
+  owa_api_key: 'OpenWA: API key (cabecera X-API-Key)',
+  owa_webhook_secret: 'OpenWA: secret del webhook (firma HMAC; sin él el canal no se activa)',
 }
 
 const leer = (o: Config, ruta: string): unknown => ruta.split('.').reduce<any>((a, k) => a?.[k], o) // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -55,6 +60,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
     excel: number
   } | null>(null)
   const [releyendo, setReleyendo] = useState(false)
+  const [prueba, setPrueba] = useState<string | null>(null)
   const [aprobar, setAprobar] = useState<ToolVista | null>(null)
   const [nombreConf, setNombreConf] = useState('')
   const puede = yo.rol === 'admin'
@@ -113,6 +119,23 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         onChange={(e) => setConfig(poner(config, ruta, tipo === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value))} />
     </div>
   )
+  // Canal de mensajería (strategy): elegir proveedor habilita sus campos y sus secretos; «ninguno» lo quita entero.
+  const proveedor = String(leer(config, 'canal_mensajeria.proveedor') ?? '')
+  const elegirProveedor = (p: string) => {
+    const c = structuredClone(config)
+    if (p === '') delete c.canal_mensajeria
+    else c.canal_mensajeria = { ...(c.canal_mensajeria as object | undefined), proveedor: p }
+    setConfig(c)
+  }
+  const probarCanal = async () => {
+    setPrueba(null)
+    try {
+      const r = await api<{ ok: boolean; numero?: string; nombre?: string; error?: string }>('POST', `/sistemas/${id}/canal/probar`)
+      setPrueba(r.ok ? `Conexión correcta: ${r.nombre ?? ''} ${r.numero ?? ''}` : `Falló: ${r.error}`)
+    } catch (e) {
+      setPrueba(mensaje(e))
+    }
+  }
   const interruptor = (ruta: string, etiqueta: string) => (
     <div className="flex items-center gap-3">
       <Switch id={ruta} disabled={!puede} checked={Boolean(leer(config, ruta))}
@@ -201,6 +224,52 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             {campo('auth.audiencia', 'Audiencia')}
             {campo('llm.modelo', 'Modelo del LLM (vacío = global)')}
             {campo('llm.base_url', 'URL del LLM propio (vacío = global)')}
+            <div className="grid gap-2">
+              <Label htmlFor="canal">Canal de mensajería</Label>
+              <select id="canal" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={!puede} value={proveedor}
+                onChange={(e) => elegirProveedor(e.target.value)}>
+                <option value="">Ninguno</option>
+                <option value="meta">WhatsApp (Meta Cloud API)</option>
+                <option value="openwa">WhatsApp (OpenWA, no oficial)</option>
+              </select>
+            </div>
+            {proveedor === 'openwa' && (
+              <div className="grid gap-4 rounded-md border p-4">
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    No oficial: automatiza WhatsApp Web y puede provocar el baneo del número. Solo lectura. Uso recomendado: pruebas.
+                  </AlertDescription>
+                </Alert>
+                {campo('canal_mensajeria.base_url', 'URL del servidor OpenWA (un host interno debe figurar en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS)')}
+                {campo('canal_mensajeria.session_id', 'ID de la sesión de OpenWA')}
+                <p className="text-sm text-muted-foreground">
+                  Registre en OpenWA un webhook a <span className="font-mono">/canal/{id}/webhook</span> con el evento
+                  message.received y el mismo secret que cargue abajo. Active RESOLVE_LID_TO_PHONE=true en OpenWA.
+                </p>
+              </div>
+            )}
+            {proveedor !== '' && (
+              <div className="flex items-center gap-3">
+                {puede && (
+                  <Button type="button" variant="outline" disabled={!vista.config.canal_mensajeria || hayCambios}
+                    onClick={() => void probarCanal()}>Probar conexión</Button>
+                )}
+                {prueba && <span className="text-sm">{prueba}</span>}
+                {(!vista.config.canal_mensajeria || hayCambios) && (
+                  <span className="text-sm text-muted-foreground">Guarde los cambios para probar.</span>
+                )}
+              </div>
+            )}
+            {proveedor === 'meta' && (
+              <div className="grid gap-4 rounded-md border p-4">
+                {campo('canal_mensajeria.phone_number_id', 'Phone number ID (no es el teléfono)')}
+                {campo('canal_mensajeria.graph_version', 'Versión de Graph (vacío = v23.0)')}
+                <p className="text-sm text-muted-foreground">
+                  Webhook para Meta: <span className="font-mono">/canal/{id}/webhook</span> bajo el dominio público. Cargue abajo
+                  los tres secretos de WhatsApp. Una App de Meta por sistema.
+                </p>
+              </div>
+            )}
             {interruptor('memoria_habilitada', 'Memoria por usuario')}
             {interruptor('busqueda_web', 'Búsqueda web')}
             {interruptor('consultas_recientes', 'Consultas recientes')}
@@ -262,7 +331,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         <CardHeader><CardTitle>Secretos</CardTitle></CardHeader>
         <CardContent className="grid gap-4 max-w-2xl">
           <p className="text-sm text-muted-foreground">Se guardan cifrados. Se pueden escribir y reemplazar, nunca leer.</p>
-          {Object.entries(CAMPOS_SECRETOS).map(([c, etiqueta]) => {
+          {Object.entries(CAMPOS_SECRETOS).filter(([c]) => c in vista.secretos).map(([c, etiqueta]) => {
             const s = vista.secretos[c]
             return (
               <div key={c} className="grid gap-2 border-b pb-4 last:border-0">

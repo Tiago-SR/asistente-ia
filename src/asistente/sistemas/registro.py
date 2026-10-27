@@ -33,6 +33,7 @@ from pydantic import (
 )
 
 from asistente.core import zona
+from asistente.core.canales.config import SECRETOS_CANAL, ConfigCanal
 
 log = logging.getLogger(__name__)
 
@@ -169,6 +170,8 @@ class Sistema(_Modelo):
     # consulta sale a un proveedor externo (ver `core/web/herramientas.py`). Requiere `WEB_*` configurado.
     busqueda_web: bool = False
     adjuntos: AdjuntosConfig = AdjuntosConfig()
+    # Canal de mensajería (strategy): None = ninguno; `proveedor` elige la variante y con ella sus campos y secretos.
+    canal_mensajeria: ConfigCanal | None = None
     # Leer imágenes de cualquier tema cuando el usuario lo pide (facturas, planillas…) y conservar el texto leído en la
     # conversación para los turnos siguientes. Apagado: solo se usan las imágenes pertinentes a las tools del sistema.
     leer_imagenes: bool = False
@@ -199,7 +202,13 @@ class Sistema(_Modelo):
 
 
 # Secretos canónicos de un sistema. Se escriben, nunca se devuelven en claro.
-CAMPOS_SECRETOS = ("auth_hs256", "token_manifiesto", "llm_api_key")
+SECRETOS_BASE = ("auth_hs256", "token_manifiesto", "llm_api_key")
+CAMPOS_SECRETOS = SECRETOS_BASE + tuple(c for cs in SECRETOS_CANAL.values() for c in cs)
+
+
+def secretos_canal(config: Mapping) -> tuple[str, ...]:
+    """Secretos del canal que aplican a esta config (`Sistema` ya validado o su JSON)."""
+    return SECRETOS_CANAL.get((config.get("canal_mensajeria") or {}).get("proveedor"), ())
 
 
 @dataclass(frozen=True)

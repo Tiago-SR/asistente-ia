@@ -24,7 +24,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.sistemas.cifrado import Cifrador, huella
-from asistente.sistemas.registro import CAMPOS_SECRETOS, Sistema, validar_sistema
+from asistente.sistemas.registro import (
+    CAMPOS_SECRETOS,
+    SECRETOS_BASE,
+    Sistema,
+    secretos_canal,
+    validar_sistema,
+)
 from asistente.sistemas.registro_bd import config_json, incrementar_version
 from asistente.store.models import (
     Accion,
@@ -126,7 +132,7 @@ def _vista(f: SistemaRegistro, secretos: Mapping[str, SistemaSecreto], tools: Ma
         "secretos": {c: ({"configurado": True, "huella": secretos[c].huella,
                           "actualizado_en": secretos[c].actualizado_en.isoformat()}
                          if c in secretos else {"configurado": False})
-                     for c in CAMPOS_SECRETOS},
+                     for c in SECRETOS_BASE + secretos_canal(f.config)},
         "tool_estado": dict(sorted(tools.items())),
         "actualizado_en": f.actualizado_en.isoformat() if f.actualizado_en else None,
         "actualizado_por": f.actualizado_por,
@@ -226,6 +232,9 @@ async def actualizar_sistema(
             if "auth_hs256" in nuevos:
                 raise ErrorEscritura(422, "secreto_no_aplica", {"campo": "auth_hs256"})
             borrar.add("auth_hs256")
+        # Cambiar o quitar el proveedor del canal deja sin sentido los secretos del anterior.
+        aplican = secretos_canal(config_json(sistema))
+        borrar |= {c for c in presentes if c in CAMPOS_SECRETOS and c not in SECRETOS_BASE and c not in aplican}
         final = (set(presentes) - borrar) | set(nuevos)
 
         faltan = _faltan(sistema, final) if sistema.habilitado else []
@@ -284,6 +293,8 @@ async def guardar_secreto(
         fila = await _bloquear(s, sistema_id)
         _exigir_version(fila, version)
         if campo == "auth_hs256" and fila.config.get("auth", {}).get("algoritmo") != "HS256":
+            raise ErrorEscritura(409, "secreto_no_aplica", {"campo": campo})
+        if campo not in SECRETOS_BASE and campo not in secretos_canal(fila.config):
             raise ErrorEscritura(409, "secreto_no_aplica", {"campo": campo})
         await _guardar(s, cifrador, sistema_id, campo, valor, por)
         fila.version += 1

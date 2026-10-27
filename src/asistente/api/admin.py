@@ -22,8 +22,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import DBAPIError
 
 from asistente import precios
+from asistente.api.canal import canal_de
 from asistente.api.deps import servicios
 from asistente.api.errores import ErrorApi
+from asistente.core.canales.base import ErrorCanal
 from asistente.core.red import resolver_dns
 from asistente.servicios import Servicios, reglas_red
 from asistente.sistemas import escritura
@@ -354,10 +356,11 @@ async def _verificar_destinos(config: dict, svc: Servicios) -> None:
     en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS) para dar un error claro. No es el control: ese ocurre al conectar
     (`core/red.py`), con la IP resuelta en ese momento. Un nombre que aún no resuelve se acepta."""
     reglas = reglas_red(svc.settings)
-    auth, llm = config.get("auth"), config.get("llm")
+    auth, llm, canal = config.get("auth"), config.get("llm"), config.get("canal_mensajeria")
     for campo, url in (("base_url", config.get("base_url")),
                        ("auth.jwks_url", auth.get("jwks_url") if isinstance(auth, dict) else None),
-                       ("llm.base_url", llm.get("base_url") if isinstance(llm, dict) else None)):
+                       ("llm.base_url", llm.get("base_url") if isinstance(llm, dict) else None),
+                       ("canal_mensajeria.base_url", canal.get("base_url") if isinstance(canal, dict) else None)):
         if not isinstance(url, str) or not url:
             continue
         try:
@@ -818,3 +821,17 @@ async def uso(
         else:
             s["sin_tarifa"].append(clave)
     return {"mes": f"{anio:04d}-{num:02d}", "sistemas": list(sistemas.values())}
+
+
+
+@router.post("/sistemas/{sistema_id}/canal/probar")
+async def probar_canal(sistema_id: str, svc: Servicios = _ESCRIBIR) -> dict:
+    if svc.registro.obtener(sistema_id) is None:
+        raise ErrorApi(404, "sistema_inexistente")
+    canal = canal_de(svc, sistema_id, habilitado=False)
+    if canal is None:
+        raise ErrorApi(409, "canal_sin_configurar")
+    try:
+        return {"ok": True, **await canal.probar()}
+    except ErrorCanal as e:
+        return {"ok": False, "error": str(e)}

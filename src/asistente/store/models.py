@@ -338,6 +338,34 @@ class SistemaSecreto(Base):
     actualizado_por: Mapped[str | None] = mapped_column(String(200))
 
 
+class CanalMensaje(Base):
+    """Un mensaje de un canal de mensajería; `(sistema_id, id)` deduplica los reenvíos del proveedor. Sin contenido."""
+
+    __tablename__ = "canal_mensajes"
+    __table_args__ = (Index("ix_canal_mensajes_creado", "creado_en"),)  # purga
+
+    sistema_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    contacto: Mapped[str] = mapped_column(String(32))
+    direccion: Mapped[str] = mapped_column(String(8))  # entrada | salida
+    tipo: Mapped[str] = mapped_column(String(24))
+    estado: Mapped[str] = mapped_column(String(24), server_default="recibido")
+    error: Mapped[str | None] = mapped_column(String(200))
+    creado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+
+
+class CanalVinculo(Base):
+    """Contacto vinculado en un sistema; la identidad del usuario la resuelve el sistema anfitrión."""
+
+    __tablename__ = "canal_vinculos"
+
+    sistema_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    contacto: Mapped[str] = mapped_column(String(32), primary_key=True)  # sin «+»
+    activo: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    creado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    ultimo_uso: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+
+
 class ToolEstado(Base):
     """Solo excepciones al valor por defecto (lectura sí, escritura no): una tool nueva del manifiesto no se
     enciende sola."""

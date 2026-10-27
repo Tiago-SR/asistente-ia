@@ -705,3 +705,7 @@ Una tool que borra o anula se declara con `"destructiva": true` y `confirmacion`
 - **Plazos y topes.** Vence como máximo a los 60 s (aunque `ttl_s` diga más). Cada usuario puede proponer a lo sumo `limites.destructivas_por_usuario_hora` por hora (5 por defecto; lo ajusta el operador en el panel, que también muestra cuántas lleva).
 - **No se propone en un turno que leyó la web** (`buscar_web`, `leer_pagina`): `destructiva_tras_web`.
 - **La última barrera es el sistema.** Como la marca la declara el propio sistema, un nombre engañoso (`actualizar_estado` que borra) pasa por escritura normal. Ejecuta solo con el token de escritura que emitió para esa propuesta, y debe hacer **borrado lógico o dejar papelera** si el negocio lo admite: deshacer es cosa suya, el asistente no lo ofrece.
+
+## 9. Canal WhatsApp (opcional)
+
+Un sistema puede dejar que sus usuarios hablen con el asistente por WhatsApp. El sistema, no el asistente, decide a qué usuario corresponde cada número: el usuario vincula su número desde su sesión web con un código de un solo uso, y el asistente pide un token por mensaje con una credencial de servicio propia (el **token de canal**). Es opcional y compatible: no cambia ningún endpoint existente ni sube `"contrato"`. Endpoints, claims (`canal: "whatsapp"`), reglas de escritura y casos de prueba en [`CANAL_WHATSAPP.md`](CANAL_WHATSAPP.md).
