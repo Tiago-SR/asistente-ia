@@ -3,6 +3,9 @@
 services:
   asistente:
     networks: [interna, publica, web]
+    # Loopback del host: el túnel ssh al panel (/admin, /panel) entra por aquí (deploy/VPS.md §5).
+    ports:
+      - "127.0.0.1:${ASISTENTE_PUERTO:-8000}:8000"
 
 networks:
   web:

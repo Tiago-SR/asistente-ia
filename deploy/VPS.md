@@ -80,7 +80,7 @@ Orden seguro (todo reversible hasta el paso 6):
 
 - **Caddy en el host** (lo más simple): `deploy/Caddyfile.example` → `/etc/caddy/Caddyfile`, ajustar el dominio, `systemctl reload caddy`. El TLS es automático.
 - **nginx**: `deploy/nginx.conf.example` → `sites-available`, ajustar el dominio, `sudo certbot --nginx -d asistente.<dominio>`.
-- **Caddy en otro stack de compose** (red externa `web`): `COMPOSE_FILES="-f docker-compose.yml -f docker-compose.proxy-externo.yml" deploy/deploy.sh` y `reverse_proxy asistente:8000` en ese Caddy.
+- **Caddy en otro stack de compose** (red externa `web`): `COMPOSE_FILES="-f docker-compose.yml -f docker-compose.proxy-externo.yml" deploy/deploy.sh` y `reverse_proxy asistente:8000` en ese Caddy. Este override también publica el puerto en loopback (`127.0.0.1:${ASISTENTE_PUERTO:-8000}`) para el túnel ssh al panel (§5); no hace falta sumar `docker-compose.prod.yml`.
 
 Los ejemplos devuelven 404 para `/admin`, `/panel`, `/docs` y `/openapi.json` desde fuera, y desactivan el buffering (SSE). Ambos requisitos son obligatorios en cualquier otro proxy. `/docs` además está apagado en el servicio salvo `ASISTENTE_DOCS=1` (solo dev).
 
