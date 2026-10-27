@@ -78,9 +78,9 @@ class Prompts:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
         if usuario_nombre:
-            sesion.append(f"Usuario: {usuario_nombre}.")
+            sesion.append(f"Usuario: {memorias._limpio(usuario_nombre, 80)}.")
         if locale:
-            sesion.append(f"Idioma preferido del usuario: {locale}.")
+            sesion.append(f"Idioma preferido del usuario: {memorias._limpio(locale, 20)}.")
         partes = [self._base]
         if dominio:
             partes.append("## Dominio del sistema\n" + dominio)

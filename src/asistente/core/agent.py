@@ -327,7 +327,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
                 atenciones.append(_ejecutar(ctx, conector, auditoria, conversacion_id, c, sem, config))
-        leyo_web = leyo_web or any(c.nombre == webtools.LEER for c in llamadas)
+        leyo_web = leyo_web or any(c.nombre in webtools.NOMBRES for c in llamadas)
         datos_sistema = datos_sistema or any(_es_dato_sistema(c.nombre, excel, recientes, memoria) for c in llamadas)
         resultados = await asyncio.gather(*atenciones)
         for c, r in zip(llamadas, resultados, strict=True):

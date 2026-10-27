@@ -187,6 +187,8 @@ class LectorDirecto:
                         continue
                     if r.status_code != 200:
                         raise PaginaIlegible(f"la página respondió HTTP {r.status_code}")
+                    if r.headers.get("content-encoding", "identity").lower() != "identity":
+                        raise PaginaIlegible("la página llegó comprimida")  # httpx descomprime sin tope
                     tipo = r.headers.get("content-type", "").split(";")[0].strip().lower()
                     if tipo not in _TIPOS:
                         raise PaginaIlegible(f"la página no es HTML ni texto ({tipo or 'sin tipo'})")

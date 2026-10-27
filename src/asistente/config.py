@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     tts_modelo: str | None = _env("TTS_MODELO", None)
     voz_max_tts_chars: int = _env("ASISTENTE_VOZ_MAX_TTS_CHARS", 1000)
     voz_tts_max_por_min: int = _env("ASISTENTE_VOZ_TTS_MAX_POR_MIN", 60)
+    voz_tts_max_por_dia: int = _env("ASISTENTE_VOZ_TTS_MAX_POR_DIA", 1000)
     voz_max_audio_kb: int = _env("ASISTENTE_VOZ_MAX_AUDIO_KB", 2048)
     voz_max_audio_s: int = _env("ASISTENTE_VOZ_MAX_AUDIO_S", 60)
     voz_max_por_min: int = _env("ASISTENTE_VOZ_MAX_POR_MIN", 10)
+    voz_max_por_dia: int = _env("ASISTENTE_VOZ_MAX_POR_DIA", 300)  # tope de costo por usuario

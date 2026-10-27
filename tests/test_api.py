@@ -420,7 +420,7 @@ m-caro:
 
 async def test_salud_verifica_la_bd(api):
     r = await api.get("/salud")
-    assert r.status_code == 200 and r.json() == {"ok": True, "bd": True, "sistemas": 2}
+    assert r.status_code == 200 and r.json() == {"ok": True, "bd": True}
 
 
 # --- unidades sin red ----------------------------------------------------------------------------

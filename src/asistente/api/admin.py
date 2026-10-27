@@ -375,7 +375,7 @@ async def _verificar_destinos(config: dict, svc: Servicios) -> None:
         if not host:
             continue
         # Los Bearer (token_manifiesto, token_canal) viajan a estas URL: http solo hacia hosts internos permitidos.
-        if campo.endswith("base_url") and not campo.startswith("llm") and url.lower().startswith("http://") \
+        if url.lower().startswith("http://") \
                 and host not in reglas.nombres:
             raise ErrorApi(422, "base_url_requiere_https", datos={"mensaje": f"{campo}: {host}"})
         try:

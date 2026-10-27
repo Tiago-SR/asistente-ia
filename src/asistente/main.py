@@ -133,7 +133,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
         fuente = svc.registro.fuente_bd
         registro_listo = fuente is None or fuente.listo
         ok = bd and registro_listo
-        cuerpo = {"ok": ok, "bd": bd, "sistemas": len(svc.registro.todos())}
+        cuerpo = {"ok": ok, "bd": bd}
         if not registro_listo:
             cuerpo["registro"] = "sin_cargar"
         return JSONResponse(cuerpo, status_code=200 if ok else 503)

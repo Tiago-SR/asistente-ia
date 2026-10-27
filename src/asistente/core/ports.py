@@ -254,9 +254,10 @@ class Limites(Protocol):
 
     async def registrar_uso(self, ctx: Contexto, uso: Uso) -> None: ...
 
-    async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int, clave: str = "voz") -> None:
+    async def reservar_voz(self, sistema_id: str, usuario_ref: str, tope_por_min: int, tope_por_dia: int,
+                           clave: str = "voz") -> None:
         """Cuenta un dictado (`clave="voz"`) o una síntesis (`clave="tts"`) del usuario, en un contador
-        aparte del de mensajes y del otro; lanza `LimiteExcedido("voz_min")` si supera el tope."""
+        aparte del de mensajes y del otro; lanza `LimiteExcedido("voz_min"|"voz_dia")` si supera un tope."""
 
     async def reservar_web(self, sistema_id: str, usuario_ref: str, tope_por_min: int, tope_por_dia: int,
                            clave: str = "web") -> None:

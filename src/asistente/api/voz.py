@@ -85,7 +85,7 @@ async def transcribir(
         segundos = None
 
     try:
-        await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_max_por_min)
+        await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_max_por_min, cfg.voz_max_por_dia)
     except LimiteExcedido as e:
         _medir(svc, u, "stt", "limite", motivo=e.cual)
         raise ErrorApi(429, "limite_excedido") from e
@@ -143,7 +143,7 @@ async def sintetizar(
         raise ErrorApi(413, "texto_demasiado_largo")
 
     try:
-        await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_tts_max_por_min, clave="tts")
+        await svc.limites.reservar_voz(u.sistema_id, u.usuario_ref, cfg.voz_tts_max_por_min, cfg.voz_tts_max_por_dia, clave="tts")
     except LimiteExcedido as e:
         _medir(svc, u, "tts", "limite", motivo=e.cual)
         raise ErrorApi(429, "limite_excedido") from e
