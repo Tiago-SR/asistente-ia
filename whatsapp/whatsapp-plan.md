@@ -144,7 +144,7 @@ teléfono en ninguna tabla. Recomendación: **el mapeo vive en el sistema, no en
    - Si `res.completo`, `guardar_turno` en el mismo orden que `api/chat.py:159-179`. Renovar el token ante 401.
    - Enviar la respuesta con `enviar_texto`, cortada a 4.096 caracteres. Respetar `limites` y `metricas`.
    - Una conversación por `wa_id` (serializar mensajes del mismo número con un lock; no dos turnos a la vez).
-10. [ ] **Medios**
+10. [x] (pypdfium2 + Pillow, `core/medios.py`; sin tests aún, van en el paso 12) **Medios**
     - `info_medio` + `descargar_medio` (URL dura 5 min), validar `mime_type`, tope propio y `sha256`.
     - JPEG/PNG → `core/adjuntos.py` `decodificar()` (hoy 3 imágenes, 700 KB c/u, `config.py:56-57`): reducir/recomprimir
       antes de entregar. **PDF → rasterizar** (hace falta dependencia nueva, p. ej. `pymupdf`; no está en

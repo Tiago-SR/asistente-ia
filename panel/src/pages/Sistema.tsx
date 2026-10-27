@@ -173,6 +173,14 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
       {ok && <Alert><AlertDescription>{ok}</AlertDescription></Alert>}
       {vista.error && <Alert variant="destructive"><AlertDescription>{vista.error}</AlertDescription></Alert>}
       {!puede && <Alert><AlertDescription>Su rol es de solo lectura.</AlertDescription></Alert>}
+      {vista.config.canal_mensajeria && !vista.secretos.token_canal?.configurado && (
+        <Alert>
+          <AlertDescription>
+            Hay un canal de mensajería configurado pero falta el token de canal: sin él el asistente no puede vincular
+            números ni emitir tokens por mensaje, y el canal no responde. Cárguelo en Secretos.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <form onSubmit={guardar} className="grid gap-6">
         <Card>
@@ -309,6 +317,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
               <Alert>
                 <AlertDescription className="grid gap-2">
                   Cambiar base_url descarta el token del manifiesto actual: cárguelo de nuevo aquí o deshabilite el sistema.
+                  {vista.secretos.token_canal?.configurado && ' También descarta el token de canal: cárguelo de nuevo en Secretos tras guardar.'}
                   <Input type="password" autoComplete="off" placeholder="Nuevo token del manifiesto" value={nuevos.token_manifiesto ?? ''}
                     onChange={(e) => setNuevos({ ...nuevos, token_manifiesto: e.target.value })} />
                 </AlertDescription>

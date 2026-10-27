@@ -14,16 +14,20 @@ import weakref
 import httpx
 
 from asistente.api.chat import armar_turno
-from asistente.core import events
+from asistente.core import adjuntos as adj
+from asistente.core import events, medios
 from asistente.core.agent import run_turn
 from asistente.core.canales.base import Canal, Entrante, ErrorCanal
+from asistente.core.llm.base import Uso
 from asistente.servicios import LLMNoConfigurado, Servicios
 from asistente.sistemas.auth import TokenInvalido, Usuario
 
 log = logging.getLogger(__name__)
 
 BIENVENIDA = "Recibí tu solicitud, la estoy procesando."
-SOLO_TEXTO = "Por ahora solo puedo leer mensajes de texto."
+SOLO_TEXTO = "Por ahora solo puedo leer mensajes de texto, fotos y PDF."
+SIN_IMAGENES = "Por ahora no puedo leer imágenes ni PDF. Escribime lo que necesites."
+MEDIO_FALLO = "No pude leer ese archivo. Probá con una foto JPEG o PNG, o un PDF sin clave."
 FALLO = "No pude responder ahora. Probá de nuevo en un momento."
 MAX_RESPUESTA = 4096  # tope de un mensaje de texto de WhatsApp
 _VINCULAR = re.compile(r"^\s*vincular\s+([A-Za-z0-9-]{4,40})\s*$", re.IGNORECASE)
@@ -95,10 +99,11 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     sistema = svc.registro.obtener(sistema_id)
     if sistema is None:
         return
-    if m.tipo != "texto" or not m.texto:
+    es_medio = m.tipo in ("imagen", "documento") and bool(m.medio_ref)
+    if not es_medio and (m.tipo != "texto" or not m.texto):
         await canal.enviar_texto(m.contacto, SOLO_TEXTO)
         return
-    texto = m.texto.strip()
+    texto = (m.texto or "").strip() or ("Te envío este archivo." if es_medio else "")
     if len(texto) > svc.settings.max_mensaje_chars:
         await canal.enviar_texto(m.contacto, "El mensaje es demasiado largo.")
         return
@@ -125,6 +130,22 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     except LLMNoConfigurado:
         await canal.enviar_texto(m.contacto, FALLO)
         return
+    adjuntos: tuple = ()
+    if es_medio:
+        if not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
+            await canal.enviar_texto(m.contacto, SIN_IMAGENES)
+            return
+        cfg = svc.settings
+        tope = min(sistema.adjuntos.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb) * 1024
+        n = min(sistema.adjuntos.max_archivos or cfg.max_imagenes, cfg.max_imagenes)
+        try:
+            datos, _ = await canal.descargar_medio(m.medio_ref, medios.MAX_MEDIO_BYTES)
+            adjuntos = adj.decodificar(await medios.a_imagenes(datos, max_bytes=tope, max_imagenes=n),
+                                       max_imagenes=n, max_bytes=tope)
+        except (ErrorCanal, medios.MedioInvalido, adj.AdjuntoInvalido) as e:
+            log.info("[%s] medio rechazado (%s)", request_id, type(e).__name__)
+            await canal.enviar_texto(m.contacto, MEDIO_FALLO)
+            return
     ctx, config, memoria, web, excel, version = await armar_turno(svc, sistema, u, modelo, request_id)
     # Una conversación por número y usuario: el id es determinista y guardar_turno la crea la primera vez.
     conv_id = uuid.uuid5(_NS, f"{sistema_id}:{u.usuario_ref}")
@@ -135,15 +156,21 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
         if evento == events.ERROR:
             error.append(str(datos))
 
+    lectura = (asyncio.create_task(adj.leer(llm, modelo, adjuntos, svc.settings.max_output_tokens))
+               if adjuntos and sistema.leer_imagenes else None)
     res = await run_turn(ctx, llm, svc.conector.para(u, request_id), svc.auditoria, svc.limites, historial,
-                         texto, emit, conv_id, config, acciones=None,
+                         texto, emit, conv_id, config, acciones=None, adjuntos=adjuntos,
                          recientes=svc.recientes if sistema.consultas_recientes else None,
                          memoria=memoria, web=web, metricas=svc.metricas,
                          excel=svc.archivos if excel else None)
     if not res.completo:
+        if lectura:
+            lectura.cancel()
         log.info("[%s] turno de canal sin completar (%s %s)", request_id, res.motivo, error)
         await canal.enviar_texto(m.contacto, FALLO)
         return
-    await asyncio.shield(svc.repo.guardar_turno(sistema_id, u.usuario_ref, conv_id, "WhatsApp", res.nuevos,
-                                                res.uso, modelo, version))
+    leidos, uso_lectura = await lectura if lectura else ([], Uso())
+    nuevos = [await adj.para_guardar(x, svc.adjuntos, sistema_id, u.usuario_ref, leidos) for x in res.nuevos]
+    await asyncio.shield(svc.repo.guardar_turno(sistema_id, u.usuario_ref, conv_id, "WhatsApp", nuevos,
+                                                res.uso + uso_lectura, modelo, version))
     await canal.enviar_texto(m.contacto, (res.texto or FALLO)[:MAX_RESPUESTA])

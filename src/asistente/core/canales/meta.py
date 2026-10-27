@@ -121,6 +121,8 @@ class CanalMeta:
         r = await self._llamar("GET", info["url"])
         if len(r.content) > max_bytes:
             raise ErrorCanal("medio demasiado grande")
+        if info.get("sha256") and hashlib.sha256(r.content).hexdigest() != info["sha256"]:
+            raise ErrorCanal("el medio no coincide con su sha256")
         return r.content, str(info.get("mime_type", ""))
 
     async def probar(self) -> dict:
