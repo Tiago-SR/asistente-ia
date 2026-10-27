@@ -20,6 +20,7 @@ if [ "${1:-}" = restore ]; then
   exit 0
 fi
 
+[ -n "${BACKUP_GPG_RECIPIENT:-}" ] || BACKUP_GPG_RECIPIENT=$(sed -n 's/^BACKUP_GPG_RECIPIENT=//p' .env 2>/dev/null | tail -1 | tr -d "\"' ")
 receptor=${BACKUP_GPG_RECIPIENT:?indicar BACKUP_GPG_RECIPIENT (clave pública gpg)}
 salida="backups/asistente-$(date +%Y%m%d-%H%M%S).sql.gz.gpg"
 trap 'rm -f "$salida"' ERR  # un volcado parcial no se queda ni cuenta para la retención
