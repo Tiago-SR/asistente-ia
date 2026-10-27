@@ -29,6 +29,8 @@ class Settings(BaseSettings):
         return v
     prompts_dir: str = _env("ASISTENTE_PROMPTS_DIR", "prompts")
     admin_token: str | None = _env("ASISTENTE_ADMIN_TOKEN", None)
+    # Correo al que pedir el borrado de datos; lo muestra la página pública /privacidad (Meta la exige para pasar a Live).
+    contacto_privacidad: str | None = _env("ASISTENTE_CONTACTO_PRIVACIDAD", None)
     # Panel: la cookie de sesión es `__Host-admin` (solo HTTPS). En dev sobre http://localhost poner
     # ASISTENTE_ADMIN_COOKIE_SECURE=false (cookie `admin`). `ASISTENTE_ADMIN_ORIGENES` (coma) suma orígenes
     # válidos para el chequeo CSRF además del host propio (p. ej. el dev server de Vite); vacío en prod.

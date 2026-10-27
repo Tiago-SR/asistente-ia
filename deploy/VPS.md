@@ -27,6 +27,7 @@ Completar `.env`:
 | Variable | Valor |
 |---|---|
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (obligatoria; sin ella el compose no arranca) |
+| `ASISTENTE_CONTACTO_PRIVACIDAD` | correo que muestra la página pública `/privacidad` (Meta la pide para pasar a Live) |
 | `ASISTENTE_ADMIN_TOKEN` | `openssl rand -hex 32` (vacío = `/admin` deshabilitado) |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `ASISTENTE_MODELO_DEFAULT` | el proveedor de producción |
 | `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS` | solo si algún sistema (`base_url`, `jwks_url`) o un LLM por sistema vive en el mismo host o red docker: nombres y/o CIDR, coma (`mi-sistema,host.docker.internal,10.0.5.0/24`). Vacío = solo IPs públicas; `169.254.0.0/16` (metadatos) nunca |

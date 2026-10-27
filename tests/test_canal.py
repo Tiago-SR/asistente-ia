@@ -245,3 +245,10 @@ def test_openwa_es_solo_lectura_y_url_valida():
     with pytest.raises(ValueError):
         CanalOpenWAConfig(proveedor="openwa", base_url="ftp://x", session_id="s")
     assert secretos_canal({"canal_mensajeria": {"proveedor": "openwa"}}) == ("owa_api_key", "owa_webhook_secret")
+
+
+async def test_privacidad_es_publica_y_muestra_el_contacto(wa):
+    r = await wa.get("/privacidad")
+    assert r.status_code == 200 and "eliminación de datos" in r.text and "operador" in r.text
+    wa._transport.app.state.servicios.settings.contacto_privacidad = "a@b.c<x>"
+    assert "mailto:a@b.c&lt;x&gt;" in (await wa.get("/privacidad")).text  # escapado
