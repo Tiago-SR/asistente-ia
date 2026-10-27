@@ -108,7 +108,7 @@ class AdminSql:
         if u.bloqueado_hasta is not None and u.bloqueado_hasta > ahora:
             raise ErrorAdmin("cuenta bloqueada temporalmente", "clave_actual_incorrecta")
         if not await self._verificar(u.hash, actual):
-            await self._registrar_fallo(u.id, ahora)
+            await self._registrar_fallo(u.id, u.email, ahora)
             raise ErrorAdmin("la contraseña actual no es correcta", "clave_actual_incorrecta")
         hash_ = await asyncio.to_thread(_hasher.hash, nueva)
         async with self._sesiones.begin() as s:
@@ -170,7 +170,7 @@ class AdminSql:
         if bloqueado or not u.activo:
             return None
         if not ok:
-            await self._registrar_fallo(u.id, ahora)
+            await self._registrar_fallo(u.id, u.email, ahora)
             return None
         token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         async with self._sesiones.begin() as s:
@@ -182,7 +182,7 @@ class AdminSql:
                 AdminSesion.expira < ahora))
         return token, SesionAdmin(u.id, u.email, u.rol, csrf)
 
-    async def _registrar_fallo(self, usuario_id: uuid.UUID, ahora: datetime) -> None:
+    async def _registrar_fallo(self, usuario_id: uuid.UUID, email: str, ahora: datetime) -> None:
         """Cuenta el fallo con un UPDATE atómico: leer-y-escribir dejaba que intentos en paralelo no sumaran."""
         async with self._sesiones.begin() as s:
             fallos = (await s.execute(
@@ -191,6 +191,7 @@ class AdminSql:
             if fallos >= FALLOS_MAX:
                 await s.execute(update(AdminUsuario).where(AdminUsuario.id == usuario_id)
                                 .values(fallos=0, bloqueado_hasta=ahora + BLOQUEO))
+                s.add(AdminAuditoria(actor=email[:320], accion="cuenta_bloqueada", despues={"minutos": int(BLOQUEO.total_seconds() // 60)}))
 
     @staticmethod
     async def _verificar(hash_: str, clave: str) -> bool:

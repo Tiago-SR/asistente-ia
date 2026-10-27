@@ -31,4 +31,6 @@ async def privacidad(svc: Servicios = Depends(servicios)) -> HTMLResponse:
     c = svc.settings.contacto_privacidad
     contacto = (f"Escribe a <a href=\"mailto:{escape(c)}\">{escape(c)}</a> indicando tu número de teléfono."
                 if c else "Escribe al operador de este servicio indicando tu número de teléfono.")
-    return HTMLResponse(_HTML.format(contacto=contacto))
+    return HTMLResponse(_HTML.format(contacto=contacto), headers={
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+        "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff"})

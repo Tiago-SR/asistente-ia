@@ -87,6 +87,7 @@ async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, 
     config = ConfigTurno(max_iter=cfg.max_iter, max_output_tokens=cfg.max_output_tokens,
                          timeout_turno_s=cfg.timeout_turno_s, resumen_voz=canal == "voz",
                          web_max_por_min=cfg.web_max_por_min, web_max_por_dia=cfg.web_max_por_dia,
+                         web_max_por_dia_sistema=cfg.web_max_por_dia_sistema,
                          web_max_pagina_chars=cfg.web_max_pagina_chars, web_max_por_turno=cfg.web_max_por_turno,
                          excel_max_filas=cfg.excel_max_filas, excel_max_columnas=cfg.excel_max_columnas,
                          excel_max_kb=cfg.excel_max_kb)

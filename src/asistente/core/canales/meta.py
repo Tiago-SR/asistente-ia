@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import hmac
 import json
+import re
 from collections.abc import Callable
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -12,6 +14,7 @@ from asistente.core.canales.base import Entrante, ErrorCanal, EstadoEnvio
 from asistente.core.canales.config import SECRETOS_CANAL, CanalMetaConfig
 
 GRAPH = "https://graph.facebook.com"
+_DOMINIOS_META = (".facebook.com", ".fbsbx.com", ".fbcdn.net", ".whatsapp.net")
 MAX_TEXTO = 4096
 _REINTENTOS = 2  # sobre 5xx/429/red
 _TIPOS = {"text": "texto", "image": "imagen", "document": "documento", "interactive": "boton", "button": "boton"}
@@ -38,7 +41,7 @@ class CanalMeta:
     # --- webhook ---
     def verificar_suscripcion(self, params: dict[str, str]) -> str | None:
         if params.get("hub.mode") == "subscribe" and hmac.compare_digest(
-                params.get("hub.verify_token", ""), self._verify):
+                params.get("hub.verify_token", "").encode(), self._verify.encode()):
             return params.get("hub.challenge", "")
         return None
 
@@ -46,7 +49,7 @@ class CanalMeta:
         """`X-Hub-Signature-256: sha256=<hex>` = HMAC-SHA256 del cuerpo crudo con el App Secret."""
         cab = headers.get("x-hub-signature-256", "")
         esperado = hmac.new(self._app_secret.encode(), cuerpo, hashlib.sha256).hexdigest()
-        return cab.startswith("sha256=") and hmac.compare_digest(cab[7:], esperado)
+        return cab.startswith("sha256=") and hmac.compare_digest(cab[7:].encode(), esperado.encode())
 
     def parsear(self, cuerpo: bytes) -> tuple[list[Entrante], list[EstadoEnvio]]:
         """Tolera cualquier forma. Descarta lo que no sea de nuestro `phone_number_id`: el webhook es por App y una
@@ -115,9 +118,15 @@ class CanalMeta:
     async def descargar_medio(self, ref: str, max_bytes: int) -> tuple[bytes, str]:
         """Dos pasos: la info del medio y su URL (dura ~5 min, mismo `Authorization`).
         shortcut: valida el tamaño después de bajar, no en streaming; pasar a streaming si se admiten medios grandes."""
+        if not re.fullmatch(r"\d{1,32}", ref):
+            raise ErrorCanal("referencia de medio inválida")
         info = await self._json("GET", f"{self._base}/{ref}")
         if int(info.get("file_size") or 0) > max_bytes or not info.get("url"):
             raise ErrorCanal("medio demasiado grande o sin URL")
+        u = urlsplit(str(info["url"]))
+        # El Bearer solo viaja a dominios de Meta.
+        if u.scheme != "https" or not (u.hostname or "").endswith(_DOMINIOS_META):
+            raise ErrorCanal("URL de medio fuera de los dominios de Meta")
         r = await self._llamar("GET", info["url"])
         if len(r.content) > max_bytes:
             raise ErrorCanal("medio demasiado grande")

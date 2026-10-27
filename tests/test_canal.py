@@ -110,13 +110,33 @@ async def test_reintenta_5xx_y_tipa_el_error():
 
 async def test_medio_demasiado_grande():
     def h(req):
-        if req.url.path.endswith("/m1"):
-            return httpx.Response(200, json={"url": "https://m/x", "mime_type": "image/png"})
+        if req.url.path.endswith("/111"):
+            return httpx.Response(200, json={"url": "https://lookaside.fbsbx.com/x", "mime_type": "image/png"})
         return httpx.Response(200, content=b"x" * 10)
 
-    assert await _canal(h).descargar_medio("m1", 10) == (b"x" * 10, "image/png")
+    assert await _canal(h).descargar_medio("111", 10) == (b"x" * 10, "image/png")
     with pytest.raises(ErrorCanal):
-        await _canal(h).descargar_medio("m1", 5)
+        await _canal(h).descargar_medio("111", 5)
+
+
+async def test_medio_con_ref_o_host_ajeno_no_recibe_el_bearer():
+    vistos = []
+
+    def h(req):
+        vistos.append(str(req.url))
+        return httpx.Response(200, json={"url": "https://evil.example/x", "mime_type": "image/png"})
+
+    with pytest.raises(ErrorCanal):
+        await _canal(h).descargar_medio("111", 10)  # URL fuera de Meta
+    with pytest.raises(ErrorCanal):
+        await _canal(h).descargar_medio("../me", 10)  # ref no numérica
+    assert len(vistos) == 1  # solo la consulta de info; nada llegó a evil.example
+
+
+def test_firma_y_verify_token_no_ascii_no_lanzan():
+    c = _canal()
+    assert c.autenticar("", b"{}", {"x-hub-signature-256": "sha256=ñ"}) is False
+    assert c.verificar_suscripcion({"hub.mode": "subscribe", "hub.verify_token": "ñ"}) is None
 
 
 # --- webhook ---

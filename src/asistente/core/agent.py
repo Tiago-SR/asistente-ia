@@ -67,6 +67,7 @@ class ConfigTurno:
     # Búsqueda web (tools locales `buscar_web` y `leer_pagina`): topes por usuario y texto máximo de una página.
     web_max_por_min: int = 10
     web_max_por_dia: int = 100
+    web_max_por_dia_sistema: int = 1000
     web_max_pagina_chars: int = 12_000
     web_max_por_turno: int = 4  # búsquedas + lecturas: el cupo del proveedor es chico y compartido
     # Excel descargable (tool local `generar_excel`): topes de una tabla.
@@ -304,7 +305,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                     continue
                 propuestas += 1
                 exclusiva = solitaria
-                # Una destructiva o un recuerdo no se propone en un turno que ya leyó la web (ni en la misma tanda que una).
+                # Ninguna escritura se propone en un turno que ya leyó la web (ni en la misma tanda que una).
                 con_web = web_usadas > 0 or any(x.nombre in webtools.NOMBRES for x in llamadas)
                 turno = TurnoMemoria(tuple(nuevos), frozenset(lectura), conector) if local else None
                 atenciones.append(_proponer(ctx, conector, acciones, auditoria, conversacion_id,
@@ -420,6 +421,8 @@ async def _web(ctx, web, limites, auditoria, conversacion_id, c: LlamadaTool, co
     elif (r := webtools.validar(c.nombre, c.parametros)) is None:
         try:
             await limites.reservar_web(ctx.sistema_id, ctx.usuario_ref, config.web_max_por_min, config.web_max_por_dia)
+            # ref vacío = contador global del sistema (ningún `sub` es vacío)
+            await limites.reservar_web(ctx.sistema_id, "", config.web_max_por_dia_sistema, config.web_max_por_dia_sistema)
         except LimiteExcedido as e:
             r = ResultadoTool(False, error=e.cual, detalle="demasiadas búsquedas web; intenta más tarde")
         else:
@@ -484,9 +487,9 @@ async def _proponer(ctx, conector, acciones, auditoria, conversacion_id, c: Llam
     inicio = time.monotonic()
     if acciones is None:
         r = ResultadoTool(False, error="no_disponible", detalle="las acciones no están habilitadas")
-    elif (destructiva or local) and con_web:
-        r = ResultadoTool(False, error="destructiva_tras_web",
-                          detalle="no se puede proponer un borrado ni un recuerdo en un turno con contenido de la web")
+    elif con_web:
+        r = ResultadoTool(False, error="escritura_tras_web",
+                          detalle="no se puede proponer una escritura en un turno con contenido de la web")
     elif c.argumentos_invalidos:
         r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
     else:

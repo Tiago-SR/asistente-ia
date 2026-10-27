@@ -23,7 +23,7 @@ IP = ipaddress.IPv4Address | ipaddress.IPv6Address
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
 _DENEGADAS = tuple(ipaddress.ip_network(n) for n in (
-    "0.0.0.0/8", "169.254.0.0/16", "100.100.100.200/32", "224.0.0.0/4",  # IPv4: any, link-local/metadatos, multicast
+    "0.0.0.0/8", "169.254.0.0/16", "100.100.100.200/32", "168.63.129.16/32", "224.0.0.0/4",  # IPv4: any, link-local/metadatos (Alibaba, Azure), multicast
     "::/128", "fe80::/10", "fd00:ec2::254/128", "ff00::/8",              # IPv6: unspecified, link-local, metadatos
 ))
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")

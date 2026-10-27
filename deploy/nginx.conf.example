@@ -7,6 +7,9 @@ server {
 
     client_max_body_size 4m;   # dictado: audio crudo
 
+    # HSTS: solo sirve tras certbot (TLS); el navegador lo ignora por http.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
     # Operación solo por túnel ssh (deploy/VPS.md §5) o curl desde el host a http://127.0.0.1:8000.
     location ~ ^/(admin|panel|docs|openapi\.json) {
         return 404;

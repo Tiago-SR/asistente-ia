@@ -6,6 +6,8 @@ asistente.midominio.com {
 	@cerrado path /admin* /panel* /docs* /openapi.json
 	respond @cerrado 404
 
+	header Strict-Transport-Security "max-age=31536000"
+
 	request_body {
 		max_size 4MB   # dictado: audio crudo
 	}

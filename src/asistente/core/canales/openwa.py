@@ -43,7 +43,7 @@ class CanalOpenWA:
         """`X-OpenWA-Signature: sha256=<hex>` = HMAC-SHA256 del cuerpo crudo con el secret del webhook."""
         cab = headers.get("x-openwa-signature", "")
         esperado = hmac.new(self._secret.encode(), cuerpo, hashlib.sha256).hexdigest()
-        return cab.startswith("sha256=") and hmac.compare_digest(cab[7:], esperado)
+        return cab.startswith("sha256=") and hmac.compare_digest(cab[7:].encode(), esperado.encode())
 
     def parsear(self, cuerpo: bytes) -> tuple[list[Entrante], list[EstadoEnvio]]:
         """Solo `message.received` de nuestra sesión, de un chat individual, no propio y con teléfono resoluble.

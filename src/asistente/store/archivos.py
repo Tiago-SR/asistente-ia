@@ -13,10 +13,12 @@ from asistente.store.models import Archivo
 
 
 class ArchivosSql:
-    def __init__(self, sesiones: async_sessionmaker[AsyncSession], ttl_horas: int, max_por_dia: int) -> None:
+    def __init__(self, sesiones: async_sessionmaker[AsyncSession], ttl_horas: int, max_por_dia: int,
+                 max_por_dia_sistema: int = 500) -> None:
         self._sesiones = sesiones
         self._ttl = timedelta(hours=ttl_horas)
         self._max_por_dia = max_por_dia
+        self._max_por_dia_sistema = max_por_dia_sistema
 
     async def guardar(self, ctx: Contexto, conversacion_id: Any, nombre: str, datos: bytes, tipo_mime: str) -> str:
         ahora = datetime.now(UTC)
@@ -29,6 +31,10 @@ class ArchivosSql:
                 Archivo.creado > ahora - timedelta(hours=24)))).scalar_one()
             if hoy >= self._max_por_dia:
                 raise LimiteExcedido("archivos_dia")
+            del_sistema = (await s.execute(select(func.count()).select_from(Archivo).where(
+                Archivo.sistema_id == ctx.sistema_id, Archivo.creado > ahora - timedelta(hours=24)))).scalar_one()
+            if del_sistema >= self._max_por_dia_sistema:
+                raise LimiteExcedido("archivos_dia_sistema")
             fila = Archivo(sistema_id=ctx.sistema_id, usuario_ref=ctx.usuario_ref, conversacion_id=conversacion_id,
                            nombre=nombre[:120], tipo_mime=tipo_mime, bytes=len(datos), datos=datos,
                            creado=ahora, expira_en=ahora + self._ttl)

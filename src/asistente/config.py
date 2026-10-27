@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     excel_max_columnas: int = _env("ASISTENTE_EXCEL_MAX_COLUMNAS", 50)
     excel_max_kb: int = _env("ASISTENTE_EXCEL_MAX_KB", 2048)
     excel_max_por_dia: int = _env("ASISTENTE_EXCEL_MAX_POR_DIA", 20)
+    excel_max_por_dia_sistema: int = _env("ASISTENTE_EXCEL_MAX_POR_DIA_SISTEMA", 500)  # todos los usuarios del sistema
     archivos_ttl_horas: int = _env("ASISTENTE_ARCHIVOS_TTL_HORAS", 24)
 
     # Purga de retención: cada cuántos segundos (0 = desactivada).
@@ -92,6 +93,7 @@ class Settings(BaseSettings):
     web_pausa_cupo_s: float = _env("ASISTENTE_WEB_PAUSA_CUPO_S", 21600.0)
     web_max_por_min: int = _env("ASISTENTE_WEB_MAX_POR_MIN", 10)
     web_max_por_dia: int = _env("ASISTENTE_WEB_MAX_POR_DIA", 100)
+    web_max_por_dia_sistema: int = _env("ASISTENTE_WEB_MAX_POR_DIA_SISTEMA", 1000)  # todos los usuarios del sistema
     web_max_por_turno: int = _env("ASISTENTE_WEB_MAX_POR_TURNO", 4)
     web_max_pagina_chars: int = _env("ASISTENTE_WEB_MAX_PAGINA_CHARS", 12000)
 

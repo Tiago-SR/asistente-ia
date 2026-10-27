@@ -188,6 +188,20 @@ class Sistema(_Modelo):
             raise ValueError("nombre_asistente: sin espacios en los extremos ni caracteres de control")
         return valor
 
+    @field_validator("origenes_permitidos")
+    @classmethod
+    def _origenes(cls, valor: tuple[str, ...]) -> tuple[str, ...]:
+        for o in valor:
+            try:
+                u = urlsplit(o)
+                u.port  # noqa: B018 - lanza ValueError si el puerto es inválido
+            except ValueError as e:
+                raise ValueError(f"origen inválido: {o!r}") from e
+            # Un origen es solo esquema://host[:puerto]; "*" y "null" no lo son.
+            if u.scheme not in ("http", "https") or not u.hostname or o != f"{u.scheme}://{u.netloc}":
+                raise ValueError(f"origen inválido: {o!r} (esperado esquema://host[:puerto])")
+        return valor
+
     @field_validator("zona_horaria")
     @classmethod
     def _zona(cls, valor: str | None) -> str | None:

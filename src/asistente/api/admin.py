@@ -234,6 +234,9 @@ def _fallos_ip(request: Request) -> deque[float]:
     estado = request.app.state
     if not hasattr(estado, "admin_fallos_ip"):
         estado.admin_fallos_ip = {}
+    if len(estado.admin_fallos_ip) > 1000:  # tope: se descartan las IPs cuya ventana ya venció
+        corte = time.monotonic() - _VENTANA_IP_S
+        estado.admin_fallos_ip = {k: d for k, d in estado.admin_fallos_ip.items() if d and d[-1] > corte}
     return estado.admin_fallos_ip.setdefault(_ip(request), deque())
 
 
@@ -371,6 +374,10 @@ async def _verificar_destinos(config: dict, svc: Servicios) -> None:
             continue  # la forma la rechaza la validación del modelo
         if not host:
             continue
+        # Los Bearer (token_manifiesto, token_canal) viajan a estas URL: http solo hacia hosts internos permitidos.
+        if campo.endswith("base_url") and not campo.startswith("llm") and url.lower().startswith("http://") \
+                and host not in reglas.nombres:
+            raise ErrorApi(422, "base_url_requiere_https", datos={"mensaje": f"{campo}: {host}"})
         try:
             ips = [ipaddress.ip_address(host)]
         except ValueError:
