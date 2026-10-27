@@ -57,7 +57,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
                             svc.admin or (AdminSql(svc.sesiones) if svc.sesiones is not None else None),
                             svc.settings.admin_auditoria_dias,
                             ResumenSql(svc.sesiones) if svc.sesiones is not None else None,
-                            svc.archivos))
+                            svc.archivos, svc.canal_mensajes, svc.canal_vinculos))
         escritor = None
         if propio and app.state.servicios.metricas is not None:
             escritor = asyncio.create_task(app.state.servicios.metricas.bucle())

@@ -8,18 +8,22 @@ from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
 from asistente.store.archivos import ArchivosSql
 from asistente.store.auditoria import AuditoriaSql
+from asistente.store.canal import MensajesCanal, VinculosCanal
 from asistente.store.memoria import MemoriaSql
 from asistente.store.repo import Repo
 from asistente.store.resumen import ResumenSql
 
 log = logging.getLogger(__name__)
 
+CANAL_MENSAJES_DIAS = 8  # Meta reintenta un webhook fallido hasta 7 días: la deduplicación necesita ese plazo
+
 
 async def purgar_todos(
     registro: RegistroSistemas, repo: Repo, acciones: AccionesSql | None = None,
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
     admin: AdminSql | None = None, admin_auditoria_dias: int = 0, resumen: ResumenSql | None = None,
-    archivos: ArchivosSql | None = None,
+    archivos: ArchivosSql | None = None, canal_mensajes: MensajesCanal | None = None,
+    canal_vinculos: VinculosCanal | None = None,
 ) -> dict[str, int]:
     """Una pasada. Un sistema que falle no impide purgar a los demás."""
     borradas: dict[str, int] = {}
@@ -39,6 +43,8 @@ async def purgar_todos(
                 await memoria.purgar(sistema.id)
             if resumen is not None:  # solo días ya resumidos
                 await resumen.purgar_eventos(sistema.id, sistema.retencion_dias)
+            if canal_vinculos is not None:  # teléfonos vinculados sin uso
+                await canal_vinculos.purgar(sistema.id, sistema.retencion_dias)
         except Exception:
             log.exception("purga de %s fallida", sistema.id)
     if acciones is not None:  # no es de ningún sistema: fuera del bucle
@@ -59,6 +65,11 @@ async def purgar_todos(
             await archivos.purgar()
         except Exception:
             log.exception("purga de archivos vencidos fallida")
+    if canal_mensajes is not None:  # teléfonos de quien escribió, vinculado o no
+        try:
+            await canal_mensajes.purgar(CANAL_MENSAJES_DIAS)
+        except Exception:
+            log.exception("purga de mensajes de canal fallida")
     if resumen is not None:  # no es de ningún sistema
         try:
             await resumen.purgar_contadores()
@@ -74,10 +85,11 @@ async def bucle_purga(
     registro: RegistroSistemas, repo: Repo, intervalo_s: float, acciones: AccionesSql | None = None,
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
     admin: AdminSql | None = None, admin_auditoria_dias: int = 0, resumen: ResumenSql | None = None,
-    archivos: ArchivosSql | None = None,
+    archivos: ArchivosSql | None = None, canal_mensajes: MensajesCanal | None = None,
+    canal_vinculos: VinculosCanal | None = None,
 ) -> None:
     """Purga al arrancar y luego cada `intervalo_s`. Se cancela al apagar."""
     while True:
         await purgar_todos(registro, repo, acciones, auditoria, memoria, admin, admin_auditoria_dias,
-                           resumen, archivos)
+                           resumen, archivos, canal_mensajes, canal_vinculos)
         await asyncio.sleep(intervalo_s)

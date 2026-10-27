@@ -17,7 +17,7 @@ from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
 from asistente.core import adjuntos as adj
 from asistente.core import events, zona
-from asistente.core.agent import ConfigTurno, run_turn
+from asistente.core.agent import ConfigTurno, reservar_cuota, run_turn
 from asistente.core.llm.base import Uso
 from asistente.core.memoria import ServicioMemoria
 from asistente.core.ports import Contexto, EventoMetrica, LimitesUso
@@ -148,13 +148,19 @@ async def chat(
 
     # Con `leer_imagenes`, el texto de la imagen se lee en paralelo al turno (llamada aparte, sin tools) y se guarda
     # junto al mensaje: así los turnos siguientes pueden usarlo sin reenviar la imagen.
-    lectura = (asyncio.create_task(adj.leer(llm, modelo, adjuntos, cfg.max_output_tokens))
-               if adjuntos and sistema.leer_imagenes else None)
+    lectura: asyncio.Task | None = None  # se lanza tras reservar la cuota: leer la imagen es lo caro
 
     generados: list[dict] = []  # tarjetas de descarga del turno: se guardan en el mensaje final para rehidratarlas
 
     async def turno() -> None:
+        nonlocal lectura
         try:
+            if limite := await reservar_cuota(ctx, svc.limites, svc.metricas):
+                await emit(events.ERROR, limite)
+                return
+            if adjuntos and sistema.leer_imagenes:
+                lectura = asyncio.create_task(adj.leer(llm, modelo, adjuntos, cfg.max_output_tokens))
+
             async def filtrado(evento: str, datos) -> None:
                 if evento == events.UI:
                     generados.extend({"id": a["id"], "nombre": a["nombre"]} for a in datos if a.get("tipo") == "descarga")
@@ -165,7 +171,7 @@ async def chat(
                                  texto, filtrado, conv_id, config, acciones=svc.acciones,
                                  recientes=svc.recientes if sistema.consultas_recientes else None,
                                  memoria=memoria, adjuntos=adjuntos, web=web, metricas=svc.metricas,
-                                 excel=svc.archivos if excel else None)
+                                 excel=svc.archivos if excel else None, reservar=False)
             if res.completo:
                 try:
                     leidos, uso_lectura = await lectura if lectura else ([], Uso())

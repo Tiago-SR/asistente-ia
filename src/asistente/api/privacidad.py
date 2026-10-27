@@ -20,7 +20,7 @@ _HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name
 <p>Solo para generar y enviar la respuesta del asistente. No se venden. Para responder, el texto de la consulta se envía al
 proveedor del modelo de lenguaje configurado por el operador.</p>
 <h2>Cuánto se conservan</h2>
-<p>Las conversaciones se conservan durante el período de retención configurado por el operador y luego se eliminan.</p>
+<p>Las conversaciones se conservan durante el período de retención configurado por el operador y luego se eliminan. El registro de los mensajes recibidos por WhatsApp (sin contenido, con el número) se borra a los 8 días; el vínculo de tu número, tras el mismo período de retención sin usarlo.</p>
 <h2>Cómo pedir la eliminación de tus datos</h2>
 <p>{contacto}</p>
 </body></html>"""

@@ -4,6 +4,7 @@ Todo en memoria y sin guardar nada. Entrada no confiable: tope de bytes, de píx
 
 import asyncio
 import base64
+import concurrent.futures
 import io
 import threading
 import warnings
@@ -20,6 +21,9 @@ _CALIDADES = (85, 75, 60, 45)
 Image.MAX_IMAGE_PIXELS = 40_000_000
 warnings.simplefilter("error", Image.DecompressionBombWarning)
 _pdfium = threading.Lock()  # pdfium no es thread-safe
+# Un hilo propio: un PDF colgado (`wait_for` no mata el hilo) no se lleva el pool compartido (login admin, Excel).
+# shortcut: el render colgado sigue ocupando este hilo; matarlo exigiría un proceso aparte.
+_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="medios")
 
 
 class MedioInvalido(ValueError):
@@ -69,7 +73,8 @@ def _convertir(datos: bytes, max_bytes: int, max_imagenes: int) -> list[bytes]:
 async def a_imagenes(datos: bytes, *, max_bytes: int, max_imagenes: int) -> list[tuple[str, str]]:
     """Pares `(mime, base64)` listos para `adjuntos.decodificar`. `MedioInvalido` si no se puede convertir."""
     try:
-        jpegs = await asyncio.wait_for(asyncio.to_thread(_convertir, datos, max_bytes, max_imagenes), TIMEOUT_S)
+        jpegs = await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(_pool, _convertir, datos, max_bytes, max_imagenes), TIMEOUT_S)
     except TimeoutError as e:
         raise MedioInvalido("medio_invalido") from e
     return [("image/jpeg", base64.b64encode(j).decode()) for j in jpegs]

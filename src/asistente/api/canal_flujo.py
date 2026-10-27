@@ -5,6 +5,7 @@ con el token de canal y valida ese JWT como cualquier otro. Sin vínculo, o ante
 número recibe silencio."""
 
 import asyncio
+import hashlib
 import logging
 import random
 import re
@@ -16,9 +17,10 @@ import httpx
 from asistente.api.chat import armar_turno
 from asistente.core import adjuntos as adj
 from asistente.core import events, medios
-from asistente.core.agent import run_turn
+from asistente.core.agent import reservar_cuota, run_turn
 from asistente.core.canales.base import Canal, Entrante, ErrorCanal
 from asistente.core.llm.base import Uso
+from asistente.core.ports import LimiteExcedido
 from asistente.servicios import LLMNoConfigurado, Servicios
 from asistente.sistemas.auth import TokenInvalido, Usuario
 
@@ -72,6 +74,8 @@ async def procesar(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -
     try:
         cod = _VINCULAR.match(m.texto or "") if m.tipo == "texto" else None
         if cod:
+            if not await _cupo_vincular(svc, sistema_id, m.contacto):
+                return  # silencio, igual que con un código inválido
             await _vincular(svc, sistema_id, canal, m, cod.group(1))
         elif await svc.canal_vinculos.activo(sistema_id, m.contacto):
             lock = _locks.get((sistema_id, m.contacto)) or _locks.setdefault((sistema_id, m.contacto), asyncio.Lock())
@@ -82,6 +86,19 @@ async def procesar(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -
         log.warning("canal %s: no se pudo enviar (%s)", sistema_id, e.codigo)
     except Exception:
         log.exception("canal %s: error procesando %s", sistema_id, m.id)
+
+
+async def _cupo_vincular(svc: Servicios, sistema_id: str, contacto: str) -> bool:
+    """Tope local de intentos, contados antes del POST: por número y global del sistema (rotar números no lo evade).
+    El contador guarda un hash, no el teléfono."""
+    ref = hashlib.sha256(f"{sistema_id}:{contacto}".encode()).hexdigest()[:32]
+    try:
+        await svc.limites.reservar_web(sistema_id, ref, 3, 10, clave="vincular")
+        await svc.limites.reservar_web(sistema_id, "*", 30, 200, clave="vincular")
+    except LimiteExcedido:
+        log.warning("canal %s: demasiados intentos de vincular", sistema_id)
+        return False
+    return True
 
 
 async def _vincular(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante, codigo: str) -> None:
@@ -121,20 +138,26 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
         return
     await svc.canal_vinculos.tocar(sistema_id, m.contacto)
 
-    await asyncio.sleep(random.uniform(1, 5))
-    await canal.enviar_texto(m.contacto, BIENVENIDA)
-
     request_id = uuid.uuid4().hex
     try:
         llm, modelo = svc.llm_para(sistema)
     except LLMNoConfigurado:
         await canal.enviar_texto(m.contacto, FALLO)
         return
+    if es_medio and not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
+        await canal.enviar_texto(m.contacto, SIN_IMAGENES)
+        return
+    ctx, config, memoria, web, excel, version = await armar_turno(svc, sistema, u, modelo, request_id)
+    # La cuota se reserva antes de descargar y leer el medio: es lo caro, y un medio inválido también cuenta.
+    if await reservar_cuota(ctx, svc.limites, svc.metricas):
+        await canal.enviar_texto(m.contacto, FALLO)
+        return
+
+    await asyncio.sleep(random.uniform(1, 5))
+    await canal.enviar_texto(m.contacto, BIENVENIDA)
+
     adjuntos: tuple = ()
     if es_medio:
-        if not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
-            await canal.enviar_texto(m.contacto, SIN_IMAGENES)
-            return
         cfg = svc.settings
         tope = min(sistema.adjuntos.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb) * 1024
         n = min(sistema.adjuntos.max_archivos or cfg.max_imagenes, cfg.max_imagenes)
@@ -146,7 +169,6 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
             log.info("[%s] medio rechazado (%s)", request_id, type(e).__name__)
             await canal.enviar_texto(m.contacto, MEDIO_FALLO)
             return
-    ctx, config, memoria, web, excel, version = await armar_turno(svc, sistema, u, modelo, request_id)
     # Una conversación por número y usuario: el id es determinista y guardar_turno la crea la primera vez.
     conv_id = uuid.uuid5(_NS, f"{sistema_id}:{u.usuario_ref}")
     historial = await svc.repo.historial(sistema_id, u.usuario_ref, conv_id, svc.settings.max_turnos_historial)
@@ -162,7 +184,7 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
                          texto, emit, conv_id, config, acciones=None, adjuntos=adjuntos,
                          recientes=svc.recientes if sistema.consultas_recientes else None,
                          memoria=memoria, web=web, metricas=svc.metricas,
-                         excel=svc.archivos if excel else None)
+                         excel=svc.archivos if excel else None, reservar=False)
     if not res.completo:
         if lectura:
             lectura.cancel()

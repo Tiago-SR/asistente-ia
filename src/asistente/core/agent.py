@@ -110,6 +110,7 @@ async def run_turn(
     web: Web | None = None,
     metricas: Metricas | None = None,
     excel: Archivos | None = None,
+    reservar: bool = True,  # False: el llamador ya reservó el mensaje (`reservar_cuota`) antes de gastar en medios
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
     estado = ResultadoTurno("error")
@@ -124,7 +125,8 @@ async def run_turn(
 
     try:  # el `finally` también corre si el cliente corta (CancelledError): el turno se cuenta igual
         try:
-            await limites.reservar_mensaje(ctx)
+            if reservar:
+                await limites.reservar_mensaje(ctx)
         except LimiteExcedido as e:
             limite = e.cual
             await emitir(events.ERROR, e.cual)
@@ -140,6 +142,19 @@ async def run_turn(
     finally:
         if metricas is not None:
             _medir(metricas, ctx, config, estado, errores, limite, adjuntos)
+
+
+async def reservar_cuota(ctx: Contexto, limites: Limites, metricas: Metricas | None) -> str | None:
+    """Reserva el mensaje antes de descargar o leer medios (luego `run_turn(reservar=False)`).
+    Devuelve el tope excedido, o None si hay cupo; un rechazo queda en las métricas igual que en `run_turn`."""
+    try:
+        await limites.reservar_mensaje(ctx)
+    except LimiteExcedido as e:
+        if metricas is not None:
+            metricas.registrar(EventoMetrica(sistema_id=ctx.sistema_id, usuario_ref=ctx.usuario_ref, tipo="llm",
+                                             resultado="limite", motivo=e.cual, modelo=ctx.modelo))
+        return e.cual
+    return None
 
 
 def _medir(metricas: Metricas, ctx: Contexto, config: ConfigTurno, estado: ResultadoTurno,
@@ -189,6 +204,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
     inicio_turno = datetime.now(UTC)  # las pendientes anteriores a él se reemplazan; las del turno conviven
     web_usadas = 0  # búsquedas y lecturas web de este turno
     datos_sistema = False  # el turno ya trajo resultados de tools del sistema (o de recientes)
+    leyo_web = False  # el turno ya leyó una página: su texto no es confiable y podría inducir una búsqueda con datos
     reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
     nuevos = [Mensaje("user", texto, adjuntos=adjuntos)]
     usar_paralelas = llm.capacidades.soporta_tools_paralelas
@@ -299,7 +315,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 if web_usadas > config.web_max_por_turno:
                     atenciones.append(_tope_web(config))
                     continue
-                if c.nombre == webtools.BUSCAR and (datos_sistema or any(_es_dato_sistema(x.nombre, excel, recientes, memoria) for x in llamadas)):
+                if c.nombre == webtools.BUSCAR and (leyo_web or datos_sistema or any(_es_dato_sistema(x.nombre, excel, recientes, memoria) for x in llamadas)):
                     atenciones.append(_web_tras_datos())
                     continue
                 atenciones.append(_web(ctx, web, limites, auditoria, conversacion_id, c, config, emit,
@@ -310,6 +326,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
                 atenciones.append(_ejecutar(ctx, conector, auditoria, conversacion_id, c, sem, config))
+        leyo_web = leyo_web or any(c.nombre == webtools.LEER for c in llamadas)
         datos_sistema = datos_sistema or any(_es_dato_sistema(c.nombre, excel, recientes, memoria) for c in llamadas)
         resultados = await asyncio.gather(*atenciones)
         for c, r in zip(llamadas, resultados, strict=True):
@@ -443,8 +460,8 @@ def _es_dato_sistema(nombre: str, excel, recientes, memoria) -> bool:
 
 async def _web_tras_datos() -> ResultadoTool:
     return ResultadoTool(False, error="web_tras_datos",
-                         detalle="no se busca en la web en un turno con datos del sistema: la consulta saldría "
-                                 "a un tercero; responde con lo que tienes")
+                         detalle="no se busca en la web tras leer una página ni en un turno con datos del sistema: "
+                                 "la consulta saldría a un tercero; responde con lo que tienes")
 
 
 async def _rechazar_extra(c: LlamadaTool, sola: bool) -> ResultadoTool:

@@ -1,6 +1,8 @@
 """Registro de mensajes de los canales de mensajería (sin contenido)."""
 
-from sqlalchemy import func, select, update
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,6 +25,12 @@ class MensajesCanal:
         async with self._sesiones.begin() as s:
             await s.execute(update(CanalMensaje).where(
                 CanalMensaje.sistema_id == sistema_id, CanalMensaje.id == mid).values(estado=estado))
+
+    async def purgar(self, dias: int) -> int:
+        """Quita los registros viejos: la deduplicación solo necesita el plazo de reintento del proveedor."""
+        async with self._sesiones.begin() as s:
+            r = await s.execute(delete(CanalMensaje).where(CanalMensaje.creado_en < datetime.now(UTC) - timedelta(days=dias)))
+            return r.rowcount
 
 
 class VinculosCanal:
@@ -54,3 +62,13 @@ class VinculosCanal:
         async with self._sesiones.begin() as s:
             await s.execute(update(CanalVinculo).where(
                 CanalVinculo.sistema_id == sistema_id, CanalVinculo.contacto == contacto).values(**valores))
+
+    async def purgar(self, sistema_id: str, retencion_dias: int, inactivo_dias: int = 30) -> int:
+        """Sin uso en `retencion_dias` (o desactivados y sin uso en `inactivo_dias`): quien siga puede vincular de nuevo."""
+        ahora = datetime.now(UTC)
+        async with self._sesiones.begin() as s:
+            r = await s.execute(delete(CanalVinculo).where(
+                CanalVinculo.sistema_id == sistema_id,
+                or_(CanalVinculo.ultimo_uso < ahora - timedelta(days=retencion_dias),
+                    (CanalVinculo.activo.is_(False)) & (CanalVinculo.ultimo_uso < ahora - timedelta(days=inactivo_dias)))))
+            return r.rowcount

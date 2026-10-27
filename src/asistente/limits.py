@@ -111,13 +111,15 @@ class LimitesPostgres:
         if c.mensajes > tope_por_min:  # un rechazo también cuenta
             raise LimiteExcedido("voz_min")
 
-    async def reservar_web(self, sistema_id: str, usuario_ref: str, tope_por_min: int, tope_por_dia: int) -> None:
-        # Contador propio (`web:<ref>`): el cupo del proveedor de búsqueda es compartido por todos los usuarios.
+    async def reservar_web(self, sistema_id: str, usuario_ref: str, tope_por_min: int, tope_por_dia: int,
+                           clave: str = "web") -> None:
+        # Contador propio (`<clave>:<ref>`): el cupo del proveedor de búsqueda es compartido por todos los usuarios
+        # (`clave="vincular"` limita los intentos de vincular un número por el canal).
         v = _ventanas(self._reloj())
         async with self._sesiones.begin() as s:
-            por_min = await _sumar(s, sistema_id, f"web:{usuario_ref}", "min", v["min"], 1, 0)
-            por_dia = await _sumar(s, sistema_id, f"web:{usuario_ref}", "dia", v["dia"], 1, 0)
+            por_min = await _sumar(s, sistema_id, f"{clave}:{usuario_ref}", "min", v["min"], 1, 0)
+            por_dia = await _sumar(s, sistema_id, f"{clave}:{usuario_ref}", "dia", v["dia"], 1, 0)
         if por_min.mensajes > tope_por_min:  # un rechazo también cuenta
-            raise LimiteExcedido("web_min")
+            raise LimiteExcedido(f"{clave}_min")
         if por_dia.mensajes > tope_por_dia:
-            raise LimiteExcedido("web_dia")
+            raise LimiteExcedido(f"{clave}_dia")
