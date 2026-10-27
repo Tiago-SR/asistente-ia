@@ -150,7 +150,8 @@ class Autenticador:
             self._jwks[sistema_id] = hit
         return hit[1]
 
-    async def validar(self, token: str, scope: str = SCOPE_LECTURA) -> Usuario:
+    async def validar(self, token: str, scope: str = SCOPE_LECTURA, canal: str | None = None) -> Usuario:
+        """`canal` debe coincidir con el claim del token: uno web (sin claim) no sirve en un canal ni al revés."""
         sistema = self._sistema_del_token(token)
         clave = await self._clave(sistema, token)
         auth = sistema.auth
@@ -171,6 +172,8 @@ class Autenticador:
 
         if claims["scope"] != scope:
             raise TokenInvalido("scope insuficiente")
+        if claims.get("canal") != canal:
+            raise TokenInvalido("canal no corresponde")
         sub, jti = claims["sub"], claims["jti"]
         if not isinstance(sub, str) or not sub or len(sub) > 240 or not isinstance(jti, str) or not jti:
             raise TokenInvalido("sub/jti inválidos")

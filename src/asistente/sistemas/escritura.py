@@ -6,7 +6,7 @@ escribe, incrementa `registro_version` y deja la auditoría. Quien llama recarga
 las demás réplicas lo ven con el sondeo.
 
 Reglas que protegen el acceso a terceros:
-- cambiar `base_url` borra `token_manifiesto` (el conector lo reenvía a esa URL); cambiar `llm.base_url` borra
+- cambiar `base_url` borra `token_manifiesto` y `token_canal` (el conector lo reenvía a esa URL); cambiar `llm.base_url` borra
   `llm_api_key`. Un secreto nuevo en el mismo cambio los reemplaza; sin él, y con el sistema habilitado, se
   rechaza (`base_url_requiere_token`) en vez de apagarlo en silencio.
 - los secretos se escriben, nunca se devuelven: solo `configurado`, huella y fecha.
@@ -199,14 +199,15 @@ async def crear_sistema(sesiones: async_sessionmaker[AsyncSession], config: Mapp
 async def actualizar_sistema(
     sesiones: async_sessionmaker[AsyncSession], cifrador: Cifrador | None, sistema_id: str, cuerpo: Mapping,
     version: int, *, token_manifiesto: str | None = None, llm_api_key: str | None = None,
-    auth_hs256: str | None = None, por: str, ip: str | None = None,
+    auth_hs256: str | None = None, token_canal: str | None = None, por: str, ip: str | None = None,
 ) -> dict:
     """PUT de la configuración completa (no un parche) con control de `version`. Los secretos que lleguen se
     cifran en la misma transacción; ver las reglas de `base_url` y `llm.base_url` en la cabecera del módulo."""
     if RESERVADOS & set(cuerpo):
         raise ErrorEscritura(422, "campo_reservado")
     nuevos = {c: v for c, v in (("token_manifiesto", token_manifiesto), ("llm_api_key", llm_api_key),
-                                ("auth_hs256", auth_hs256)) if v is not None}
+                                ("auth_hs256", auth_hs256),
+                                ("token_canal", token_canal)) if v is not None}
     for campo, valor in nuevos.items():
         _validar_secreto(campo, valor)
     if nuevos and cifrador is None:
@@ -226,6 +227,8 @@ async def actualizar_sistema(
         borrar: set[str] = set()
         if sistema.base_url != url_antes and "token_manifiesto" not in nuevos:
             borrar.add("token_manifiesto")
+        if sistema.base_url != url_antes and "token_canal" not in nuevos:
+            borrar.add("token_canal")  # también viaja a base_url
         if llm_ahora != llm_antes and "llm_api_key" not in nuevos:
             borrar.add("llm_api_key")
         if sistema.auth.algoritmo != "HS256":

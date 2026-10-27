@@ -252,3 +252,98 @@ async def test_privacidad_es_publica_y_muestra_el_contacto(wa):
     assert r.status_code == 200 and "eliminación de datos" in r.text and "operador" in r.text
     wa._transport.app.state.servicios.settings.contacto_privacidad = "a@b.c<x>"
     assert "mailto:a@b.c&lt;x&gt;" in (await wa.get("/privacidad")).text  # escapado
+
+
+# --- flujo: vincular y turno ---
+
+class _Salida:
+    def __init__(self):
+        self.enviados = []
+
+    async def enviar_texto(self, contacto, texto):
+        self.enviados.append((contacto, texto))
+        return "wamid.out"
+
+
+@pytest.fixture
+async def flujo(wa, sesiones, monkeypatch, llm):
+    from asistente.api import canal_flujo
+    from asistente.store.canal import VinculosCanal
+    from conftest import firmar
+
+    svc = wa._transport.app.state.servicios
+    svc.canal_vinculos = VinculosCanal(sesiones)
+    llamadas, vinculados = [], {"59899111222": "ana"}
+
+    def sistema(req):
+        llamadas.append(req.url.path)
+        cuerpo = json.loads(req.content)
+        assert req.headers["Authorization"] == "Bearer tc"
+        if req.url.path.endswith("/vincular"):
+            ok = cuerpo["codigo"] == "FST-BUENO"
+            if ok:
+                vinculados[cuerpo["wa_id"]] = "ana"
+            return httpx.Response(200, json={"ok": True, "nombre": "Ana"}) if ok else httpx.Response(404)
+        sub = vinculados.get(cuerpo["wa_id"])
+        return httpx.Response(200, json={"token": firmar("mock-a", sub, canal="whatsapp")}) if sub else httpx.Response(404)
+
+    svc.http = httpx.AsyncClient(transport=httpx.MockTransport(sistema))
+    secreto = svc.registro.secreto
+    monkeypatch.setattr(svc.registro, "secreto", lambda sid, c: "tc" if c == "token_canal" else secreto(sid, c))
+    monkeypatch.setattr(canal_flujo.random, "uniform", lambda a, b: 0)
+    salida = _Salida()
+    yield svc, salida, llamadas, vinculados, llm
+
+
+def _msg(texto, contacto="59899111222", tipo="texto"):
+    from asistente.core.canales.base import Entrante
+    return Entrante(id="w" + uuid.uuid4().hex, contacto=contacto, tipo=tipo, texto=texto)
+
+
+async def test_sin_vinculo_silencio_y_sin_llamar_al_sistema(flujo):
+    from asistente.api.canal_flujo import procesar
+    svc, salida, llamadas, _, _ = flujo
+    await procesar(svc, "mock-a", salida, _msg("hola"))
+    await procesar(svc, "mock-a", salida, _msg("VINCULAR MALO", "59800000000"))
+    assert salida.enviados == [] and llamadas == ["/asistente/canal/vincular"]
+
+
+async def test_vincular_y_preguntar(flujo):
+    from asistente.api.canal_flujo import BIENVENIDA, procesar
+    from asistente.core.llm.falso import texto
+    svc, salida, _, _, llm = flujo
+    await procesar(svc, "mock-a", salida, _msg("vincular FST-BUENO", "59877777777"))
+    assert "vinculado" in salida.enviados[-1][1] and await svc.canal_vinculos.activo("mock-a", "59877777777")
+    llm.usar(texto("Tenés 3 campos"))
+    salida.enviados.clear()
+    await procesar(svc, "mock-a", salida, _msg("¿cuántos campos tengo?", "59877777777"))
+    assert [t for _, t in salida.enviados] == [BIENVENIDA, "Tenés 3 campos"]
+
+
+async def test_vinculo_revocado_en_el_sistema_se_desactiva(flujo):
+    from asistente.api.canal_flujo import procesar
+    svc, salida, _, _, _ = flujo
+    await svc.canal_vinculos.guardar("mock-a", "59855555555")  # vínculo local sin respaldo en el sistema
+    await procesar(svc, "mock-a", salida, _msg("hola", "59855555555"))
+    assert salida.enviados == [] and not await svc.canal_vinculos.activo("mock-a", "59855555555")
+
+
+async def test_vinculado_con_imagen_recibe_aviso(flujo):
+    from asistente.api.canal_flujo import SOLO_TEXTO, procesar
+    svc, salida, _, _, _ = flujo
+    await svc.canal_vinculos.guardar("mock-a", "59899111222")
+    await procesar(svc, "mock-a", salida, _msg(None, tipo="imagen"))
+    assert salida.enviados == [("59899111222", SOLO_TEXTO)]
+
+
+async def test_token_sin_claim_canal_no_sirve_en_el_canal(flujo, monkeypatch):
+    from asistente.api.canal_flujo import procesar
+    from conftest import firmar
+    svc, salida, _, _, _ = flujo
+    await svc.canal_vinculos.guardar("mock-a", "59899111222")
+    web = firmar("mock-a", "ana")  # token del widget: sin claim `canal`
+    svc.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"token": web})))
+    await procesar(svc, "mock-a", salida, _msg("hola"))
+    assert salida.enviados == []
+    with pytest.raises(Exception, match="canal"):
+        await svc.autenticador.validar(firmar("mock-a", "ana", canal="whatsapp"))  # y al revés

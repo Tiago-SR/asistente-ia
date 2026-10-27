@@ -9,6 +9,7 @@ Configuración por variables de entorno:
   MOCK_SECRETO            secreto HS256 que firma/valida tokens   [secreto-mock-a]
   MOCK_AUDIENCIA          claim `aud`                             [asistente]
   MOCK_TOKEN_MANIFIESTO   credencial para leer el manifiesto      [manifiesto-mock-a]
+  MOCK_TOKEN_CANAL        token de canal (/asistente/canal/*)      [canal-mock-a]
   MOCK_XSS                si tiene valor, añade la tool `probar_xss` con HTML en descripciones
   MOCK_DEFECTO            rompe una regla del contrato a propósito, para probar el
                           verificador (herramientas/verificar_sistema.py). Ver DEFECTOS.
@@ -19,9 +20,12 @@ ese usuario sin pedir contraseña. Un sistema real usa su sesión normal.
 
 import asyncio
 import hashlib
+import hmac
 import itertools
 import json
 import os
+import re
+import secrets
 import time
 import uuid
 
@@ -35,6 +39,7 @@ NOMBRE = os.getenv("MOCK_NOMBRE", "Mock A")
 SECRETO = os.getenv("MOCK_SECRETO", "secreto-mock-a")
 AUDIENCIA = os.getenv("MOCK_AUDIENCIA", "asistente")
 TOKEN_MANIFIESTO = os.getenv("MOCK_TOKEN_MANIFIESTO", "manifiesto-mock-a")
+TOKEN_CANAL = os.getenv("MOCK_TOKEN_CANAL", "canal-mock-a")
 VIDA_TOKEN_S = 600
 VIDA_TOKEN_ESCRITURA_S = 60
 SCOPE_L = "asistente:lectura"
@@ -317,6 +322,66 @@ async def emitir_token(
         "token": token,
         "expira": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(claims["exp"])),
     }
+
+
+# Canal de mensajería (contrato/CANAL_WHATSAPP.md), solo lectura. En memoria: un sistema real usa tablas.
+CODIGOS: dict[str, dict] = {}   # hash del código -> {"sub", "exp"}
+VINCULOS: dict[str, str] = {}   # wa_id -> sub
+FALLOS: dict[str, list[float]] = {}  # wa_id -> instantes de intentos fallidos
+_ALFABETO = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # sin 0 O 1 I L
+
+
+def _token_canal(authorization: str | None) -> None:
+    dado = (authorization or "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(dado.encode(), TOKEN_CANAL.encode()):
+        raise HTTPException(403, "token de canal inválido")
+
+
+@app.post("/asistente/canal/codigo")
+async def canal_codigo(usuario: str) -> dict:
+    """Login de juguete, igual que /asistente/token. Un código vigente por usuario."""
+    if usuario not in DATOS:
+        raise HTTPException(403, "usuario sin acceso al asistente")
+    for h in [h for h, c in CODIGOS.items() if c["sub"] == usuario]:
+        del CODIGOS[h]
+    codigo = f"{ID[:3].upper()}-" + "".join(secrets.choice(_ALFABETO) for _ in range(8))
+    exp = int(time.time()) + 600
+    CODIGOS[hashlib.sha256(codigo.encode()).hexdigest()] = {"sub": usuario, "exp": exp}
+    return {"codigo": codigo, "expira": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(exp))}
+
+
+@app.post("/asistente/canal/vincular")
+async def canal_vincular(request: Request, authorization: str | None = Header(default=None)) -> dict:
+    _token_canal(authorization)
+    cuerpo = await request.json()
+    wa_id, codigo = str(cuerpo.get("wa_id", "")), str(cuerpo.get("codigo", ""))
+    if not re.fullmatch(r"\d{8,15}", wa_id):
+        raise HTTPException(400, "wa_id inválido")
+    ahora = time.time()
+    fallos = FALLOS[wa_id] = [t for t in FALLOS.get(wa_id, []) if t > ahora - 3600]
+    if len(fallos) >= 5:  # contrato §3.2; shortcut: sin tope global por minuto
+        raise HTTPException(429, "demasiados intentos")
+    c = CODIGOS.pop(hashlib.sha256(codigo.encode()).hexdigest(), None)
+    if c is None or c["exp"] < ahora:
+        fallos.append(ahora)
+        raise HTTPException(404, "código inválido")
+    VINCULOS[wa_id] = c["sub"]
+    return {"ok": True, "nombre": c["sub"].capitalize()}
+
+
+@app.post("/asistente/canal/token")
+async def canal_token(request: Request, authorization: str | None = Header(default=None)) -> dict:
+    _token_canal(authorization)
+    cuerpo = await request.json()
+    if cuerpo.get("confirmacion") or cuerpo.get("huella"):
+        raise HTTPException(403, "escritura por el canal no implementada")
+    sub = VINCULOS.get(str(cuerpo.get("wa_id", "")))
+    if sub is None:
+        raise HTTPException(404, "sin vínculo")
+    r = await emitir_token(sub)
+    claims = jwt.decode(r["token"], SECRETO, algorithms=["HS256"], audience=AUDIENCIA)
+    token = jwt.encode({**claims, "canal": "whatsapp"}, SECRETO, algorithm="HS256")
+    return {"token": token, "expira": r["expira"]}
 
 
 @app.get("/asistente/tools")

@@ -202,7 +202,7 @@ class Sistema(_Modelo):
 
 
 # Secretos canónicos de un sistema. Se escriben, nunca se devuelven en claro.
-SECRETOS_BASE = ("auth_hs256", "token_manifiesto", "llm_api_key")
+SECRETOS_BASE = ("auth_hs256", "token_manifiesto", "llm_api_key", "token_canal")
 CAMPOS_SECRETOS = SECRETOS_BASE + tuple(c for cs in SECRETOS_CANAL.values() for c in cs)
 
 
@@ -271,6 +271,9 @@ def desde_yaml(entrada: Mapping, env: Mapping[str, str]) -> tuple[dict, dict[str
             secretos["token_manifiesto"] = v
         else:
             faltan.append(str(nombre))
+    # Opcional: sin él el sistema no habilita el canal de mensajería (vinculación y token por mensaje).
+    if isinstance(conector, dict) and (v := valor(conector.pop("token_canal_env", None))):
+        secretos["token_canal"] = v
     llm = cfg.get("llm")
     if isinstance(llm, dict):
         # Opcionales: sin variable se hereda de la configuración global.

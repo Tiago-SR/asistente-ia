@@ -14,6 +14,7 @@ const CAMPOS_SECRETOS: Record<string, string> = {
   token_manifiesto: 'Token del manifiesto (el conector lo envía a base_url)',
   auth_hs256: 'Secreto HS256 (solo si el algoritmo es HS256, 32 bytes o más)',
   llm_api_key: 'API key del LLM propio (solo con llm.base_url propio)',
+  token_canal: 'Token de canal (el sistema lo exige en /asistente/canal/*; vincular y emitir tokens por mensaje)',
   wa_token: 'WhatsApp (Meta): token permanente del System User',
   wa_app_secret: 'WhatsApp (Meta): App Secret (valida la firma del webhook)',
   wa_verify_token: 'WhatsApp (Meta): verify token (handshake del webhook)',

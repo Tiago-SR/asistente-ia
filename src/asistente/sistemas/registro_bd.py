@@ -210,6 +210,8 @@ async def exportar_yaml(sesiones: async_sessionmaker[AsyncSession]) -> dict:
             d["auth"] = {**d["auth"], "secreto_env": _env_de(f.id, "auth_hs256")}
         if "token_manifiesto" in tiene:
             d["conector"] = {**d["conector"], "token_manifiesto_env": _env_de(f.id, "token_manifiesto")}
+        if "token_canal" in tiene:
+            d["conector"] = {**d["conector"], "token_canal_env": _env_de(f.id, "token_canal")}
         if "llm_api_key" in tiene:
             d["llm"] = {**(d.get("llm") or {}), "api_key_env": _env_de(f.id, "llm_api_key")}
         salida.append(d)

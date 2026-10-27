@@ -132,13 +132,13 @@ teléfono en ninguna tabla. Recomendación: **el mapeo vive en el sistema, no en
 
 ## Fase 3: identidad y entrega al asistente (contrato en `contrato/CANAL_WHATSAPP.md`)
 
-7b. [ ] **Ejemplos y verificador** (para poder probar de punta a punta sin un sistema real): implementar el canal en
+7b. [~] (mock hecho 2026-10-27, solo lectura; faltan PHP y verificador) **Ejemplos y verificador** (para poder probar de punta a punta sin un sistema real): implementar el canal en
    `ejemplos/sistema-mock/app.py` (y, si se quiere, en `ejemplos/sistema-php`), y añadir comprobaciones en
    `herramientas/verificar_sistema.py` (sólo si el sistema declara el canal). Casos en `CANAL_WHATSAPP.md` §9.
-8. [ ] **Vinculación**: mensaje `VINCULAR <PREFIJO>-XXXXXXXX` → elegir sistema por prefijo → `canal/vincular` →
+8. [x] (`api/canal_flujo.py`, 2026-10-27) **Vinculación**: mensaje `VINCULAR <PREFIJO>-XXXXXXXX` → elegir sistema por prefijo → `canal/vincular` →
    guardar `whatsapp_vinculos` (`wa_id → sistema_id`). Sin vínculo y sin código válido: silencio. Normalizar `wa_id`
    (sin `+`). `404` del sistema = silencio.
-9. [ ] **Turno por WhatsApp** (`core/whatsapp/turno.py`, reutiliza `run_turn`, `core/agent.py:95`; no hay SSE)
+9. [x] (solo texto y lectura; `acciones=None`; lock en memoria por número) **Turno por WhatsApp** (`core/whatsapp/turno.py`, reutiliza `run_turn`, `core/agent.py:95`; no hay SSE)
    - `sleep(random.uniform(1, 5))` → bienvenida → pedir `token-canal` → armar `Contexto` (`core/ports.py:46`),
      `svc.llm_para(sistema)`, `svc.conector.para(usuario, request_id)` → `run_turn(..., emit=acumulador)`.
    - Si `res.completo`, `guardar_turno` en el mismo orden que `api/chat.py:159-179`. Renovar el token ante 401.

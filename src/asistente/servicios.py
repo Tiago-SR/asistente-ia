@@ -34,7 +34,7 @@ from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
 from asistente.store.archivos import ArchivosSql
 from asistente.store.auditoria import AuditoriaSql
-from asistente.store.canal import MensajesCanal
+from asistente.store.canal import MensajesCanal, VinculosCanal
 from asistente.store.memoria import MemoriaSql
 from asistente.store.metricas import MetricasSql
 from asistente.store.recientes import RecientesSql
@@ -75,6 +75,7 @@ class Servicios:
     cifrador: Cifrador | None = None  # secretos de sistema (solo registro en BD); None = sin claves maestras
     metricas: Metricas | None = None  # None = sin métricas de uso (tests)
     canal_mensajes: MensajesCanal | None = None  # dedupe de entrantes del canal de mensajería
+    canal_vinculos: VinculosCanal | None = None  # contactos vinculados por sistema
     http: httpx.AsyncClient | None = None  # cliente saliente compartido (canales de mensajería)
 
 
@@ -220,5 +221,6 @@ def construir(settings: Settings) -> Servicios:
         cifrador=cifrador,
         metricas=MetricasSql(sesiones, Tarifas(settings.precios_path)),
         canal_mensajes=MensajesCanal(sesiones),
+        canal_vinculos=VinculosCanal(sesiones),
         http=saliente,
     )

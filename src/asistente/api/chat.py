@@ -54,6 +54,45 @@ def _frame(evento: str, datos) -> bytes:
     return f"event: {evento}\ndata: {json.dumps(cuerpo, ensure_ascii=False)}\n\n".encode()
 
 
+async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, *,
+                      canal: str = "texto", zona_cliente: str | None = None):
+    """Lo común a todo turno (chat web y canales de mensajería): zona, memoria, prompt, contexto y config.
+    Devuelve (ctx, config, memoria, web, excel, version del prompt)."""
+    cfg = svc.settings
+    zona_usuario = zona.resolver(zona_cliente, sistema.zona_horaria)
+    # Memoria por usuario: solo con el flag del sistema. Un fallo al leerla no tumba el chat.
+    memoria, recuerdos = None, []
+    if sistema.memoria_habilitada and svc.memoria is not None:
+        memoria = ServicioMemoria(svc.memoria)
+        try:
+            recuerdos = await svc.memoria.listar(u.sistema_id, u.usuario_ref, renovar=True)
+        except Exception:
+            log.exception("[%s] no se pudo leer la memoria del usuario", request_id)
+    web = svc.web if sistema.busqueda_web else None
+    excel = sistema.exportar_excel and svc.archivos is not None
+    prompt, version = svc.prompts.componer(
+        sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
+        usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
+        canal=canal, memoria=recuerdos, web=web is not None,
+        leer_imagenes=sistema.leer_imagenes, excel=excel,
+    )
+    lim = sistema.limites
+    ctx = Contexto(
+        sistema_id=u.sistema_id, sistema_nombre=sistema.nombre, usuario_ref=u.usuario_ref,
+        jti=u.jti, request_id=request_id, modelo=modelo, prompt_system=prompt, prompt_version=version,
+        limites=LimitesUso(lim.mensajes_por_usuario_min, lim.mensajes_por_usuario_dia, lim.tokens_por_mes,
+                           lim.destructivas_por_usuario_hora),
+        zona_horaria=zona_usuario, retencion_dias=sistema.retencion_dias, locale=u.locale,
+    )
+    config = ConfigTurno(max_iter=cfg.max_iter, max_output_tokens=cfg.max_output_tokens,
+                         timeout_turno_s=cfg.timeout_turno_s, resumen_voz=canal == "voz",
+                         web_max_por_min=cfg.web_max_por_min, web_max_por_dia=cfg.web_max_por_dia,
+                         web_max_pagina_chars=cfg.web_max_pagina_chars, web_max_por_turno=cfg.web_max_por_turno,
+                         excel_max_filas=cfg.excel_max_filas, excel_max_columnas=cfg.excel_max_columnas,
+                         excel_max_kb=cfg.excel_max_kb)
+    return ctx, config, memoria, web, excel, version
+
+
 @router.post("/v1/chat")
 async def chat(
     body: ChatIn,
@@ -95,40 +134,11 @@ async def chat(
         conv_id, nueva = uuid.uuid4(), True
 
     request_id = uuid.uuid4().hex
-    zona_usuario = zona.resolver(body.zona_horaria, sistema.zona_horaria)
-    # Memoria por usuario: solo con el flag del sistema. Un fallo al leerla no tumba el chat.
-    memoria, recuerdos = None, []
-    if sistema.memoria_habilitada and svc.memoria is not None:
-        memoria = ServicioMemoria(svc.memoria)
-        try:
-            recuerdos = await svc.memoria.listar(u.sistema_id, u.usuario_ref, renovar=True)
-        except Exception:
-            log.exception("[%s] no se pudo leer la memoria del usuario", request_id)
-    web = svc.web if sistema.busqueda_web else None
-    excel = sistema.exportar_excel and svc.archivos is not None
-    prompt, version = svc.prompts.componer(
-        sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
-        usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
-        canal=body.canal, memoria=recuerdos, web=web is not None,
-        leer_imagenes=sistema.leer_imagenes, excel=excel,
-    )
-    lim = sistema.limites
-    ctx = Contexto(
-        sistema_id=u.sistema_id, sistema_nombre=sistema.nombre, usuario_ref=u.usuario_ref,
-        jti=u.jti, request_id=request_id, modelo=modelo, prompt_system=prompt, prompt_version=version,
-        limites=LimitesUso(lim.mensajes_por_usuario_min, lim.mensajes_por_usuario_dia, lim.tokens_por_mes,
-                           lim.destructivas_por_usuario_hora),
-        zona_horaria=zona_usuario, retencion_dias=sistema.retencion_dias, locale=u.locale,
-    )
+    ctx, config, memoria, web, excel, version = await armar_turno(
+        svc, sistema, u, modelo, request_id, canal=body.canal, zona_cliente=body.zona_horaria)
     historial = [] if nueva else await svc.repo.historial(
         u.sistema_id, u.usuario_ref, conv_id, cfg.max_turnos_historial
     )
-    config = ConfigTurno(max_iter=cfg.max_iter, max_output_tokens=cfg.max_output_tokens,
-                         timeout_turno_s=cfg.timeout_turno_s, resumen_voz=body.canal == "voz",
-                         web_max_por_min=cfg.web_max_por_min, web_max_por_dia=cfg.web_max_por_dia,
-                         web_max_pagina_chars=cfg.web_max_pagina_chars, web_max_por_turno=cfg.web_max_por_turno,
-                         excel_max_filas=cfg.excel_max_filas, excel_max_columnas=cfg.excel_max_columnas,
-                         excel_max_kb=cfg.excel_max_kb)
     conector = svc.conector.para(u, request_id)
 
     cola: asyncio.Queue = asyncio.Queue()

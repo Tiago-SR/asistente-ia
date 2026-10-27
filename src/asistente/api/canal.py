@@ -8,10 +8,11 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import PlainTextResponse
 
+from asistente.api.canal_flujo import procesar
 from asistente.api.deps import servicios
 from asistente.api.errores import ErrorApi
 from asistente.core import canales
-from asistente.core.canales.base import Canal, Entrante
+from asistente.core.canales.base import Canal
 from asistente.servicios import Servicios
 
 log = logging.getLogger(__name__)
@@ -58,9 +59,3 @@ async def recibir(sistema_id: str, request: Request, tareas: BackgroundTasks,
         if await svc.canal_mensajes.registrar_entrada(sistema_id, m.id, m.contacto, m.tipo):
             tareas.add_task(procesar, svc, sistema_id, canal, m)
     return {"ok": True}
-
-
-async def procesar(svc: Servicios, sistema_id: str, canal: Canal, mensaje: Entrante) -> None:
-    """Fase 3 (vinculación y turno del asistente). Hasta entonces el mensaje queda registrado y nada más:
-    un contacto sin vínculo recibe silencio."""
-    log.info("canal %s: mensaje %s recibido (%s)", sistema_id, mensaje.id, mensaje.tipo)

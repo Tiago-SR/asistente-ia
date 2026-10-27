@@ -32,6 +32,7 @@ canal** (§2). Rutas relativas a la `base` del manifiesto, igual que `/asistente
   credencial.
 - Viaja como `Authorization: Bearer <token_canal>` en los dos endpoints del asistente.
 - Compáralo en **tiempo constante** (`hash_equals` / `hmac.compare_digest`). Si falta o no coincide: `403`.
+- Rotación sin corte: durante el cambio el sistema acepta el token actual y el anterior (añade el nuevo, cámbialo en el panel del asistente, retira el viejo).
 - Va en el entorno del sistema (sugerido `STMGIS_CANAL_TOKEN`), nunca en el repositorio. El asistente lo lee de
   `conector.token_canal_env` en su registro (a implementar en el asistente).
 

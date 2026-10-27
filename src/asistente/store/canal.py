@@ -1,10 +1,10 @@
 """Registro de mensajes de los canales de mensajería (sin contenido)."""
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from asistente.store.models import CanalMensaje
+from asistente.store.models import CanalMensaje, CanalVinculo
 
 
 class MensajesCanal:
@@ -23,3 +23,34 @@ class MensajesCanal:
         async with self._sesiones.begin() as s:
             await s.execute(update(CanalMensaje).where(
                 CanalMensaje.sistema_id == sistema_id, CanalMensaje.id == mid).values(estado=estado))
+
+
+class VinculosCanal:
+    """Qué contactos están vinculados en cada sistema. No es autoritativo (lo es el sistema anfitrión): evita
+    consultarle por cada número desconocido y deja pasar solo a quien ya vinculó."""
+
+    def __init__(self, sesiones: async_sessionmaker[AsyncSession]) -> None:
+        self._sesiones = sesiones
+
+    async def activo(self, sistema_id: str, contacto: str) -> bool:
+        async with self._sesiones() as s:
+            q = select(CanalVinculo.activo).where(
+                CanalVinculo.sistema_id == sistema_id, CanalVinculo.contacto == contacto)
+            return bool((await s.execute(q)).scalar())
+
+    async def guardar(self, sistema_id: str, contacto: str) -> None:
+        async with self._sesiones.begin() as s:
+            await s.execute(pg_insert(CanalVinculo).values(sistema_id=sistema_id, contacto=contacto, activo=True)
+                            .on_conflict_do_update(index_elements=["sistema_id", "contacto"],
+                                                   set_={"activo": True, "ultimo_uso": func.now()}))
+
+    async def desactivar(self, sistema_id: str, contacto: str) -> None:
+        await self._poner(sistema_id, contacto, activo=False)
+
+    async def tocar(self, sistema_id: str, contacto: str) -> None:
+        await self._poner(sistema_id, contacto, ultimo_uso=func.now())
+
+    async def _poner(self, sistema_id: str, contacto: str, **valores) -> None:
+        async with self._sesiones.begin() as s:
+            await s.execute(update(CanalVinculo).where(
+                CanalVinculo.sistema_id == sistema_id, CanalVinculo.contacto == contacto).values(**valores))

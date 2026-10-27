@@ -165,6 +165,7 @@ class _Secretos(BaseModel):
     token_manifiesto: str | None = Field(default=None, max_length=4096, repr=False)
     llm_api_key: str | None = Field(default=None, max_length=4096, repr=False)
     auth_hs256: str | None = Field(default=None, max_length=4096, repr=False)
+    token_canal: str | None = Field(default=None, max_length=4096, repr=False)
 
 
 class _Crear(BaseModel):
@@ -420,7 +421,7 @@ async def actualizar_sistema(sistema_id: str, datos: _Actualizar, request: Reque
         r = await escritura.actualizar_sistema(
             svc.sesiones, svc.cifrador, sistema_id, datos.config, datos.version,
             token_manifiesto=datos.secretos.token_manifiesto, llm_api_key=datos.secretos.llm_api_key,
-            auth_hs256=datos.secretos.auth_hs256, por=a.nombre, ip=_ip(request))
+            auth_hs256=datos.secretos.auth_hs256, token_canal=datos.secretos.token_canal, por=a.nombre, ip=_ip(request))
     except ErrorEscritura as e:
         raise _fallo(e) from None
     return await _tras_escribir(svc, r)
