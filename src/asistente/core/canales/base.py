@@ -36,6 +36,10 @@ class EstadoEnvio:
     codigo_error: int | None = None
 
 
+# Códigos de error de Meta en un estado `failed` que el operador debe saber leer.
+MOTIVOS_FALLO = {131047: "fuera de la ventana de 24 h", 131026: "número no entregable", 131052: "archivo demasiado grande"}
+
+
 class Canal(Protocol):
     def verificar_suscripcion(self, params: dict[str, str]) -> str | None:
         """Handshake GET del webhook: el desafío a devolver, o None si no corresponde (403)."""
@@ -48,6 +52,9 @@ class Canal(Protocol):
 
     async def enviar_texto(self, contacto: str, texto: str) -> str:
         """Devuelve el id del mensaje enviado."""
+
+    async def enviar_botones(self, contacto: str, cuerpo: str, botones: list[tuple[str, str]]) -> str:
+        """Mensaje con botones de respuesta `(id, título)`. Devuelve el id del mensaje; ErrorCanal si el proveedor no puede."""
 
     async def descargar_medio(self, ref: str, max_bytes: int) -> tuple[bytes, str]:
         """`(bytes, mime)`."""

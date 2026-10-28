@@ -4,6 +4,7 @@ proveedor del sistema (firma). Una ruta por sistema; todo fallo es la misma 403,
 El POST responde 200 enseguida (el proveedor reintenta si tarda) y el trabajo sigue en segundo plano."""
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import PlainTextResponse
@@ -12,11 +13,13 @@ from asistente.api.canal_flujo import procesar
 from asistente.api.deps import servicios
 from asistente.api.errores import ErrorApi
 from asistente.core import canales
+from asistente.core.canales.base import MOTIVOS_FALLO as MOTIVOS
 from asistente.core.canales.base import Canal
 from asistente.servicios import Servicios
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+UMBRAL_FALLIDOS = 5  # envíos fallidos en una hora que se registran como error
 
 
 def canal_de(svc: Servicios, sistema_id: str, *, habilitado: bool = True) -> Canal | None:
@@ -52,8 +55,14 @@ async def recibir(sistema_id: str, request: Request, tareas: BackgroundTasks,
     log.info("canal %s: webhook firmado con %d mensajes y %d estados", sistema_id, len(entrantes), len(estados))
     for e in estados:
         if e.estado == "fallido":
-            log.warning("canal %s: envío fallido id=%s codigo=%s", sistema_id, e.id, e.codigo_error)
-        await svc.canal_mensajes.actualizar_estado(sistema_id, e.id, e.estado)
+            log.warning("canal %s: envío fallido id=%s codigo=%s (%s)", sistema_id, e.id, e.codigo_error,
+                        MOTIVOS.get(e.codigo_error, "otro"))
+        await svc.canal_mensajes.actualizar_estado(
+            sistema_id, e.id, e.estado, str(e.codigo_error) if e.codigo_error is not None else None)
+        if e.estado == "fallido":
+            n = len(await svc.canal_mensajes.fallidos(sistema_id, datetime.now(UTC) - timedelta(hours=1), UMBRAL_FALLIDOS))
+            if n >= UMBRAL_FALLIDOS:
+                log.error("canal %s: %d envíos fallidos en la última hora", sistema_id, n)
     for m in entrantes:
         # Solo metadatos, nunca contenido. Un reenvío (mismo id) no se procesa de nuevo.
         if await svc.canal_mensajes.registrar_entrada(sistema_id, m.id, m.contacto, m.tipo):

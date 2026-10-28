@@ -25,7 +25,7 @@ from asistente import precios
 from asistente.api.canal import canal_de
 from asistente.api.deps import servicios
 from asistente.api.errores import ErrorApi
-from asistente.core.canales.base import ErrorCanal
+from asistente.core.canales.base import MOTIVOS_FALLO, ErrorCanal
 from asistente.core.red import resolver_dns
 from asistente.servicios import Servicios, reglas_red
 from asistente.sistemas import escritura
@@ -833,13 +833,63 @@ async def uso(
 
 
 @router.post("/sistemas/{sistema_id}/canal/probar")
-async def probar_canal(sistema_id: str, svc: Servicios = _ESCRIBIR) -> dict:
+async def probar_canal(sistema_id: str, request: Request, svc: Servicios = _ESCRIBIR) -> dict:
     if svc.registro.obtener(sistema_id) is None:
         raise ErrorApi(404, "sistema_inexistente")
     canal = canal_de(svc, sistema_id, habilitado=False)
     if canal is None:
         raise ErrorApi(409, "canal_sin_configurar")
     try:
-        return {"ok": True, **await canal.probar()}
+        r = {"ok": True, **await canal.probar()}
     except ErrorCanal as e:
-        return {"ok": False, "error": str(e)}
+        r = {"ok": False, "error": str(e)}
+    await _store(svc).auditar(request.state.actor.nombre, "canal_probar", sistema_id, despues={"ok": r["ok"]},
+                              ip=_ip(request))
+    return r
+
+
+def _vinculos(svc: Servicios):
+    if svc.canal_vinculos is None or svc.canal_mensajes is None:
+        raise ErrorApi(503, "sin_base_de_datos")
+    return svc.canal_vinculos, svc.canal_mensajes
+
+
+def _enmascarar(contacto: str) -> str:
+    return "•••" + contacto[-4:]
+
+
+@router.get("/sistemas/{sistema_id}/canal/vinculos")
+async def vinculos_canal(sistema_id: str, svc: Servicios = _LEER) -> dict:
+    """Números vinculados (solo los últimos 4 dígitos) y el `ref` para revocar."""
+    if svc.registro.obtener(sistema_id) is None:
+        raise ErrorApi(404, "sistema_inexistente")
+    return {"vinculos": [{"ref": v.contacto, "numero": _enmascarar(v.contacto), "activo": v.activo,
+                          "creado_en": v.creado_en.isoformat(), "ultimo_uso": v.ultimo_uso.isoformat()}
+                         for v in await _vinculos(svc)[0].listar(sistema_id)]}
+
+
+class _Revocar(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ref: str = Field(min_length=1, max_length=32)
+
+
+@router.post("/sistemas/{sistema_id}/canal/vinculos/revocar")
+async def revocar_vinculo(sistema_id: str, datos: _Revocar, request: Request, svc: Servicios = _ESCRIBIR) -> dict:
+    """Corta el acceso desde el asistente. El vínculo autoritativo vive en el sistema: allí también hay que revocarlo."""
+    if svc.registro.obtener(sistema_id) is None:
+        raise ErrorApi(404, "sistema_inexistente")
+    await _vinculos(svc)[0].desactivar(sistema_id, datos.ref)
+    await _store(svc).auditar(request.state.actor.nombre, "canal_revocar", sistema_id,
+                              despues={"numero": _enmascarar(datos.ref)}, ip=_ip(request))
+    return {"ok": True}
+
+
+@router.get("/sistemas/{sistema_id}/canal/errores")
+async def errores_canal(sistema_id: str, svc: Servicios = _LEER) -> dict:
+    """Envíos que el proveedor reportó como fallidos en las últimas 24 h (los registros se purgan a los pocos días)."""
+    if svc.registro.obtener(sistema_id) is None:
+        raise ErrorApi(404, "sistema_inexistente")
+    filas = await _vinculos(svc)[1].fallidos(sistema_id, datetime.now(UTC) - timedelta(hours=24))
+    return {"errores": [{"numero": _enmascarar(f.contacto), "tipo": f.tipo, "codigo": f.error,
+                         "motivo": MOTIVOS_FALLO.get(int(f.error)) if f.error and f.error.isdigit() else None,
+                         "cuando": f.creado_en.isoformat()} for f in filas]}

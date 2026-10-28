@@ -150,17 +150,17 @@ teléfono en ninguna tabla. Recomendación: **el mapeo vive en el sistema, no en
       antes de entregar. **PDF → rasterizar** (hace falta dependencia nueva, p. ej. `pymupdf`; no está en
       `pyproject.toml`) primera página o hasta el tope de imágenes. Respetar `adjuntos.habilitado` y
       `soporta_imagenes` del sistema. No se guarda nada (`NoGuarda`).
-11. [ ] **Confirmación de propuestas**: tarjeta con botones interactivos según «Identidad» (cid + nonce,
+11. [x] (2026-10-27 hecho: botón `ok|no:<cid>:<hmac>` (clave `wa_app_secret`, ata acción+número) en lugar de `context.id`, sin migración; `canal_mensajeria.acciones` por sistema; destructivas y locales fuera; una tarjeta por vez) **Confirmación de propuestas**: tarjeta con botones interactivos según «Identidad» (cid + nonce,
     `context.id`). Confirmar vía el flujo existente (`api/confirmaciones.py:107`, token de escritura con
     `act`/`ph`/`cid`), sin atajos nuevos en el endpoint HTTP. Vencida: volver a proponer.
-12. [ ] Tests mínimos del flujo con LLM y conector simulados: vinculado/no vinculado (silencio), texto, imagen, PDF,
+12. [x] (hecho: tests en `tests/test_canal.py` (botón, cancelar, firma falsa, sin acciones, estados)) Tests mínimos del flujo con LLM y conector simulados: vinculado/no vinculado (silencio), texto, imagen, PDF,
     confirmación, duplicado.
 
 ## Fase 4: operación y producción
 
-13. [ ] **Panel** (`panel/src/pages/`, página nueva o sección en `Sistema.tsx`; ya hay campos de secreto en
+13. [x] (hecho: `CanalEstado.tsx` (vínculos con revocar, fallos 24 h) + endpoints `/canal/vinculos`, `/canal/vinculos/revocar`, `/canal/errores`; campo de acciones del canal) **Panel** (`panel/src/pages/`, página nueva o sección en `Sistema.tsx`; ya hay campos de secreto en
     `Sistema.tsx:266-283`): credenciales, «Probar conexión», vínculos activos con revocar, últimos errores.
-14. [ ] **Registro y límites**: log sin tokens ni contenido; límite de mensajes por número y por minuto; alerta si hay
+14. [x] (hecho: tope por número (20/min, 300/día) y por sistema, salidas registradas con estado/código, log.error con ≥5 fallos/h, auditoría `canal_probar`/`canal_revocar` (`AdminSql.auditar`, no `AuditoriaSql`)) **Registro y límites**: log sin tokens ni contenido; límite de mensajes por número y por minuto; alerta si hay
     `failed` repetidos (131047 fuera de ventana, 131026 no entregable, 131052 medio grande). Purga de
     `whatsapp_mensajes`. Auditoría con `AuditoriaSql`.
 15. [ ] **Número real** (`whatsapp-alta.md` §6): cambiar `phone_number_id`, método de pago, perfil. Probar con un

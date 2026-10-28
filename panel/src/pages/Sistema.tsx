@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { CanalEstado } from '@/components/CanalEstado'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -269,6 +270,16 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
                 )}
               </div>
             )}
+            {proveedor === 'meta' && (
+              <div className="grid gap-2">
+                <Label htmlFor="canal_acciones">Escrituras que se pueden proponer por WhatsApp (nombres de tool separados por coma; vacío = solo lectura)</Label>
+                <Input id="canal_acciones" disabled={!puede}
+                  value={((leer(config, 'canal_mensajeria.acciones') as string[] | undefined) ?? []).join(', ')}
+                  onChange={(e) => setConfig(poner(config, 'canal_mensajeria.acciones',
+                    e.target.value.split(',').map((x) => x.trim()).filter(Boolean)))} />
+              </div>
+            )}
+            {proveedor !== '' && !hayCambios && vista.config.canal_mensajeria && <CanalEstado id={id} puede={puede} />}
             {proveedor === 'meta' && (
               <div className="grid gap-4 rounded-md border p-4">
                 {campo('canal_mensajeria.phone_number_id', 'Phone number ID (no es el teléfono)')}

@@ -102,6 +102,9 @@ class CanalOpenWA:
             raise ErrorCanal("OpenWA no devolvió el id del mensaje")
         return str(d["messageId"])
 
+    async def enviar_botones(self, contacto: str, cuerpo: str, botones: list[tuple[str, str]]) -> str:
+        raise ErrorCanal("OpenWA no admite botones")
+
     async def descargar_medio(self, ref: str, max_bytes: int) -> tuple[bytes, str]:
         chat, _, mid = ref.partition("/")
         r = await self._llamar("GET", f"{self._base}/messages/{quote(chat, safe='')}/{quote(mid, safe='')}/media")

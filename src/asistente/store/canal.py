@@ -21,10 +21,25 @@ class MensajesCanal:
                 .on_conflict_do_nothing())
             return r.rowcount == 1
 
-    async def actualizar_estado(self, sistema_id: str, mid: str, estado: str) -> None:
+    async def registrar_salida(self, sistema_id: str, mid: str, contacto: str, tipo: str) -> None:
+        """Un mensaje que enviamos: su estado (sent, delivered, failed) llega después por el webhook."""
+        async with self._sesiones.begin() as s:
+            await s.execute(pg_insert(CanalMensaje).values(
+                sistema_id=sistema_id, id=mid, contacto=contacto, direccion="salida", tipo=tipo, estado="enviado")
+                .on_conflict_do_nothing())
+
+    async def actualizar_estado(self, sistema_id: str, mid: str, estado: str, error: str | None = None) -> None:
         async with self._sesiones.begin() as s:
             await s.execute(update(CanalMensaje).where(
-                CanalMensaje.sistema_id == sistema_id, CanalMensaje.id == mid).values(estado=estado))
+                CanalMensaje.sistema_id == sistema_id, CanalMensaje.id == mid).values(estado=estado, error=error))
+
+    async def fallidos(self, sistema_id: str, desde: datetime, limite: int = 20) -> list[CanalMensaje]:
+        """Salientes que el proveedor reportó como fallidos, del más nuevo al más viejo."""
+        async with self._sesiones() as s:
+            return list((await s.execute(select(CanalMensaje).where(
+                CanalMensaje.sistema_id == sistema_id, CanalMensaje.direccion == "salida",
+                CanalMensaje.estado == "fallido", CanalMensaje.creado_en >= desde)
+                .order_by(CanalMensaje.creado_en.desc()).limit(limite))).scalars())
 
     async def purgar(self, dias: int) -> int:
         """Quita los registros viejos: la deduplicación solo necesita el plazo de reintento del proveedor."""
@@ -51,6 +66,11 @@ class VinculosCanal:
             await s.execute(pg_insert(CanalVinculo).values(sistema_id=sistema_id, contacto=contacto, activo=True)
                             .on_conflict_do_update(index_elements=["sistema_id", "contacto"],
                                                    set_={"activo": True, "ultimo_uso": func.now()}))
+
+    async def listar(self, sistema_id: str) -> list[CanalVinculo]:
+        async with self._sesiones() as s:
+            return list((await s.execute(select(CanalVinculo).where(CanalVinculo.sistema_id == sistema_id)
+                                         .order_by(CanalVinculo.ultimo_uso.desc()))).scalars())
 
     async def desactivar(self, sistema_id: str, contacto: str) -> None:
         await self._poner(sistema_id, contacto, activo=False)

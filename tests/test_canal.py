@@ -4,6 +4,7 @@
 import hashlib
 import hmac
 import json
+import time
 import uuid
 
 import httpx
@@ -17,7 +18,7 @@ from asistente.core.canales.openwa import CanalOpenWA
 from asistente.sistemas.registro import Sistema, secretos_canal
 from asistente.store.canal import MensajesCanal
 from conftest import entorno, entrada_sistema, escribir_registro, registro_desde_yaml
-from test_api import construir_app, llm, sesiones  # noqa: F401  (fixtures por importación)
+from test_api import construir_app, llm, sesiones, sub  # noqa: F401  (fixtures por importación)
 
 SECRETO = "app-secret-de-prueba"
 NUM = "1234567890"
@@ -278,11 +279,15 @@ async def test_privacidad_es_publica_y_muestra_el_contacto(wa):
 
 class _Salida:
     def __init__(self):
-        self.enviados = []
+        self.enviados, self.botones = [], []
 
     async def enviar_texto(self, contacto, texto):
         self.enviados.append((contacto, texto))
-        return "wamid.out"
+        return "wamid.out" + uuid.uuid4().hex
+
+    async def enviar_botones(self, contacto, cuerpo, botones):
+        self.botones.append((contacto, cuerpo, {t: i for i, t in botones}))
+        return "wamid.btn" + uuid.uuid4().hex
 
 
 @pytest.fixture
@@ -305,11 +310,16 @@ async def flujo(wa, sesiones, monkeypatch, llm):
                 vinculados[cuerpo["wa_id"]] = "ana"
             return httpx.Response(200, json={"ok": True, "nombre": "Ana"}) if ok else httpx.Response(404)
         sub = vinculados.get(cuerpo["wa_id"])
+        if sub and "confirmacion" in cuerpo:  # token de escritura atado a esa confirmación
+            return httpx.Response(200, json={"token": firmar(
+                "mock-a", sub, canal="whatsapp", scope="asistente:escritura", exp=int(time.time()) + 30,
+                act="agregar_nota", ph=cuerpo["huella"], cid=cuerpo["confirmacion"])})
         return httpx.Response(200, json={"token": firmar("mock-a", sub, canal="whatsapp")}) if sub else httpx.Response(404)
 
     svc.http = httpx.AsyncClient(transport=httpx.MockTransport(sistema))
     secreto = svc.registro.secreto
-    monkeypatch.setattr(svc.registro, "secreto", lambda sid, c: "tc" if c == "token_canal" else secreto(sid, c))
+    monkeypatch.setattr(svc.registro, "secreto", lambda sid, c: {"token_canal": "tc", "wa_app_secret": SECRETO}.get(c)
+                        or secreto(sid, c))
     monkeypatch.setattr(canal_flujo.random, "uniform", lambda a, b: 0)
     salida = _Salida()
     yield svc, salida, llamadas, vinculados, llm
@@ -367,3 +377,95 @@ async def test_token_sin_claim_canal_no_sirve_en_el_canal(flujo, monkeypatch):
     assert salida.enviados == []
     with pytest.raises(Exception, match="canal"):
         await svc.autenticador.validar(firmar("mock-a", "ana", canal="whatsapp"))  # y al revés
+
+
+# --- confirmación con botón ---
+
+@pytest.fixture
+async def escribe(flujo, mock_a, monkeypatch):
+    """El sistema `mock-a` con `agregar_nota` encendida para el canal, y un usuario vinculado con su dato."""
+    svc, salida, _, vinculados, llm = flujo
+    actual = svc.registro.obtener("mock-a")
+    con_canal = actual.model_copy(update={
+        "acciones_habilitadas": ("agregar_nota",),
+        "canal_mensajeria": CanalMetaConfig(proveedor="meta", phone_number_id=NUM, acciones=("agregar_nota",))})
+    monkeypatch.setattr(svc.registro, "obtener", lambda sid: con_canal if sid == "mock-a" else None)
+    u = sub()
+    mock_a.DATOS[u] = [{"id": "1", "nombre": "El Matorral", "superficie_ha": 10.0, "cultivo": "soja"}]
+    mock_a.NOTAS[u] = []
+    vinculados["59899111222"] = u
+    await svc.canal_vinculos.guardar("mock-a", "59899111222")
+    return svc, salida, llm, mock_a, u
+
+
+async def _proponer(escribe, texto_nota="Helada"):
+    from asistente.api.canal_flujo import procesar
+    from asistente.core.llm.base import LlamadaTool
+    from asistente.core.llm.falso import pide, texto
+    svc, salida, llm, _, _ = escribe
+    llm.usar(pide(LlamadaTool("c1", "agregar_nota", {"establecimiento_id": "1", "texto": texto_nota})),
+             texto("Te pedí confirmar."))
+    await procesar(svc, "mock-a", salida, _msg("anotá una helada"))
+    return salida.botones[-1][2]
+
+
+def _boton(id_, contacto="59899111222"):
+    from asistente.core.canales.base import Entrante
+    return Entrante(id="w" + uuid.uuid4().hex, contacto=contacto, tipo="boton", boton_id=id_)
+
+
+async def test_propuesta_sale_con_botones_y_confirmar_la_ejecuta_una_sola_vez(escribe):
+    from asistente.api.canal_flujo import VENCIDA, procesar
+    svc, salida, _, mock_a, u = escribe
+    botones = await _proponer(escribe)
+    assert set(botones) == {"Confirmar", "Cancelar"} and mock_a.NOTAS[u] == []  # proponer no escribe
+    assert "El Matorral" in salida.botones[-1][1] and "Helada" in salida.botones[-1][1]  # el resumen es del sistema
+    await procesar(svc, "mock-a", salida, _boton(botones["Confirmar"]))
+    assert [n["texto"] for n in mock_a.NOTAS[u]] == ["Helada"]
+    await procesar(svc, "mock-a", salida, _boton(botones["Confirmar"]))  # reintento de Meta o doble toque
+    assert len(mock_a.NOTAS[u]) == 1 and salida.enviados[-1][1] == VENCIDA
+
+
+async def test_cancelar_no_escribe(escribe):
+    from asistente.api.canal_flujo import procesar
+    svc, salida, _, mock_a, u = escribe
+    botones = await _proponer(escribe)
+    await procesar(svc, "mock-a", salida, _boton(botones["Cancelar"]))
+    assert mock_a.NOTAS[u] == [] and "cancelado" in salida.enviados[-1][1]
+
+
+async def test_boton_falsificado_o_de_otro_numero_se_ignora(escribe):
+    from asistente.api.canal_flujo import procesar
+    svc, salida, _, mock_a, u = escribe
+    botones = await _proponer(escribe)
+    antes = len(salida.enviados)
+    id_ = botones["Confirmar"]
+    await svc.canal_vinculos.guardar("mock-a", "59800000001")
+    await procesar(svc, "mock-a", salida, _boton(id_[:-1] + ("0" if id_[-1] != "0" else "1")))  # firma alterada
+    await procesar(svc, "mock-a", salida, _boton(id_, "59800000001"))  # firma de otro número
+    await procesar(svc, "mock-a", salida, _boton("ok:basura"))
+    assert mock_a.NOTAS[u] == [] and len(salida.enviados) == antes
+
+
+async def test_sin_acciones_para_el_canal_no_hay_botones(flujo, mock_a):
+    from asistente.api.canal_flujo import procesar
+    from asistente.core.llm.base import LlamadaTool
+    from asistente.core.llm.falso import pide, texto
+    svc, salida, _, _, llm = flujo
+    await svc.canal_vinculos.guardar("mock-a", "59899111222")
+    llm.usar(pide(LlamadaTool("c1", "agregar_nota", {"establecimiento_id": "1", "texto": "x"})), texto("No puedo."))
+    await procesar(svc, "mock-a", salida, _msg("anotá algo"))
+    assert salida.botones == []
+
+
+# --- registro de salidas y estados ---
+
+async def test_salidas_fallidas_se_guardan_con_su_codigo(sesiones):
+    from datetime import UTC, datetime, timedelta
+    m = MensajesCanal(sesiones)
+    await m.registrar_salida("mock-a", "w.out1", "59899111222", "texto")
+    await m.actualizar_estado("mock-a", "w.out1", "fallido", "131047")
+    await m.registrar_salida("mock-a", "w.out2", "59899111222", "texto")
+    await m.actualizar_estado("mock-a", "w.out2", "entregado")
+    f = await m.fallidos("mock-a", datetime.now(UTC) - timedelta(hours=1))
+    assert [(x.id, x.error) for x in f] == [("w.out1", "131047")]

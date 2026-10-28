@@ -115,6 +115,17 @@ class CanalMeta:
         except (KeyError, IndexError, TypeError) as e:
             raise ErrorCanal("Graph no devolvió el id del mensaje") from e
 
+    async def enviar_botones(self, contacto: str, cuerpo: str, botones: list[tuple[str, str]]) -> str:
+        # Límites de Meta: cuerpo 1024, hasta 3 botones, título 20, id 256.
+        d = await self._json("POST", f"{self._base}/{self._cfg.phone_number_id}/messages", json={
+            "messaging_product": "whatsapp", "to": contacto, "type": "interactive",
+            "interactive": {"type": "button", "body": {"text": cuerpo[:1024]}, "action": {"buttons": [
+                {"type": "reply", "reply": {"id": i[:256], "title": t[:20]}} for i, t in botones[:3]]}}})
+        try:
+            return d["messages"][0]["id"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise ErrorCanal("Graph no devolvió el id del mensaje") from e
+
     async def descargar_medio(self, ref: str, max_bytes: int) -> tuple[bytes, str]:
         """Dos pasos: la info del medio y su URL (dura ~5 min, mismo `Authorization`).
         shortcut: valida el tamaño después de bajar, no en streaming; pasar a streaming si se admiten medios grandes."""

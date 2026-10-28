@@ -96,33 +96,27 @@ async def cancelar(
     accion_id: uuid.UUID, sesion: Sesion = Depends(sesion_actual), svc: Servicios = Depends(servicios)
 ):
     accion = await _propia(svc, sesion, accion_id)
-    u = sesion.usuario
-    if not await _acciones(svc).cancelar(u.sistema_id, u.usuario_ref, accion_id):
+    if not await cancelar_pendiente(svc, sesion, accion):
         return _no_pendiente(await _propia(svc, sesion, accion_id))
-    await _anotar(svc, sesion, accion, f"{AVISO} Acción cancelada por el usuario: {accion.resumen}. No se guardó nada.")
     return {"estado": "cancelada"}
 
 
-@router.post("/v1/confirmaciones/{accion_id}/confirmar")
-async def confirmar(
-    accion_id: uuid.UUID, sesion: Sesion = Depends(sesion_escritura), svc: Servicios = Depends(servicios)
-):
+async def cancelar_pendiente(svc: Servicios, sesion: Sesion, accion: Accion) -> bool:
+    """Cancela una acción propia aún pendiente y lo anota en el historial. Compartido con el botón de los canales."""
     u = sesion.usuario
-    accion = await _propia(svc, sesion, accion_id)
-    if accion.tool in memorias.NOMBRES:
-        # Una acción local se aplica en `confirmar-local`; esta ruta es solo para escrituras del anfitrión.
-        raise ErrorApi(403, "confirmacion_invalida")
-    c = u.accion
-    # El token debe ser para ESTA acción, tool y parámetros. Se comprueba antes de reclamar: un token
-    # equivocado no gasta la confirmación.
-    if c is None or c.cid != str(accion.id) or c.act != accion.tool or c.ph != accion.huella:
-        raise ErrorApi(403, "confirmacion_invalida")
-    if sesion.sistema.id != accion.sistema_id:
-        raise ErrorApi(403, "confirmacion_invalida")
+    if not await _acciones(svc).cancelar(u.sistema_id, u.usuario_ref, accion.id):
+        return False
+    await _anotar(svc, sesion, accion, f"{AVISO} Acción cancelada por el usuario: {accion.resumen}. No se guardó nada.")
+    return True
 
+
+async def ejecutar_confirmada(svc: Servicios, sesion: Sesion, accion_id: uuid.UUID) -> dict:
+    """Reclama la acción y la ejecuta en el anfitrión. Compartido con la confirmación por botón de los canales: quien
+    llama ya validó que el token de escritura es para ESTA acción. `{"error": "accion_no_pendiente"}` si otro ganó."""
+    u = sesion.usuario
     reclamada = await _acciones(svc).reclamar(u.sistema_id, u.usuario_ref, accion_id, u.jti)
     if reclamada is None:
-        return _no_pendiente(await _propia(svc, sesion, accion_id))
+        return {"error": "accion_no_pendiente", "estado": (await _propia(svc, sesion, accion_id)).estado}
 
     request_id = uuid.uuid4().hex
     inicio = time.monotonic()
@@ -144,6 +138,27 @@ async def confirmar(
     await _anotar(svc, sesion, reclamada,
                   f"{AVISO} La acción NO se realizó ({r.error}): {reclamada.resumen}. No se guardó nada.{extra}")
     return {"estado": "fallida", "ok": False, "error": r.error, "detalle": (r.detalle or "")[:MAX_MENSAJE]}
+
+
+@router.post("/v1/confirmaciones/{accion_id}/confirmar")
+async def confirmar(
+    accion_id: uuid.UUID, sesion: Sesion = Depends(sesion_escritura), svc: Servicios = Depends(servicios)
+):
+    u = sesion.usuario
+    accion = await _propia(svc, sesion, accion_id)
+    if accion.tool in memorias.NOMBRES:
+        # Una acción local se aplica en `confirmar-local`; esta ruta es solo para escrituras del anfitrión.
+        raise ErrorApi(403, "confirmacion_invalida")
+    c = u.accion
+    # El token debe ser para ESTA acción, tool y parámetros. Se comprueba antes de reclamar: un token
+    # equivocado no gasta la confirmación.
+    if c is None or c.cid != str(accion.id) or c.act != accion.tool or c.ph != accion.huella:
+        raise ErrorApi(403, "confirmacion_invalida")
+    if sesion.sistema.id != accion.sistema_id:
+        raise ErrorApi(403, "confirmacion_invalida")
+
+    r = await ejecutar_confirmada(svc, sesion, accion_id)
+    return JSONResponse(r, status_code=409) if r.get("error") == "accion_no_pendiente" else r
 
 
 @router.post("/v1/confirmaciones/{accion_id}/confirmar-local")
