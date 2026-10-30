@@ -16,18 +16,22 @@ class CanalMetaConfig(BaseModel):
     graph_version: str = Field(default="v23.0", pattern=r"^v\d{1,3}\.\d{1,3}$")
     # Escrituras que el modelo puede proponer por este canal (aparte de `acciones_habilitadas`). Vacío = solo lectura.
     acciones: tuple[str, ...] = ()
+    # Lecturas del sistema que NO se ofrecen por este canal (por defecto todas las habilitadas se ofrecen).
+    lecturas_bloqueadas: tuple[str, ...] = ()
 
 
 class CanalOpenWAConfig(BaseModel):
     """OpenWA (github.com/rmyndharis/OpenWA, MIT, autoalojado): automatiza WhatsApp Web, NO es la API oficial
-    (riesgo de baneo del número). Solo lectura: no admite `acciones`. El alta de la sesión (QR) y del webhook en
-    OpenWA es manual (ver README). El host de `base_url` interno debe figurar en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS."""
+    (riesgo de baneo del número). Sin botones: las escrituras de `acciones` se confirman escribiendo un código
+    (`CONFIRMAR <código>`). El alta de la sesión (QR) y del webhook en OpenWA es manual (ver README). El host de `base_url` interno debe figurar en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS."""
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     proveedor: Literal["openwa"]
     base_url: str
     session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     acciones: tuple[str, ...] = ()
+    # Lecturas del sistema que NO se ofrecen por este canal (por defecto todas las habilitadas se ofrecen).
+    lecturas_bloqueadas: tuple[str, ...] = ()
 
     @field_validator("base_url")
     @classmethod
@@ -35,13 +39,6 @@ class CanalOpenWAConfig(BaseModel):
         u = urlsplit(v)
         if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
             raise ValueError("base_url debe ser http(s) sin usuario, contraseña, query ni fragmento")
-        return v
-
-    @field_validator("acciones")
-    @classmethod
-    def _solo_lectura(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        if v:
-            raise ValueError("OpenWA es solo lectura: no admite acciones")
         return v
 
 

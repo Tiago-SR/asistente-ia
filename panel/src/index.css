@@ -144,3 +144,9 @@
   --viz-aviso: #fab219;
   --viz-rejilla: #2c2c2a;
 }
+
+/* Los desplegables nativos (<select>) heredan el texto claro del tema oscuro pero abren con fondo claro: se
+   avisa al navegador del esquema y se fijan los colores de las opciones con los tokens del panel. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+select option { background-color: var(--background); color: var(--foreground); }

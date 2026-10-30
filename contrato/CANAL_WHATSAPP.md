@@ -3,7 +3,8 @@
 Sección **opcional** del contrato (§9 de `CONTRATO.md`). No cambia ningún endpoint existente y no sube la versión
 (`"contrato": "1"`). Léelo junto con `CONTRATO.md` §1 (token de usuario) y §8 (acciones con confirmación) e
 `IMPLEMENTAR.md`. Este documento define **sólo lo que debe construir el sistema anfitrión**; el webhook de Meta y el
-chat viven en el asistente (ver `whatsapp/whatsapp-plan.md`).
+chat viven en el asistente (ver `whatsapp/whatsapp-plan.md`). El proveedor del canal (OpenWA o API de Meta) lo elige
+el operador en el asistente; lo que cambia para el sistema está en §10.
 
 ## 0. Qué es esto y por qué así
 
@@ -179,3 +180,41 @@ hoy se arma `scope`.
 - Token de escritura con una `huella` de una propuesta hecha desde el widget → rechazado.
 - Token de escritura para una tool destructiva → `403`.
 - Dar de baja al usuario → `/token` pasa a `404`.
+
+## 10. Proveedores del canal: qué cambia para el sistema
+
+El contrato (§1-§9) es el **mismo** con cualquier proveedor: el sistema nunca habla con WhatsApp, sólo con el asistente,
+y el asistente le entrega un `wa_id`. Elegir proveedor **no obliga a construir endpoints distintos**. Lo que sí debe
+saber el sistema:
+
+| | OpenWA (soportado) | API de Meta (fuera por ahora) |
+|---|---|---|
+| Qué es | WhatsApp Web autoalojado: el número es una cuenta de WhatsApp común, no oficial | WhatsApp Business Cloud API, número de empresa |
+| Endpoints del sistema | los de §1 | los de §1 |
+| Lectura (`asistente:lectura`) | sí | sí |
+| Escritura por el canal (§4.1) | sí, opt-in del operador; la confirmación es **escribir un código** (`CONFIRMAR 4F7K2`), no un botón | sí, opt-in del operador, con confirmación por botones |
+| Texto de la pantalla «Vincular WhatsApp» | «número del asistente» = el número de la sesión de OpenWA que te dé el operador | el número de la empresa en Meta |
+| Quién valida el origen del mensaje | firma HMAC del webhook de OpenWA, verificada por el asistente | firma de Meta, verificada por el asistente |
+
+### 10.1 Formato de `wa_id` (aplica a ambos)
+
+- Sólo **dígitos en formato internacional, sin `+`, sin espacios y sin sufijos** (`59899123456`; nunca
+  `59899123456@c.us`). Máximo 32 caracteres. El asistente lo normaliza antes de llamar al sistema.
+- Guárdalo y compáralo como **texto exacto** (el índice `(canal, wa_id)` de §3.2); no lo conviertas a entero ni
+  le quites ceros ni lo reformatees.
+- Con OpenWA, los contactos que WhatsApp oculta tras un identificador interno (`@lid`) sin teléfono resoluble **no
+  llegan** al sistema: el asistente los ignora, así que el sistema nunca verá un `wa_id` que no sea un teléfono.
+- El valor de `canal` sigue siendo `"whatsapp"` con cualquier proveedor. El sistema no necesita saber cuál se usa.
+
+### 10.2 Qué debe hacer el sistema según el proveedor
+
+1. **Con OpenWA:** lectura igual que con Meta. La escritura (§4.1) es idéntica para el sistema: el asistente pide el
+   token de escritura con `confirmacion` y `huella` cuando el usuario responde el código; el sistema no ve la
+   diferencia ni valida el código. El operador te da el número de la sesión para la pantalla de vinculación y el
+   token de canal (§2).
+2. **Con Meta (cuando se habilite):** implementa además §4.1 si quieres acciones por WhatsApp. No hay otros cambios
+   en el sistema.
+3. **Cambiar de proveedor** (p. ej. de OpenWA a Meta) **no invalida los vínculos**: son del número, no del proveedor.
+   Sólo cambia el número al que el usuario le escribe, y la pantalla de vinculación debe reflejarlo.
+4. **Aviso de riesgo con OpenWA:** al ser no oficial, WhatsApp puede bloquear el número. Si pasa, el canal queda sin
+   servicio hasta que el operador lo restablezca; los vínculos siguen vigentes.

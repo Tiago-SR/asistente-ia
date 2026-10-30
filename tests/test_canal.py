@@ -260,9 +260,8 @@ async def test_openwa_enviar_probar_y_medio():
         await c.probar()
 
 
-def test_openwa_es_solo_lectura_y_url_valida():
-    with pytest.raises(ValueError):
-        CanalOpenWAConfig(proveedor="openwa", base_url="http://x", session_id="s", acciones=("crear_nota",))
+def test_openwa_admite_acciones_y_valida_url():
+    assert CanalOpenWAConfig(proveedor="openwa", base_url="http://x", session_id="s", acciones=("crear_nota",))
     with pytest.raises(ValueError):
         CanalOpenWAConfig(proveedor="openwa", base_url="ftp://x", session_id="s")
     assert secretos_canal({"canal_mensajeria": {"proveedor": "openwa"}}) == ("owa_api_key", "owa_webhook_secret")
@@ -278,7 +277,8 @@ async def test_privacidad_es_publica_y_muestra_el_contacto(wa):
 # --- flujo: vincular y turno ---
 
 class _Salida:
-    def __init__(self):
+    def __init__(self, tiene_botones=True):
+        self.tiene_botones = tiene_botones
         self.enviados, self.botones = [], []
 
     async def enviar_texto(self, contacto, texto):
@@ -339,7 +339,7 @@ async def test_sin_vinculo_silencio_y_sin_llamar_al_sistema(flujo):
 
 
 async def test_vincular_y_preguntar(flujo):
-    from asistente.api.canal_flujo import BIENVENIDA, procesar
+    from asistente.api.canal_flujo import ACUSES, procesar
     from asistente.core.llm.falso import texto
     svc, salida, _, _, llm = flujo
     await procesar(svc, "mock-a", salida, _msg("vincular FST-BUENO", "59877777777"))
@@ -347,7 +347,7 @@ async def test_vincular_y_preguntar(flujo):
     llm.usar(texto("Tenés 3 campos"))
     salida.enviados.clear()
     await procesar(svc, "mock-a", salida, _msg("¿cuántos campos tengo?", "59877777777"))
-    assert [t for _, t in salida.enviados] == [BIENVENIDA, "Tenés 3 campos"]
+    assert [t for _, t in salida.enviados][1:] == ["Tenés 3 campos"] and salida.enviados[0][1] in ACUSES
 
 
 async def test_vinculo_revocado_en_el_sistema_se_desactiva(flujo):
@@ -478,3 +478,82 @@ def test_a_whatsapp_tabla_encabezados_y_negrita():
     assert a_whatsapp(md) == ("*Resumen*\n*Total:* 660 ha\n\n- El Matorral: Ha 540, Cultivo Soja\n- San Pedro: Ha 120, Cultivo Maíz\n\n"
                               "- ver mapa (https://x.uy/m)\n```\n| a | b |\n```")
     assert a_whatsapp("| Campo | Ha |\n|---|---|\n| El Matorral | 540 |") == "- El Matorral: 540"
+
+
+# --- confirmación por código (canales sin botones, p. ej. OpenWA) ---
+
+async def _proponer_codigo(escribe):
+    import re
+    salida = escribe[1]
+    salida.tiene_botones = False
+    await _proponer_texto(escribe)
+    return re.search(r"CONFIRMAR (\w{5}) o CANCELAR", salida.enviados[-1][1])[1]
+
+
+async def _proponer_texto(escribe):
+    from asistente.api.canal_flujo import procesar
+    from asistente.core.llm.base import LlamadaTool
+    from asistente.core.llm.falso import pide, texto
+    svc, salida, llm, _, _ = escribe
+    llm.usar(pide(LlamadaTool("c1", "agregar_nota", {"establecimiento_id": "1", "texto": "Helada"})),
+             texto("Te pedí confirmar."))
+    await procesar(svc, "mock-a", salida, _msg("anotá una helada"))
+
+
+async def test_codigo_confirma_una_sola_vez_y_no_llega_al_modelo(escribe):
+    from asistente.api.canal_flujo import VENCIDA, procesar
+    svc, salida, llm, mock_a, u = escribe
+    cod = await _proponer_codigo(escribe)
+    assert salida.botones == [] and mock_a.NOTAS[u] == []
+    antes = len(llm.actual.llamadas)
+    await procesar(svc, "mock-a", salida, _msg(f"confirmar {cod.lower()}"))
+    assert [n["texto"] for n in mock_a.NOTAS[u]] == ["Helada"]
+    await procesar(svc, "mock-a", salida, _msg(f"CONFIRMAR {cod}"))
+    assert len(mock_a.NOTAS[u]) == 1 and salida.enviados[-1][1] == VENCIDA
+    assert len(llm.actual.llamadas) == antes  # ni la confirmación ni el reintento llamaron al modelo
+
+
+async def test_codigo_cancelar_incorrecto_o_ajeno_no_escribe(escribe):
+    from asistente.api.canal_flujo import VENCIDA, procesar
+    svc, salida, _, mock_a, u = escribe
+    cod = await _proponer_codigo(escribe)
+    await svc.canal_vinculos.guardar("mock-a", "59800000001")
+    await procesar(svc, "mock-a", salida, _msg("CONFIRMAR AAAAA"))
+    assert salida.enviados[-1][1] == VENCIDA and mock_a.NOTAS[u] == []
+    await procesar(svc, "mock-a", salida, _msg(f"CONFIRMAR {cod}", "59800000001"))  # código de otro número
+    assert mock_a.NOTAS[u] == []
+    await procesar(svc, "mock-a", salida, _msg(f"cancelar {cod}"))
+    assert mock_a.NOTAS[u] == [] and "cancelado" in salida.enviados[-1][1]
+    await procesar(svc, "mock-a", salida, _msg(f"CONFIRMAR {cod}"))  # ya cancelada
+    assert mock_a.NOTAS[u] == []
+
+
+async def test_confirmar_sin_codigo_va_al_modelo_y_no_ejecuta(escribe):
+    from asistente.api.canal_flujo import procesar
+    svc, salida, llm, mock_a, u = escribe
+    await _proponer_codigo(escribe)
+    from asistente.core.llm.falso import texto
+    llm.usar(texto("Necesito el código."))
+    await procesar(svc, "mock-a", salida, _msg("sí, confirmar"))
+    assert mock_a.NOTAS[u] == []
+
+
+def test_acuse_varia_y_saluda_solo_tras_una_pausa():
+    from asistente.api.canal_flujo import ACUSES, _acuse
+    assert {_acuse("Ana", None, False) for _ in range(100)} == set(ACUSES)
+    con = _acuse("Ana María", "UTC", True)
+    assert con.startswith(("Buen día, Ana.", "Buenas tardes, Ana.", "Buenas noches, Ana.")) and con.split(". ", 1)[1] in ACUSES
+    assert _acuse(None, None, True).split(". ", 1)[0] in ("Buen día", "Buenas tardes", "Buenas noches")
+
+
+async def test_lecturas_bloqueadas_no_se_ofrecen_por_el_canal():
+    from asistente.api.canal_flujo import _ConectorCanal
+    from asistente.core.llm.base import ToolDef
+
+    class Base:
+        async def tools(self):
+            return [ToolDef(nombre=n, descripcion="", parametros={}, escritura=e) for n, e in
+                    (("ver_a", False), ("ver_b", False), ("anotar", True))]
+
+    c = _ConectorCanal(Base(), frozenset({"anotar"}), frozenset({"ver_b"}))
+    assert [t.nombre for t in await c.tools()] == ["ver_a", "anotar"]

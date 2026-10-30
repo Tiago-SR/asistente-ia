@@ -20,6 +20,8 @@ _SUFIJO = re.compile(r"@(c\.us|lid)$")
 
 
 class CanalOpenWA:
+    tiene_botones = False
+
     def __init__(self, cfg: CanalOpenWAConfig, api_key: str, webhook_secret: str,
                  http: httpx.AsyncClient | None = None, *, timeout_s: float = 20.0) -> None:
         self._cfg = cfg

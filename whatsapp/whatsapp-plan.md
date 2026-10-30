@@ -59,7 +59,7 @@ confirmación; **borrar nunca**). Flujo de cada mensaje de un número vinculado:
   `enviar_botones` se añade en la Fase 3, paso 11). Las menciones a `/whatsapp/webhook`, `core/whatsapp/`, `wa_id`→
   `contacto` y «secretos globales» de abajo son anteriores a este cambio.
 
-- [x] **Proveedor `openwa`** (2026-10-26, tras consultar al asesor): segundo proveedor del strategy, solo lectura
+- [x] **Proveedor `openwa`** (2026-10-26, tras consultar al asesor): segundo proveedor del strategy, solo lectura (2026-10-30: ya admite `acciones`, confirmadas con `CONFIRMAR <código>` por texto, sin pasar por el LLM)
   (`acciones` vacío por validador), webhook firmado obligatorio, solo chats individuales con teléfono resoluble
   (`@lid` sin `senderPhone` = silencio), contacto = dígitos (`@c.us` se añade al enviar), sin botones (las
   confirmaciones con botón de la Fase 3 solo valen con Meta), alta de sesión y webhook manual. **Formatos tomados de su

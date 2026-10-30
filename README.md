@@ -175,7 +175,7 @@ Plan en `whatsapp/whatsapp-plan.md`. Cada sistema elige su proveedor de canal (s
 la página del sistema en el panel. Una App de Meta por sistema.
 
 Proveedores: `meta` (oficial) y `openwa` ([OpenWA](https://github.com/rmyndharis/OpenWA), probado con v0.26.0, MIT, autoalojado; **no oficial: riesgo
-de baneo del número**, solo lectura, pensado para pruebas y cobertura básica). OpenWA viene en los compose (dev y prod) y arranca siempre con el asistente, sin `depends_on` (si cae, la web y la voz siguen;
+de baneo del número**, la escritura se confirma escribiendo un código (`CONFIRMAR <código>`), pensado para pruebas y cobertura básica). OpenWA viene en los compose (dev y prod) y arranca siempre con el asistente, sin `depends_on` (si cae, la web y la voz siguen;
 los envíos por el canal dan error controlado). Está solo en la red `publica`, con su dashboard únicamente en `127.0.0.1:2785`
 (en prod, por túnel ssh; nunca detrás del proxy público). En prod `OPENWA_API_KEY` (>=32 caracteres) es obligatoria; en dev
 la clave se genera sola (`docker compose -f docker-compose.dev.yml exec openwa cat /app/data/.api-key`). Alta: abrir el

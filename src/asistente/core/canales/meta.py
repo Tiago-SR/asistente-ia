@@ -22,6 +22,8 @@ _ESTADOS = {"sent": "enviado", "delivered": "entregado", "read": "leido", "faile
 
 
 class CanalMeta:
+    tiene_botones = True
+
     def __init__(self, cfg: CanalMetaConfig, token: str, app_secret: str, verify_token: str,
                  http: httpx.AsyncClient | None = None, *, timeout_s: float = 20.0, espera_s: float = 1.0) -> None:
         self._cfg = cfg

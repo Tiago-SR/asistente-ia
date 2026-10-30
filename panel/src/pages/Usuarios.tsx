@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api, mensaje, type Usuario, type Yo } from '@/lib/api'
 
@@ -104,11 +105,10 @@ export function Usuarios({ yo }: { yo: Yo }) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="u-rol">Rol</Label>
-              <select id="u-rol" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value })}
-                className="h-9 rounded-md border bg-background px-3 text-sm">
+              <Select id="u-rol" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value })}>
                 <option value="operador">operador (solo lectura)</option>
                 <option value="admin">admin (todo)</option>
-              </select>
+              </Select>
             </div>
             <Button type="submit">Crear usuario</Button>
           </form>

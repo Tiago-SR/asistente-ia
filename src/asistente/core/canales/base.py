@@ -41,6 +41,8 @@ MOTIVOS_FALLO = {131047: "fuera de la ventana de 24 h", 131026: "número no entr
 
 
 class Canal(Protocol):
+    tiene_botones: bool  # False: las confirmaciones se piden por texto con un código (`enviar_botones` no sirve)
+
     def verificar_suscripcion(self, params: dict[str, str]) -> str | None:
         """Handshake GET del webhook: el desafío a devolver, o None si no corresponde (403)."""
 

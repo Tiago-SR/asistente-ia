@@ -12,6 +12,7 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   api,
@@ -166,19 +167,14 @@ export function Metricas() {
         <CardContent className="flex flex-wrap items-end gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="m-sistema">Sistema</Label>
-            <select
-              id="m-sistema"
-              value={sistema}
-              onChange={(e) => setSistema(e.target.value)}
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            >
+            <Select id="m-sistema" value={sistema} onChange={(e) => setSistema(e.target.value)} className="w-auto min-w-40">
               <option value="">Todos</option>
               {sistemas.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nombre}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="flex gap-1" role="group" aria-label="Rango">
             {DIAS.map((d) => (

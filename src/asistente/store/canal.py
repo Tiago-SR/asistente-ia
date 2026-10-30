@@ -75,8 +75,13 @@ class VinculosCanal:
     async def desactivar(self, sistema_id: str, contacto: str) -> None:
         await self._poner(sistema_id, contacto, activo=False)
 
-    async def tocar(self, sistema_id: str, contacto: str) -> None:
-        await self._poner(sistema_id, contacto, ultimo_uso=func.now())
+    async def tocar(self, sistema_id: str, contacto: str) -> datetime | None:
+        """Marca el uso y devuelve el anterior (None si no hay vínculo)."""
+        async with self._sesiones.begin() as s:
+            donde = (CanalVinculo.sistema_id == sistema_id, CanalVinculo.contacto == contacto)
+            previo = (await s.execute(select(CanalVinculo.ultimo_uso).where(*donde))).scalar()
+            await s.execute(update(CanalVinculo).where(*donde).values(ultimo_uso=func.now()))
+            return previo
 
     async def _poner(self, sistema_id: str, contacto: str, **valores) -> None:
         async with self._sesiones.begin() as s:

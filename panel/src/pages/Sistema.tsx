@@ -9,6 +9,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { Select } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { ArrowLeftIcon, ChevronDownIcon } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { api, ApiError, mensaje, type Config, type ToolVista, type Vista, type Yo } from '@/lib/api'
 
 const CAMPOS_SECRETOS: Record<string, string> = {
@@ -22,6 +27,9 @@ const CAMPOS_SECRETOS: Record<string, string> = {
   owa_api_key: 'OpenWA: API key (cabecera X-API-Key)',
   owa_webhook_secret: 'OpenWA: secret del webhook (firma HMAC; sin él el canal no se activa)',
 }
+
+// Secretos del canal de mensajería: van dentro de su sección, no en «Secretos».
+const SECRETOS_CANAL_UI = ['token_canal', 'wa_token', 'wa_app_secret', 'wa_verify_token', 'owa_api_key', 'owa_webhook_secret']
 
 const leer = (o: Config, ruta: string): unknown => ruta.split('.').reduce<any>((a, k) => a?.[k], o) // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -65,6 +73,8 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
   const [prueba, setPrueba] = useState<string | null>(null)
   const [aprobar, setAprobar] = useState<ToolVista | null>(null)
   const [nombreConf, setNombreConf] = useState('')
+  const [elegirAcc, setElegirAcc] = useState(false)
+  const [verTools, setVerTools] = useState(false)
   const puede = yo.rol === 'admin'
 
   const cargarTools = useCallback(
@@ -142,16 +152,53 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
     <div className="flex items-center gap-3">
       <Switch id={ruta} disabled={!puede} checked={Boolean(leer(config, ruta))}
         onCheckedChange={(v) => setConfig(poner(config, ruta, v))} />
-      <Label htmlFor={ruta}>{etiqueta}</Label>
+      <Label htmlFor={ruta} className="h-[18.4px]">{etiqueta}</Label>
     </div>
   )
 
   // un número vacío equivale a null (techo global): borrar un campo que ya era null no es un cambio
   const igual = (x: unknown, y: unknown) => JSON.stringify(x, (_, v) => (v === '' ? null : v)) === JSON.stringify(y, (_, v) => (v === '' ? null : v))
+  const accionesCanal = (leer(config, 'canal_mensajeria.acciones') as string[] | undefined) ?? []
+  const ofrecibles = (tools?.tools ?? []).filter((t) => t.habilitada && t.accionable && !t.destructiva)
+  const bloqueadasCanal = (leer(config, 'canal_mensajeria.lecturas_bloqueadas') as string[] | undefined) ?? []
+  const activaEnCanal = (t: ToolVista) => (t.efecto === 'escritura' ? accionesCanal.includes(t.nombre) : !bloqueadasCanal.includes(t.nombre))
+  const alternarEnCanal = (t: ToolVista, v: boolean) => {
+    const [campo, lista, agregar] = t.efecto === 'escritura'
+      ? ['acciones', accionesCanal, v] : ['lecturas_bloqueadas', bloqueadasCanal, !v]
+    setConfig(poner(config, `canal_mensajeria.${campo}`, agregar ? [...lista, t.nombre] : lista.filter((x) => x !== t.nombre)))
+  }
   const hayCambios = !igual(config, vista.config) || ['token_manifiesto', 'llm_api_key', 'auth_hs256'].some((k) => nuevos[k])
 
-  const guardar = (ev: React.FormEvent) => {
-    ev.preventDefault()
+  const filaSecreto = (c: string, etiqueta: string) => {
+    const s = vista.secretos[c]
+    return (
+      <div key={c} className="grid gap-2 border-b pb-4 last:border-0">
+        <Label>{etiqueta}</Label>
+        <div className="text-sm">
+          {s?.configurado ? <>configurado · huella <span className="font-mono">{s.huella}</span> · {s.actualizado_en && new Date(s.actualizado_en).toLocaleString()}</> : <span className="text-muted-foreground">sin configurar</span>}
+        </div>
+        {puede && (
+          <div className="flex gap-2">
+            <Input type="password" autoComplete="off" placeholder="Nuevo valor" value={nuevos[`s:${c}`] ?? ''}
+              onChange={(e) => setNuevos({ ...nuevos, [`s:${c}`]: e.target.value })} />
+            <Button type="button" variant="outline" disabled={!nuevos[`s:${c}`]}
+              onClick={() => escribir(() => api('PUT', `/sistemas/${id}/secretos/${c}`, { version: vista.version, valor: nuevos[`s:${c}`] }), 'Secreto guardado.')}>
+              Guardar
+            </Button>
+            {s?.configurado && (
+              <Button type="button" variant="destructive"
+                onClick={() => escribir(() => api('DELETE', `/sistemas/${id}/secretos/${c}?version=${vista.version}`), 'Secreto borrado.')}>
+                Borrar
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const guardar = (ev?: React.FormEvent) => {
+    ev?.preventDefault()
     const secretos: Record<string, string> = {}
     for (const [k, v] of Object.entries(nuevos)) if (v) secretos[k] = v
     // un número vacío en los límites de adjuntos significa «techo global»
@@ -164,11 +211,15 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
   return (
     <div className="grid gap-6">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" onClick={() => ir('/sistemas')}>← Sistemas</Button>
+        <Button variant="ghost" onClick={() => ir('/sistemas')}><ArrowLeftIcon className="size-4" />Sistemas</Button>
         <h2 className="text-xl font-semibold">{String(vista.config.nombre)}</h2>
         <span className="font-mono text-sm text-muted-foreground">{id}</span>
         {vista.config.habilitado ? (vista.activo ? <Badge>activo</Badge> : <Badge variant="destructive">con error</Badge>) : <Badge variant="secondary">deshabilitado</Badge>}
         <span className="text-xs text-muted-foreground">versión {vista.version}</span>
+        <div className="ml-auto flex items-center gap-3">
+          {interruptor('habilitado', 'Habilitado')}
+          {puede && hayCambios && <Button type="button" size="sm" onClick={() => guardar()}>Guardar</Button>}
+        </div>
       </div>
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
       {ok && <Alert><AlertDescription>{ok}</AlertDescription></Alert>}
@@ -178,16 +229,14 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         <Alert>
           <AlertDescription>
             Hay un canal de mensajería configurado pero falta el token de canal: sin él el asistente no puede vincular
-            números ni emitir tokens por mensaje, y el canal no responde. Cárguelo en Secretos.
+            números ni emitir tokens por mensaje, y el canal no responde. Cárguelo en la sección Canal de mensajería.
           </AlertDescription>
         </Alert>
       )}
 
       <form onSubmit={guardar} className="grid gap-6">
-        <Card>
-          <CardHeader><CardTitle>Configuración</CardTitle></CardHeader>
-          <CardContent className="grid gap-4 max-w-2xl">
-            {interruptor('habilitado', 'Habilitado')}
+        <Seccion titulo="Configuración">
+          <div className="grid gap-4">
             {campo('nombre', 'Nombre')}
             {campo('nombre_asistente', 'Nombre del asistente en el widget')}
             {campo('base_url', 'base_url del sistema')}
@@ -198,7 +247,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="auth.algoritmo">Algoritmo de los tokens</Label>
-              <select id="auth.algoritmo" disabled={!puede} value={String(leer(config, 'auth.algoritmo') ?? '')}
+              <Select id="auth.algoritmo" disabled={!puede} value={String(leer(config, 'auth.algoritmo') ?? '')}
                 onChange={(e) => {
                   const a = e.target.value
                   let c = poner(config, 'auth.algoritmo', a)
@@ -206,10 +255,9 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
                   if (a === 'HS256') c = poner(poner(c, 'auth.jwks_url', ''), 'auth.clave_publica', '')
                   else setNuevos({ ...nuevos, auth_hs256: '' })
                   setConfig(c)
-                }}
-                className="h-9 rounded-md border bg-background px-3 text-sm">
+                }}>
                 {['RS256', 'EdDSA', 'HS256'].map((a) => <option key={a}>{a}</option>)}
-              </select>
+              </Select>
             </div>
             {leer(config, 'auth.algoritmo') !== 'HS256' && (
               <>
@@ -235,19 +283,91 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             {campo('llm.modelo', 'Modelo del LLM (vacío = global)')}
             {campo('llm.base_url', 'URL del LLM propio (vacío = global)')}
             <div className="grid gap-2">
+              <Label htmlFor="prompt_dominio">Prompt de dominio</Label>
+              <Textarea id="prompt_dominio" disabled={!puede} value={String(leer(config, 'prompt_dominio') ?? '')}
+                onChange={(e) => setConfig(poner(config, 'prompt_dominio', e.target.value))} />
+            </div>
+            {puede && urlCambio && (
+              <Alert>
+                <AlertDescription className="grid gap-2">
+                  Cambiar base_url descarta el token del manifiesto actual: cárguelo de nuevo aquí o deshabilite el sistema.
+                  {vista.secretos.token_canal?.configurado && ' También descarta el token de canal: cárguelo de nuevo en la sección Canal de mensajería tras guardar.'}
+                  <Input type="password" autoComplete="off" placeholder="Nuevo token del manifiesto" value={nuevos.token_manifiesto ?? ''}
+                    onChange={(e) => setNuevos({ ...nuevos, token_manifiesto: e.target.value })} />
+                </AlertDescription>
+              </Alert>
+            )}
+            {puede && llmCambio && (
+              <Alert>
+                <AlertDescription className="grid gap-2">
+                  Cambiar la URL del LLM descarta su API key: cárguela de nuevo aquí si el nuevo servidor la necesita.
+                  <Input type="password" autoComplete="off" placeholder="Nueva API key del LLM" value={nuevos.llm_api_key ?? ''}
+                    onChange={(e) => setNuevos({ ...nuevos, llm_api_key: e.target.value })} />
+                </AlertDescription>
+              </Alert>
+            )}
+            {puede && <Button type="submit" className="w-fit" disabled={!hayCambios}>Guardar</Button>}
+          </div>
+        </Seccion>
+
+        <Seccion titulo="Funciones y adjuntos">
+          <div className="grid gap-4">
+            {interruptor('memoria_habilitada', 'Memoria por usuario')}
+            {interruptor('busqueda_web', 'Búsqueda web')}
+            {interruptor('consultas_recientes', 'Consultas recientes')}
+            {interruptor('exportar_excel', 'Exportar a Excel')}
+            {interruptor('adjuntos.habilitado', 'Adjuntar imágenes (además requiere un modelo con visión)')}
+            {interruptor('leer_imagenes', 'Leer imágenes de cualquier tema y conservar su texto en la conversación (el texto leído, no la imagen, queda guardado y se envía al proveedor del modelo)')}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {campo('adjuntos.max_archivos', 'Imágenes por mensaje (vacío = máximo global)', 'number')}
+              {campo('adjuntos.max_kb', 'KB por imagen (vacío = máximo global)', 'number')}
+            </div>
+            {uso && (
+              <p className="text-sm text-muted-foreground">
+                Uso desde {uso.desde} (el registro de imágenes empieza con este despliegue): {uso.imagenes} imágenes; máximo en un
+                mensaje {uso.imagenes_max_turno}, la mayor {uso.imagen_max_kb ?? 0} KB; rechazos: {uso.rechazos.demasiadas_imagenes} por
+                cantidad y {uso.rechazos.imagen_demasiado_grande} por tamaño; Excel generados: {uso.excel}.
+              </p>
+            )}
+            {puede && <Button type="submit" className="w-fit" disabled={!hayCambios}>Guardar</Button>}
+          </div>
+        </Seccion>
+
+        <Seccion titulo="Límites y retención">
+          <div className="grid gap-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              {campo('limites.mensajes_por_usuario_min', 'Mensajes/usuario/min', 'number')}
+              {campo('limites.mensajes_por_usuario_dia', 'Mensajes/usuario/día', 'number')}
+              {campo('limites.tokens_por_mes', 'Tokens/mes', 'number')}
+              {campo('limites.destructivas_por_usuario_hora', 'Destructivas/usuario/hora (0 = bloqueadas)', 'number')}
+            </div>
+            {uso && (
+              <p className="text-sm text-muted-foreground">
+                Tokens este mes: {uso.tokens_mes.usados.toLocaleString()} de {uso.tokens_mes.limite.toLocaleString()}.
+              </p>
+            )}
+            {campo('retencion_dias', 'Retención (días)', 'number')}
+            {puede && <Button type="submit" className="w-fit" disabled={!hayCambios}>Guardar</Button>}
+          </div>
+        </Seccion>
+      </form>
+
+      <Seccion titulo="Canal de mensajería (WhatsApp)">
+        <form onSubmit={guardar} className="grid gap-4">
+            <div className="grid gap-2">
               <Label htmlFor="canal">Canal de mensajería</Label>
-              <select id="canal" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={!puede} value={proveedor}
+              <Select id="canal" disabled={!puede} value={proveedor}
                 onChange={(e) => elegirProveedor(e.target.value)}>
                 <option value="">Ninguno</option>
                 <option value="meta">WhatsApp (Meta Cloud API)</option>
                 <option value="openwa">WhatsApp (OpenWA, no oficial)</option>
-              </select>
+              </Select>
             </div>
             {proveedor === 'openwa' && (
               <div className="grid gap-4 rounded-md border p-4">
                 <Alert variant="destructive">
                   <AlertDescription>
-                    No oficial: automatiza WhatsApp Web y puede provocar el baneo del número. Solo lectura. Uso recomendado: pruebas.
+                    No oficial: automatiza WhatsApp Web y puede provocar el baneo del número. Sin botones: las escrituras se confirman escribiendo un código. Uso recomendado: pruebas.
                   </AlertDescription>
                 </Alert>
                 {campo('canal_mensajeria.base_url', 'URL del servidor OpenWA (un host interno debe figurar en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS)')}
@@ -270,15 +390,6 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
                 )}
               </div>
             )}
-            {proveedor === 'meta' && (
-              <div className="grid gap-2">
-                <Label htmlFor="canal_acciones">Escrituras que se pueden proponer por WhatsApp (nombres de tool separados por coma; vacío = solo lectura)</Label>
-                <Input id="canal_acciones" disabled={!puede}
-                  value={((leer(config, 'canal_mensajeria.acciones') as string[] | undefined) ?? []).join(', ')}
-                  onChange={(e) => setConfig(poner(config, 'canal_mensajeria.acciones',
-                    e.target.value.split(',').map((x) => x.trim()).filter(Boolean)))} />
-              </div>
-            )}
             {proveedor !== '' && !hayCambios && vista.config.canal_mensajeria && <CanalEstado id={id} puede={puede} />}
             {proveedor === 'meta' && (
               <div className="grid gap-4 rounded-md border p-4">
@@ -290,106 +401,27 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
                 </p>
               </div>
             )}
-            {interruptor('memoria_habilitada', 'Memoria por usuario')}
-            {interruptor('busqueda_web', 'Búsqueda web')}
-            {interruptor('consultas_recientes', 'Consultas recientes')}
-            {interruptor('exportar_excel', 'Exportar a Excel')}
-            {interruptor('adjuntos.habilitado', 'Adjuntar imágenes (además requiere un modelo con visión)')}
-            {interruptor('leer_imagenes', 'Leer imágenes de cualquier tema y conservar su texto en la conversación (el texto leído, no la imagen, queda guardado y se envía al proveedor del modelo)')}
-            <div className="grid gap-4 sm:grid-cols-2">
-              {campo('adjuntos.max_archivos', 'Imágenes por mensaje (vacío = máximo global)', 'number')}
-              {campo('adjuntos.max_kb', 'KB por imagen (vacío = máximo global)', 'number')}
-            </div>
-            {uso && (
-              <p className="text-sm text-muted-foreground">
-                Uso desde {uso.desde} (el registro de imágenes empieza con este despliegue): {uso.imagenes} imágenes; máximo en un
-                mensaje {uso.imagenes_max_turno}, la mayor {uso.imagen_max_kb ?? 0} KB; rechazos: {uso.rechazos.demasiadas_imagenes} por
-                cantidad y {uso.rechazos.imagen_demasiado_grande} por tamaño; Excel generados: {uso.excel}.
-              </p>
-            )}
-            <div className="grid gap-4 sm:grid-cols-3">
-              {campo('limites.mensajes_por_usuario_min', 'Mensajes/usuario/min', 'number')}
-              {campo('limites.mensajes_por_usuario_dia', 'Mensajes/usuario/día', 'number')}
-              {campo('limites.tokens_por_mes', 'Tokens/mes', 'number')}
-              {campo('limites.destructivas_por_usuario_hora', 'Destructivas/usuario/hora (0 = bloqueadas)', 'number')}
-            </div>
-            {uso && (
-              <p className="text-sm text-muted-foreground">
-                Tokens este mes: {uso.tokens_mes.usados.toLocaleString()} de {uso.tokens_mes.limite.toLocaleString()}.
-              </p>
-            )}
-            {campo('retencion_dias', 'Retención (días)', 'number')}
-            <div className="grid gap-2">
-              <Label htmlFor="prompt_dominio">Prompt de dominio</Label>
-              <Textarea id="prompt_dominio" disabled={!puede} value={String(leer(config, 'prompt_dominio') ?? '')}
-                onChange={(e) => setConfig(poner(config, 'prompt_dominio', e.target.value))} />
-            </div>
-            {puede && urlCambio && (
-              <Alert>
-                <AlertDescription className="grid gap-2">
-                  Cambiar base_url descarta el token del manifiesto actual: cárguelo de nuevo aquí o deshabilite el sistema.
-                  {vista.secretos.token_canal?.configurado && ' También descarta el token de canal: cárguelo de nuevo en Secretos tras guardar.'}
-                  <Input type="password" autoComplete="off" placeholder="Nuevo token del manifiesto" value={nuevos.token_manifiesto ?? ''}
-                    onChange={(e) => setNuevos({ ...nuevos, token_manifiesto: e.target.value })} />
-                </AlertDescription>
-              </Alert>
-            )}
-            {puede && llmCambio && (
-              <Alert>
-                <AlertDescription className="grid gap-2">
-                  Cambiar la URL del LLM descarta su API key: cárguela de nuevo aquí si el nuevo servidor la necesita.
-                  <Input type="password" autoComplete="off" placeholder="Nueva API key del LLM" value={nuevos.llm_api_key ?? ''}
-                    onChange={(e) => setNuevos({ ...nuevos, llm_api_key: e.target.value })} />
-                </AlertDescription>
-              </Alert>
-            )}
-            {puede && <Button type="submit" className="w-fit" disabled={!hayCambios}>Guardar</Button>}
-          </CardContent>
-        </Card>
-      </form>
+          {puede && <Button type="submit" className="w-fit" disabled={!hayCambios}>Guardar</Button>}
+        </form>
+        {proveedor !== '' && (
+          <div className="mt-6 grid gap-4">
+            <h3 className="text-sm font-medium">Secretos del canal</h3>
+            <p className="text-sm text-muted-foreground">Se guardan cifrados. Se pueden escribir y reemplazar, nunca leer.</p>
+            {Object.entries(CAMPOS_SECRETOS).filter(([c]) => c in vista.secretos && SECRETOS_CANAL_UI.includes(c)).map(([c, etiqueta]) => filaSecreto(c, etiqueta))}
+          </div>
+        )}
+      </Seccion>
 
-      <Card>
-        <CardHeader><CardTitle>Secretos</CardTitle></CardHeader>
-        <CardContent className="grid gap-4 max-w-2xl">
+      <Seccion titulo="Secretos">
+        <div className="grid gap-4">
           <p className="text-sm text-muted-foreground">Se guardan cifrados. Se pueden escribir y reemplazar, nunca leer.</p>
-          {Object.entries(CAMPOS_SECRETOS).filter(([c]) => c in vista.secretos).map(([c, etiqueta]) => {
-            const s = vista.secretos[c]
-            return (
-              <div key={c} className="grid gap-2 border-b pb-4 last:border-0">
-                <Label>{etiqueta}</Label>
-                <div className="text-sm">
-                  {s?.configurado ? <>configurado · huella <span className="font-mono">{s.huella}</span> · {s.actualizado_en && new Date(s.actualizado_en).toLocaleString()}</> : <span className="text-muted-foreground">sin configurar</span>}
-                </div>
-                {puede && (
-                  <div className="flex gap-2">
-                    <Input type="password" autoComplete="off" placeholder="Nuevo valor" value={nuevos[`s:${c}`] ?? ''}
-                      onChange={(e) => setNuevos({ ...nuevos, [`s:${c}`]: e.target.value })} />
-                    <Button type="button" variant="outline" disabled={!nuevos[`s:${c}`]}
-                      onClick={() => escribir(() => api('PUT', `/sistemas/${id}/secretos/${c}`, { version: vista.version, valor: nuevos[`s:${c}`] }), 'Secreto guardado.')}>
-                      Guardar
-                    </Button>
-                    {s?.configurado && (
-                      <Button type="button" variant="destructive"
-                        onClick={() => escribir(() => api('DELETE', `/sistemas/${id}/secretos/${c}?version=${vista.version}`), 'Secreto borrado.')}>
-                        Borrar
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </CardContent>
-      </Card>
+          {Object.entries(CAMPOS_SECRETOS).filter(([c]) => c in vista.secretos && !SECRETOS_CANAL_UI.includes(c)).map(([c, etiqueta]) => filaSecreto(c, etiqueta))}
+        </div>
+      </Seccion>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            Tools
-            <Button type="button" size="sm" variant="outline" disabled={releyendo} onClick={() => void releer()}>{releyendo ? 'Releyendo…' : 'Releer manifiesto'}</Button>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3">
+      <Seccion titulo="Tools">
+        <div className="grid gap-3">
+          <Button type="button" size="sm" variant="outline" className="w-fit" disabled={releyendo} onClick={() => void releer()}>{releyendo ? 'Releyendo…' : 'Releer manifiesto'}</Button>
           {tools && (
             <p className="text-sm text-muted-foreground">
               Destructivas en la última hora: {tools.destructivas_hora.total} en total
@@ -409,34 +441,88 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
               </AlertDescription>
             </Alert>
           )}
-          {tools?.tools.map((t) => (
-            <div key={t.nombre} className="flex items-start gap-3 border-b pb-3 last:border-0">
-              <Switch aria-label={t.nombre} checked={t.habilitada} disabled={!puede || (t.efecto === 'escritura' && !t.accionable)}
-                onCheckedChange={(v) => {
-                  if (v && t.destructiva) {
-                    setNombreConf('')
-                    setAprobar(t)
-                  } else void escribir(() => api('PUT', `/sistemas/${id}/tools/${t.nombre}`, { habilitada: v }), `Tool ${t.nombre} ${v ? 'habilitada' : 'deshabilitada'}.`)
-                }} />
-              <div className="grid gap-1">
-                {/* nombre y descripción los escribe un tercero: siempre como texto */}
-                <div><span className="font-mono">{t.nombre}</span>{' '}
-                  <Badge variant={t.efecto === 'escritura' ? 'destructive' : 'secondary'}>{t.efecto}</Badge>
-                  {t.efecto === 'escritura' && !t.accionable && <Badge variant="outline" className="ml-1">no accionable</Badge>}
-                  {t.destructiva && <Badge variant="destructive" className="ml-1">destructiva</Badge>}
-                  {t.aprobacion === 'obsoleta' && <Badge variant="outline" className="ml-1">requiere reaprobación</Badge>}
-                </div>
-                <p className="text-sm text-muted-foreground">{t.descripcion}</p>
-              </div>
+          {tools && tools.tools.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="outline" onClick={() => setVerTools(true)}>
+                Tools del sistema ({tools.tools.filter((t) => t.habilitada).length} de {tools.tools.length} habilitadas)
+              </Button>
+              <span className="text-sm text-muted-foreground">Los cambios se aplican al instante.</span>
             </div>
-          ))}
+          )}
+          {proveedor !== '' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="outline" disabled={!puede} onClick={() => setElegirAcc(true)}>
+                Tools por WhatsApp
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Escrituras: {accionesCanal.length ? accionesCanal.join(', ') : 'ninguna'}
+                {bloqueadasCanal.length > 0 && ` · Lecturas bloqueadas: ${bloqueadasCanal.join(', ')}`}
+              </span>
+            </div>
+          )}
           {tools && tools.huerfanas.length > 0 && (
             <p className="text-sm text-muted-foreground">
               Con excepción pero ausentes del manifiesto: {tools.huerfanas.map((h) => `${h.nombre} (${h.habilitada ? 'sí' : 'no'})`).join(', ')}
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Seccion>
+
+      <Dialog open={verTools} onOpenChange={setVerTools}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Tools del sistema</DialogTitle>
+            <DialogDescription>
+              Marque las que el asistente puede usar (pase el mouse por un nombre para ver qué hace). Cada cambio se
+              guarda al instante. Las destructivas piden aprobación y las escrituras «no accionables» no se pueden activar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid max-h-[60vh] gap-4 overflow-y-auto overflow-x-hidden">
+            <RejillaTools tools={tools?.tools ?? []} activa={(t) => t.habilitada}
+              deshabilitada={(t) => !puede || (t.efecto === 'escritura' && !t.accionable)}
+              alternar={(t, v) => {
+                if (v && t.destructiva) {
+                  setNombreConf('')
+                  setAprobar(t)
+                } else void escribir(() => api('PUT', `/sistemas/${id}/tools/${t.nombre}`, { habilitada: v }), `Tool ${t.nombre} ${v ? 'habilitada' : 'deshabilitada'}.`)
+              }}
+              sufijo={(t) => (
+                <>
+                  {t.destructiva && <Badge variant="destructive">destructiva</Badge>}
+                  {t.efecto === 'escritura' && !t.accionable && <Badge variant="outline">no accionable</Badge>}
+                  {t.aprobacion === 'obsoleta' && <Badge variant="outline">reaprobar</Badge>}
+                </>
+              )} />
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setVerTools(false)}>Listo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={elegirAcc} onOpenChange={setElegirAcc}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Tools por WhatsApp</DialogTitle>
+            <DialogDescription>
+              Marque cuáles de las tools habilitadas en el widget también se ofrecen por WhatsApp (pase el mouse por un
+              nombre para ver qué hace). Las lecturas vienen marcadas; las escrituras hay que marcarlas y cada una se
+              confirma en el chat antes de ejecutarse. Las destructivas nunca se ofrecen por este canal. Los cambios se
+              aplican al guardar la configuración.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid max-h-[50vh] grid-cols-1 gap-x-4 gap-y-2 overflow-y-auto overflow-x-hidden sm:grid-cols-2">
+            <RejillaTools tools={ofrecibles} activa={activaEnCanal} alternar={alternarEnCanal} />
+            {tools && ofrecibles.length === 0 && (
+              <p className="col-span-full text-sm text-muted-foreground">No hay tools habilitadas en el widget.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setElegirAcc(false)}>Cerrar</Button>
+            <Button type="button" disabled={!hayCambios || !puede} onClick={() => { setElegirAcc(false); guardar() }}>Guardar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={aprobar !== null} onOpenChange={(o) => { if (!o) setAprobar(null) }}>
         <DialogContent>
@@ -461,6 +547,59 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// Tarjeta colapsable, cerrada al entrar: el título y el chevron (a la derecha) pliegan todo.
+function Seccion({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <Card>
+      <Collapsible>
+        <CardHeader>
+          <CollapsibleTrigger className="group flex w-full items-center justify-between text-left">
+            <CardTitle>{titulo}</CardTitle>
+            <ChevronDownIcon className="size-4 transition-transform group-data-[panel-open]:rotate-180" />
+          </CollapsibleTrigger>
+        </CardHeader>
+        <CollapsiblePanel>
+          <CardContent className="pt-4">{children}</CardContent> {/* el Collapsible rompe el gap entre cabecera y contenido de la tarjeta */}
+        </CollapsiblePanel>
+      </Collapsible>
+    </Card>
+  )
+}
+
+// Rejilla de tools en dos grupos (lecturas y escrituras): checkbox con el nombre y, al pasar el mouse, su descripción.
+function RejillaTools({ tools, activa, alternar, deshabilitada, sufijo }: {
+  tools: ToolVista[]
+  activa: (t: ToolVista) => boolean
+  alternar: (t: ToolVista, v: boolean) => void
+  deshabilitada?: (t: ToolVista) => boolean
+  sufijo?: (t: ToolVista) => React.ReactNode
+}) {
+  return (
+    <TooltipProvider delay={200}>
+      {(['lectura', 'escritura'] as const).map((efecto) => {
+        const grupo = tools.filter((t) => t.efecto === efecto)
+        return grupo.length > 0 && (
+          <div key={efecto} className="col-span-full grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+            <p className="col-span-full text-sm font-medium">{efecto === 'lectura' ? 'Lecturas' : 'Escrituras'}</p>
+            {grupo.map((t) => (
+              // nombre y descripción los escribe un tercero: siempre como texto
+              <Tooltip key={t.nombre}>
+                <TooltipTrigger render={<label className="flex min-w-0 cursor-pointer items-center gap-2 font-mono text-sm" />}>
+                  <Checkbox checked={activa(t)} disabled={deshabilitada?.(t)}
+                    onChange={(e) => alternar(t, e.target.checked)} />
+                  <span className="truncate">{t.nombre}</span>
+                  {sufijo?.(t)}
+                </TooltipTrigger>
+                <TooltipContent><span className="font-mono">{t.nombre}</span>: {t.descripcion}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        )
+      })}
+    </TooltipProvider>
   )
 }
 
