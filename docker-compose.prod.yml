@@ -7,3 +7,7 @@ services:
   asistente:
     ports:
       - "127.0.0.1:${ASISTENTE_PUERTO:-8000}:8000"
+  # Dashboard/API de OpenWA solo en loopback (túnel ssh: ssh -L 2785:127.0.0.1:2785 ...). Nunca detrás del proxy público.
+  openwa:
+    ports:
+      - "127.0.0.1:2785:2785"

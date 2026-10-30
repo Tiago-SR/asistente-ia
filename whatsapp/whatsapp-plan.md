@@ -27,6 +27,8 @@ feature (suite mínima), brevedad en las respuestas del asistente. Adaptado al c
 4. Reglas: no `git commit` (sugerir mensaje), responder en español, tests sólo al terminar cada feature, consultar al
    `asesor` antes de decisiones difíciles de revertir.
 
+> Propuesta pendiente (no implementada): un número compartido entre sistemas, ver `whatsapp/numero-compartido.md`.
+
 ## Objetivo
 
 El usuario habla por WhatsApp con el asistente igual que en el chat web: **consultar y dar de alta/modificar** (con

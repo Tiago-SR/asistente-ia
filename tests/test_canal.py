@@ -212,7 +212,7 @@ def _owa(handler=None) -> CanalOpenWA:
 
 
 def _owa_payload(**data) -> bytes:
-    d = {"id": "3EB0A1", "chatId": "59899111222@c.us", "from": "59899111222@c.us", "body": "hola", "type": "chat",
+    d = {"id": "3EB0A1", "chatId": "59899111222@c.us", "from": "59899111222@c.us", "body": "hola", "type": "text",
          "fromMe": False, "isGroup": False, **data}
     return json.dumps({"event": "message.received", "sessionId": "s1", "data": d}).encode()
 
@@ -469,3 +469,12 @@ async def test_salidas_fallidas_se_guardan_con_su_codigo(sesiones):
     await m.actualizar_estado("mock-a", "w.out2", "entregado")
     f = await m.fallidos("mock-a", datetime.now(UTC) - timedelta(hours=1))
     assert [(x.id, x.error) for x in f] == [("w.out1", "131047")]
+
+
+def test_a_whatsapp_tabla_encabezados_y_negrita():
+    from asistente.core.formato_whatsapp import a_whatsapp
+    md = ("## Resumen\n**Total:** 660 ha\n\n| Campo | Ha | Cultivo |\n|---|---|---|\n| El Matorral | 540 | Soja |\n"
+          "| San Pedro | 120 | Maíz |\n\n* ver [mapa](https://x.uy/m)\n```\n| a | b |\n```")
+    assert a_whatsapp(md) == ("*Resumen*\n*Total:* 660 ha\n\n- El Matorral: Ha 540, Cultivo Soja\n- San Pedro: Ha 120, Cultivo Maíz\n\n"
+                              "- ver mapa (https://x.uy/m)\n```\n| a | b |\n```")
+    assert a_whatsapp("| Campo | Ha |\n|---|---|\n| El Matorral | 540 |") == "- El Matorral: 540"

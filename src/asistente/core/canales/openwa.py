@@ -1,6 +1,6 @@
 """OpenWA (WhatsApp Web autoalojado): webhook firmado con HMAC y REST con `X-API-Key`. Solo texto e imágenes entrantes.
 
-Los formatos salen de la documentación de OpenWA, no de capturas reales: verificar con un webhook real."""
+Los formatos salen del código de OpenWA v0.26.0 (IncomingMessage, `type` = text|image|document...), no de capturas reales: verificar con un webhook real."""
 
 import hashlib
 import hmac
@@ -15,7 +15,7 @@ from asistente.core.canales.base import Entrante, ErrorCanal, EstadoEnvio
 from asistente.core.canales.config import SECRETOS_CANAL, CanalOpenWAConfig
 
 MAX_TEXTO = 4096
-_TIPOS = {"chat": "texto", "image": "imagen", "document": "documento"}
+_TIPOS = {"text": "texto", "image": "imagen", "document": "documento"}
 _SUFIJO = re.compile(r"@(c\.us|lid)$")
 
 

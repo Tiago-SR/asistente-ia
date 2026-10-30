@@ -174,13 +174,19 @@ Plan en `whatsapp/whatsapp-plan.md`. Cada sistema elige su proveedor de canal (s
 (`phone_number_id`, `graph_version`) y sus secretos cifrados (`wa_token`, `wa_app_secret`, `wa_verify_token`), todo desde
 la página del sistema en el panel. Una App de Meta por sistema.
 
-Proveedores: `meta` (oficial) y `openwa` ([OpenWA](https://www.open-wa.org/), MIT, autoalojado; **no oficial: riesgo
-de baneo del número**, solo lectura, pensado para pruebas y cobertura básica). Con OpenWA el alta es manual: levantar
-OpenWA, crear y arrancar la sesión (QR), registrar un webhook `POST /api/sessions/{id}/webhooks` a
-`https://<dominio>/canal/<sistema>/webhook` con `events:["message.received"]` y un `secret` (el mismo que se carga en el
-panel), y activar `RESOLVE_LID_TO_PHONE=true`, `SEND_PACING_ENABLED` y `SIMULATE_TYPING`. Si OpenWA está en una red
-interna, su host va en `ASISTENTE_HOSTS_INTERNOS_PERMITIDOS`. Ojo: si el webhook trae el medio en base64 puede superar el
-tope de cuerpo (1 MB) y OpenWA reintentará; configurar OpenWA para no enviar el contenido del medio.
+Proveedores: `meta` (oficial) y `openwa` ([OpenWA](https://github.com/rmyndharis/OpenWA), probado con v0.26.0, MIT, autoalojado; **no oficial: riesgo
+de baneo del número**, solo lectura, pensado para pruebas y cobertura básica). OpenWA viene en los compose (dev y prod) y arranca siempre con el asistente, sin `depends_on` (si cae, la web y la voz siguen;
+los envíos por el canal dan error controlado). Está solo en la red `publica`, con su dashboard únicamente en `127.0.0.1:2785`
+(en prod, por túnel ssh; nunca detrás del proxy público). En prod `OPENWA_API_KEY` (>=32 caracteres) es obligatoria; en dev
+la clave se genera sola (`docker compose -f docker-compose.dev.yml exec openwa cat /app/data/.api-key`). Alta: abrir el
+dashboard, crear y arrancar la sesión (QR desde WhatsApp → Dispositivos vinculados), registrar el webhook
+`POST /api/sessions/{id}/webhooks` a `http://asistente:8000/canal/<sistema>/webhook` con `events:["message.received"]` y un
+`secret` de al menos 16 caracteres, y cargar en el panel `base_url=http://openwa:2785`, el `session_id` (UUID) y los
+secretos `owa_api_key` y `owa_webhook_secret`. `RESOLVE_LID_TO_PHONE`, `SSRF_ALLOWED_HOSTS=asistente` y el host `openwa` en
+`ASISTENTE_HOSTS_INTERNOS_PERMITIDOS` ya van en el compose (si ese último se fija en `.env`, incluir `openwa`). La sesión de
+WhatsApp vive en el volumen `openwa-data` (es una credencial: no respaldar sin cifrar; si se pierde, escanear el QR otra vez).
+Los medios llegan en base64 por el webhook solo hasta 1 MiB; por encima, el canal los baja por REST
+(`WEBHOOK_MEDIA_INLINE_MAX_BYTES=0` para no enviarlos nunca).
 
 Webhook: `GET/POST /canal/{sistema_id}/webhook` (sin sesión ni CSRF; autentica la firma del proveedor; todo fallo es 403).
 El `location /` del nginx de ejemplo ya lo deja pasar (`/admin` y `/panel` siguen cerrados). En dev, un túnel HTTPS

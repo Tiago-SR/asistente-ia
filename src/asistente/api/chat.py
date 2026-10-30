@@ -55,7 +55,7 @@ def _frame(evento: str, datos) -> bytes:
 
 
 async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, *,
-                      canal: str = "texto", zona_cliente: str | None = None):
+                      canal: Literal["texto", "voz", "whatsapp"] = "texto", zona_cliente: str | None = None):
     """Lo común a todo turno (chat web y canales de mensajería): zona, memoria, prompt, contexto y config.
     Devuelve (ctx, config, memoria, web, excel, version del prompt)."""
     cfg = svc.settings

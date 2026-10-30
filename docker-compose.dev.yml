@@ -15,7 +15,7 @@ services:
       ASISTENTE_ADMIN_HOSTS: ${ASISTENTE_ADMIN_HOSTS:-}
       # Destinos internos a los que el servicio puede conectarse (anti-SSRF, core/red.py): los sistemas de ejemplo,
       # el host (stmgis, LLM local) y los servicios de apoyo. Fuera de esta lista solo se llega a IPs públicas.
-      ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-mock-a,sistema-php,host.docker.internal,searxng,whisper}
+      ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-mock-a,sistema-php,host.docker.internal,searxng,whisper,openwa}
       # LLM local (llama-server en el host). Sobrescribible desde .env o el entorno del shell.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8090/v1}
       # Búsqueda web: el SearXNG del perfil `busqueda` (si no está arriba, la búsqueda responde «no disponible»).
@@ -70,6 +70,50 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # OpenWA: WhatsApp Web no oficial (canal `openwa`), siempre arriba con el asistente pero sin depends_on (si falla, el resto
+  # sigue). Dashboard/API: http://localhost:2785 (la clave maestra se genera sola y queda en el volumen:
+  #   docker compose -f docker-compose.dev.yml exec openwa cat /app/data/.api-key). base_url del canal: http://openwa:2785.
+  # El webhook va a http://asistente:8000/canal/<sistema>/webhook. Si cambia el volumen hay que volver a escanear el QR.
+  openwa:
+    image: ${OPENWA_IMAGEN:-ghcr.io/rmyndharis/openwa:0.26.0@sha256:46e3d3d01b1948c96a0bea94f6650aa772370f40dd3956052d2da24fe4ee2acf}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: "2785"
+      HOME: /tmp
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+      AUTO_START_SESSIONS: "true"
+      DATABASE_TYPE: sqlite
+      DATABASE_SYNCHRONIZE: "true"
+      SESSION_DATA_PATH: /app/data/sessions
+      STORAGE_LOCAL_PATH: /app/data/media
+      PLUGINS_DIR: /app/data/plugins
+      PUPPETEER_HEADLESS: "true"
+      PUPPETEER_ARGS: --no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu
+      RESOLVE_LID_TO_PHONE: "true"
+      SSRF_ALLOWED_HOSTS: asistente
+    volumes:
+      - openwa-data-dev:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 512
+    mem_limit: 1536m
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:2785:2785"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2785/api/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # Dos sistemas mock con ids y secretos distintos (tests de aislamiento).
   mock-a:
@@ -138,5 +182,6 @@ services:
 
 volumes:
   pgdata-dev:
+  openwa-data-dev:
   panel-node-modules:
   whisper-cache:

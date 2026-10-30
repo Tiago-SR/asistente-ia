@@ -23,6 +23,7 @@ from asistente.core import events, medios
 from asistente.core import memoria as memorias
 from asistente.core.agent import reservar_cuota, run_turn
 from asistente.core.canales.base import Canal, Entrante, ErrorCanal
+from asistente.core.formato_whatsapp import a_whatsapp
 from asistente.core.llm.base import ToolDef, Uso
 from asistente.core.ports import LimiteExcedido
 from asistente.servicios import LLMNoConfigurado, Servicios
@@ -241,7 +242,7 @@ async def _boton(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
         texto = VENCIDA
     else:
         texto = f"No se pudo realizar la acción: {r.get('detalle') or r.get('error')}. No se guardó nada."
-    await canal.enviar_texto(m.contacto, texto[:MAX_RESPUESTA])
+    await canal.enviar_texto(m.contacto, a_whatsapp(texto)[:MAX_RESPUESTA])
 
 
 async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> None:
@@ -270,7 +271,7 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     if es_medio and not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
         await canal.enviar_texto(m.contacto, SIN_IMAGENES)
         return
-    ctx, config, _, web, excel, version = await armar_turno(svc, sistema, u, modelo, request_id)
+    ctx, config, _, web, excel, version = await armar_turno(svc, sistema, u, modelo, request_id, canal="whatsapp")
     # La cuota se reserva antes de descargar y leer el medio: es lo caro, y un medio inválido también cuenta.
     if await reservar_cuota(ctx, svc.limites, svc.metricas):
         await canal.enviar_texto(m.contacto, FALLO)
@@ -328,6 +329,6 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     nuevos = [await adj.para_guardar(x, svc.adjuntos, sistema_id, u.usuario_ref, leidos) for x in res.nuevos]
     await asyncio.shield(svc.repo.guardar_turno(sistema_id, u.usuario_ref, conv_id, "WhatsApp", nuevos,
                                                 res.uso + uso_lectura, modelo, version))
-    await canal.enviar_texto(m.contacto, (res.texto or FALLO)[:MAX_RESPUESTA])
+    await canal.enviar_texto(m.contacto, a_whatsapp(res.texto or FALLO)[:MAX_RESPUESTA])
     if escribe:
         await _ofrecer(svc, sistema_id, canal, u, m.contacto, clave, tarjetas)

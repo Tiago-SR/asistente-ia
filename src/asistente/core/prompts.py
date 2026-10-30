@@ -28,6 +28,9 @@ class Prompts:
         # Capa del canal de voz (opcional): cómo pedir el resumen hablado. Ver core/voz_resumen.py.
         archivo_voz = self._dir / "voz.md"
         self._voz = archivo_voz.read_text(encoding="utf-8").strip() if archivo_voz.is_file() else ""
+        # Capa del canal de WhatsApp (opcional): sin tablas ni encabezados, formato propio de WhatsApp.
+        archivo_wa = self._dir / "whatsapp.md"
+        self._whatsapp = archivo_wa.read_text(encoding="utf-8").strip() if archivo_wa.is_file() else ""
         # Capa de la búsqueda web (solo en los sistemas que la tienen): cómo separar internet de los datos del sistema.
         archivo_web = self._dir / "web.md"
         self._web = archivo_web.read_text(encoding="utf-8").strip() if archivo_web.is_file() else ""
@@ -97,6 +100,9 @@ class Prompts:
         if canal == "voz" and self._voz:
             partes.append("## Canal de voz\n" + self._voz)
             version += f"+v{_hash(self._voz)}"
+        if canal == "whatsapp" and self._whatsapp:
+            partes.append("## Canal de WhatsApp\n" + self._whatsapp)
+            version += f"+a{_hash(self._whatsapp)}"
         partes.append("## Contexto de la sesión\n" + "\n".join(sesion))
         # Lo que el usuario pidió recordar es por usuario: va al final para no romper el prefijo cacheable (base y
         # dominio) y no entra en la versión, solo una marca.

@@ -30,6 +30,8 @@ services:
       # /admin y /panel solo por túnel ssh (deploy/VPS.md §5): 404 con otro Host o con cabeceras de proxy.
       # Si se cambia el puerto local del túnel o ASISTENTE_PUERTO, ajustar la lista en .env.
       ASISTENTE_ADMIN_HOSTS: ${ASISTENTE_ADMIN_HOSTS:-localhost:8001,127.0.0.1:8001,localhost:8000,127.0.0.1:8000}
+      # Si se fija en .env, debe incluir `openwa` (el canal WhatsApp no oficial) además de los demás destinos internos.
+      ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-openwa}
     volumes:
       - ./config/sistemas.yaml:/config/sistemas.yaml:ro
       - ./config/precios.yaml:/config/precios.yaml:ro
@@ -68,6 +70,54 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+  # OpenWA: WhatsApp Web autoalojado (canal `openwa`, NO oficial: riesgo de baneo del número). Siempre arriba junto al
+  # asistente, pero sin depends_on: si falla, la web y la voz siguen y los envíos por el canal dan error controlado.
+  # Solo en `publica` (necesita salir a internet; fuera de `interna` para no quedar al lado de Postgres). Sin puertos
+  # publicados en la base: el dashboard/API (equivalen a tener el WhatsApp del número) van solo por loopback + túnel ssh
+  # (docker-compose.prod.yml). El volumen guarda la SESIÓN de WhatsApp: es una credencial, no se respalda sin cifrar.
+  # El webhook llega a http://asistente:8000/canal/<sistema>/webhook y el asistente usa base_url http://openwa:2785.
+  openwa:
+    image: ${OPENWA_IMAGEN:-ghcr.io/rmyndharis/openwa:0.26.0@sha256:46e3d3d01b1948c96a0bea94f6650aa772370f40dd3956052d2da24fe4ee2acf}
+    restart: unless-stopped
+    logging: *logs
+    environment:
+      NODE_ENV: production
+      PORT: "2785"
+      HOME: /tmp                       # Chromium necesita HOME/XDG escribibles (read_only + tmpfs)
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+      API_MASTER_KEY: ${OPENWA_API_KEY:?definir OPENWA_API_KEY (openssl rand -hex 32)}
+      AUTO_START_SESSIONS: "true"      # tras un reinicio, reabre la sesión ya vinculada (sin QR)
+      DATABASE_TYPE: sqlite
+      DATABASE_SYNCHRONIZE: "true"
+      SESSION_DATA_PATH: /app/data/sessions
+      STORAGE_LOCAL_PATH: /app/data/media
+      PLUGINS_DIR: /app/data/plugins
+      PUPPETEER_HEADLESS: "true"
+      PUPPETEER_ARGS: --no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu
+      RESOLVE_LID_TO_PHONE: "true"     # sin esto los mensajes llegan con id @lid y el canal los descarta (sin teléfono)
+      SSRF_ALLOWED_HOSTS: asistente    # OpenWA bloquea webhooks a hosts privados salvo los listados
+    volumes:
+      - openwa-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]   # el entrypoint hace chown y baja a su usuario con gosu
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 512
+    mem_limit: 1536m
+    cpus: 1.0
+    stop_grace_period: 30s
+    networks: [publica]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2785/api/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # STT local (dictado, perfil `voz`). El asistente lo usa con STT_BASE_URL=http://whisper:8000/v1
   # y STT_MODELO igual a WHISPER_MODELO. Sin puertos publicados. Necesita egress (red `publica`)
@@ -123,4 +173,5 @@ networks:
 
 volumes:
   pgdata:
+  openwa-data:
   whisper-cache:

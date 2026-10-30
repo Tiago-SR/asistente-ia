@@ -6,6 +6,10 @@ services:
     # Loopback del host: el túnel ssh al panel (/admin, /panel) entra por aquí (deploy/VPS.md §5).
     ports:
       - "127.0.0.1:${ASISTENTE_PUERTO:-8000}:8000"
+  # Dashboard/API de OpenWA solo en loopback (túnel ssh). No conectar a la red `web`: no debe quedar detrás del proxy.
+  openwa:
+    ports:
+      - "127.0.0.1:2785:2785"
 
 networks:
   web:
