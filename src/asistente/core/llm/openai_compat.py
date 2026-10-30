@@ -1,7 +1,7 @@
 """Adaptador para cualquier endpoint `/v1/chat/completions` con streaming y tools.
 
 Probado contra llama-server (Qwen). El razonamiento del modelo (`reasoning_content`)
-se ignora a propósito: no se muestra, no se guarda y no se reenvía.
+no se muestra ni se guarda; solo se reenvía dentro del turno (DeepSeek lo exige con tool_calls).
 """
 
 import base64
@@ -78,6 +78,7 @@ class OpenAICompat:
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
         texto: list[str] = []
+        razon: list[str] = []
         parciales: dict[int, dict] = {}
         motivo: str | None = None
         uso = Uso()
@@ -96,6 +97,8 @@ class OpenAICompat:
                         uso = Uso(u.get("prompt_tokens") or 0, u.get("completion_tokens") or 0, _cache(u))
                     for ch in evento.get("choices") or []:
                         delta = ch.get("delta") or {}
+                        if frag := delta.get("reasoning_content"):
+                            razon.append(frag)
                         if frag := delta.get("content"):
                             texto.append(frag)
                             if on_delta:
@@ -110,7 +113,7 @@ class OpenAICompat:
             raise LLMError("el stream terminó sin finish_reason")
         llamadas = tuple(_cerrar(i, p) for i, p in sorted(parciales.items()))
         fin: MotivoFin = "tool" if llamadas else _MOTIVOS.get(motivo, "fin")
-        return Respuesta("".join(texto), llamadas, fin, uso)
+        return Respuesta("".join(texto), llamadas, fin, uso, "".join(razon))
 
 
 async def _eventos(r: httpx.Response) -> AsyncIterator[dict]:
@@ -165,6 +168,7 @@ def _traducir(mensajes: list[Mensaje]) -> list[dict]:
             salida.append(
                 {
                     "role": "assistant",
+                    **({"reasoning_content": m.razonamiento} if m.razonamiento else {}),
                     "content": m.texto or None,
                     "tool_calls": [
                         {

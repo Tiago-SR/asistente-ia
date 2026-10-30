@@ -286,7 +286,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
 
         llamadas = resp.llamadas[: config.max_llamadas_por_iteracion]
         # Se reenvía solo lo atendido: todo tool_call enviado debe tener su resultado.
-        nuevos.append(Mensaje("assistant", resp.texto, llamadas))
+        nuevos.append(Mensaje("assistant", resp.texto, llamadas, razonamiento=resp.razonamiento))
         await emit(events.TOOL, [
             _LEGIBLE_WEB[c.nombre] if web is not None and c.nombre in webtools.NOMBRES
             else "Generando el Excel" if excel is not None and c.nombre == excels.NOMBRE

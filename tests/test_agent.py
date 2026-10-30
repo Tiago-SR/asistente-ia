@@ -312,3 +312,14 @@ async def test_buscar_web_se_rechaza_tras_leer_una_pagina():
                          "lee https://ejemplo.com/a", emit, "conv-1", web=web)
     assert res.completo and web.busquedas == 0
     assert "web_tras_datos" in next(m.texto for m in res.nuevos if m.llamada_id == "c2")
+
+
+def test_traducir_reenvia_razonamiento_solo_si_existe():
+    from asistente.core.llm.base import LlamadaTool, Mensaje
+    from asistente.core.llm.openai_compat import _traducir
+
+    llamada = (LlamadaTool("c1", "t", {}),)
+    con = _traducir([Mensaje("assistant", "", llamada, razonamiento="pienso")])[0]
+    sin = _traducir([Mensaje("assistant", "", llamada)])[0]
+    assert con["reasoning_content"] == "pienso"
+    assert "reasoning_content" not in sin

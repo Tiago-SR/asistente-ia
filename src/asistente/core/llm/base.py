@@ -58,6 +58,7 @@ class Mensaje:
     llamadas: tuple[LlamadaTool, ...] = ()
     llamada_id: str | None = None
     adjuntos: tuple[Adjunto, ...] = ()
+    razonamiento: str = field(default="", repr=False)  # solo en memoria: DeepSeek lo exige de vuelta en el tramo de tools
 
 
 @dataclass(frozen=True)
@@ -84,9 +85,10 @@ class Respuesta:
     llamadas: tuple[LlamadaTool, ...] = ()
     motivo_fin: MotivoFin = "fin"
     uso: Uso = field(default_factory=Uso)
+    razonamiento: str = field(default="", repr=False)
 
     def como_mensaje(self) -> Mensaje:
-        return Mensaje("assistant", self.texto, self.llamadas)
+        return Mensaje("assistant", self.texto, self.llamadas, razonamiento=self.razonamiento)
 
 
 @dataclass(frozen=True)
