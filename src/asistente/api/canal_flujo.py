@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 ACUSES = ("Recibí tu solicitud, la estoy procesando.", "Ya lo miro.", "Dame un momento, lo reviso.",
           "Enseguida te respondo.", "Un segundo, lo estoy viendo.", "Entendido, lo busco.")
 PAUSA_SALUDO = timedelta(hours=4)  # sin hablar más que esto, el acuse empieza con un saludo
+PAUSA_ACUSE = timedelta(minutes=15)  # conversación activa: sin acuse, solo una espera extra
 SOLO_TEXTO = "Por ahora solo puedo leer mensajes de texto, fotos y PDF."
 SIN_IMAGENES = "Por ahora no puedo leer imágenes ni PDF. Escribime lo que necesites."
 MEDIO_FALLO = "No pude leer ese archivo. Probá con una foto JPEG o PNG, o un PDF sin clave."
@@ -328,7 +329,9 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     if u is None:
         return
     previo = await svc.canal_vinculos.tocar(sistema_id, m.contacto)
-    saludar = previo is None or datetime.now(UTC) - previo.astimezone(UTC) > PAUSA_SALUDO
+    inactivo = None if previo is None else datetime.now(UTC) - previo.astimezone(UTC)
+    saludar = inactivo is None or inactivo > PAUSA_SALUDO
+    activo = inactivo is not None and inactivo < PAUSA_ACUSE
 
     request_id = uuid.uuid4().hex
     try:
@@ -346,7 +349,10 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
         return
 
     await asyncio.sleep(random.uniform(1, 5))
-    await canal.enviar_texto(m.contacto, _acuse(u.nombre, sistema.zona_horaria, saludar))
+    if activo:
+        await asyncio.sleep(random.uniform(3, 5))
+    else:
+        await canal.enviar_texto(m.contacto, _acuse(u.nombre, sistema.zona_horaria, saludar))
 
     adjuntos: tuple = ()
     if es_medio:

@@ -339,7 +339,7 @@ async def test_sin_vinculo_silencio_y_sin_llamar_al_sistema(flujo):
 
 
 async def test_vincular_y_preguntar(flujo):
-    from asistente.api.canal_flujo import ACUSES, procesar
+    from asistente.api.canal_flujo import procesar
     from asistente.core.llm.falso import texto
     svc, salida, _, _, llm = flujo
     await procesar(svc, "mock-a", salida, _msg("vincular FST-BUENO", "59877777777"))
@@ -347,7 +347,8 @@ async def test_vincular_y_preguntar(flujo):
     llm.usar(texto("Tenés 3 campos"))
     salida.enviados.clear()
     await procesar(svc, "mock-a", salida, _msg("¿cuántos campos tengo?", "59877777777"))
-    assert [t for _, t in salida.enviados][1:] == ["Tenés 3 campos"] and salida.enviados[0][1] in ACUSES
+    # conversación activa (<15 min): sin acuse, solo la respuesta
+    assert [t for _, t in salida.enviados] == ["Tenés 3 campos"]
 
 
 async def test_vinculo_revocado_en_el_sistema_se_desactiva(flujo):
