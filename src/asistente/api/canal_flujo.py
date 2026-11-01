@@ -80,7 +80,7 @@ async def _pedir(svc: Servicios, sistema_id: str, ruta: str, cuerpo: dict) -> di
             return r.json()
         except ValueError:
             pass
-    log.info("canal %s: %s respondió HTTP %s", sistema_id, ruta, r.status_code)
+    log.warning("canal %s: %s respondió HTTP %s", sistema_id, ruta, r.status_code)
     raise _SistemaRechaza(r.status_code == 404)
 
 
@@ -166,6 +166,7 @@ async def _identificar(svc: Servicios, sistema_id: str, contacto: str, extra: di
         u = await svc.autenticador.validar(t["token"], scope, canal="whatsapp")
     except _SistemaRechaza as e:
         if e.definitivo:
+            log.warning("canal %s: vínculo …%s desactivado (el sistema respondió 404)", sistema_id, contacto[-4:])
             await svc.canal_vinculos.desactivar(sistema_id, contacto)
         return None
     except (TokenInvalido, KeyError, TypeError) as e:

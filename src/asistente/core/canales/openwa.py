@@ -5,6 +5,7 @@ Los formatos salen del código de OpenWA v0.26.0 (IncomingMessage, `type` = text
 import hashlib
 import hmac
 import json
+import logging
 import re
 from collections.abc import Callable
 from urllib.parse import quote
@@ -17,6 +18,13 @@ from asistente.core.canales.config import SECRETOS_CANAL, CanalOpenWAConfig
 MAX_TEXTO = 4096
 _TIPOS = {"text": "texto", "image": "imagen", "document": "documento"}
 _SUFIJO = re.compile(r"@(c\.us|lid)$")
+log = logging.getLogger(__name__)
+
+
+def _tapar(v: object) -> str:
+    """Últimos 4 caracteres: alcanza para distinguir contactos sin volcar teléfonos al log."""
+    s = str(v or "")
+    return "…" + s[-4:] if s else "(vacío)"
 
 
 class CanalOpenWA:
@@ -55,9 +63,13 @@ class CanalOpenWA:
         except ValueError:
             return [], []
         d = p.get("data") if isinstance(p, dict) else None
-        if (not isinstance(d, dict) or p.get("event") != "message.received"
-                or p.get("sessionId") != self._cfg.session_id or d.get("fromMe") or d.get("isGroup")
-                or not d.get("id")):
+        if not isinstance(d, dict) or p.get("event") != "message.received":
+            return [], []
+        if p.get("sessionId") != self._cfg.session_id:
+            log.warning("openwa: mensaje de otra sesión descartado (sessionId=%s, esperada=%s)",
+                        p.get("sessionId"), self._cfg.session_id)
+            return [], []
+        if d.get("fromMe") or d.get("isGroup") or not d.get("id"):
             return [], []
         chat = str(d.get("chatId") or d.get("from") or "")
         if chat.endswith("@c.us"):
@@ -65,9 +77,12 @@ class CanalOpenWA:
         elif chat.endswith("@lid"):
             contacto = str(d.get("senderPhone") or "")
         else:
+            log.warning("openwa: mensaje descartado, chatId de tipo no soportado (…%s)", chat[-8:])
             return [], []
         contacto = _SUFIJO.sub("", contacto).lstrip("+")
         if not contacto.isdigit():
+            log.warning("openwa: mensaje descartado, sin teléfono resoluble (chatId=%s senderPhone=%s)",
+                        _tapar(chat.split("@")[0]) + "@" + chat.rpartition("@")[2], _tapar(d.get("senderPhone")))
             return [], []
         media = d.get("media") if isinstance(d.get("media"), dict) else {}
         return [Entrante(
