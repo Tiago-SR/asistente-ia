@@ -33,7 +33,6 @@ services:
       # Si se fija en .env, debe incluir `openwa` (el canal WhatsApp no oficial) además de los demás destinos internos.
       ASISTENTE_HOSTS_INTERNOS_PERMITIDOS: ${ASISTENTE_HOSTS_INTERNOS_PERMITIDOS:-openwa}
     volumes:
-      - ./config/sistemas.yaml:/config/sistemas.yaml:ro
       - ./config/precios.yaml:/config/precios.yaml:ro
       - ./config/voces.yaml:/config/voces.yaml:ro
     read_only: true
@@ -47,7 +46,7 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
-    networks: [interna, publica]
+    networks: [interna, publica, dokploy-network]   # dokploy-network: Traefik de Dokploy llega a asistente:8000
     expose:
       - "8000"
     depends_on:
@@ -170,6 +169,8 @@ networks:
   interna:
     internal: true      # postgres sin salida a internet
   publica: {}           # el proxy inverso se conecta aquí; asistente necesita egress al LLM y a los sistemas
+  dokploy-network:      # solo existe en hosts con Dokploy; en otros hay que quitarla o `docker network create dokploy-network`
+    external: true
 
 volumes:
   pgdata:

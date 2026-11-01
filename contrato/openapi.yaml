@@ -102,6 +102,80 @@ paths:
           description: Token inválido o vencido
         "403":
           description: Scope insuficiente
+  /asistente/canal/codigo:
+    post:
+      summary: Canal WhatsApp (opcional). Código de vinculación de un solo uso para el usuario logueado
+      description: Sesión normal del usuario. 403 si no puede usar el asistente. Ver CANAL_WHATSAPP.md §3.1.
+      responses:
+        "200":
+          description: Código generado (vida 10 min)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [codigo, expira]
+                properties:
+                  codigo: { type: string, example: "FST-7K2M9QXD" }
+                  expira: { type: string, format: date-time }
+        "403":
+          description: El usuario no puede usar el asistente
+  /asistente/canal/vincular:
+    post:
+      summary: Canal WhatsApp (opcional). Vincula un número a un usuario con su código
+      description: Lo llama el asistente con la cabecera `Authorization` (Bearer <token_canal>). Ver CANAL_WHATSAPP.md §3.2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canal, wa_id, codigo]
+              properties:
+                canal: { type: string, enum: [whatsapp] }
+                wa_id: { type: string, pattern: "^[0-9]{8,15}$" }
+                codigo: { type: string }
+      responses:
+        "200":
+          description: Vinculado
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties: { ok: { type: boolean }, nombre: { type: string } }
+        "400": { description: wa_id o cuerpo mal formado }
+        "403": { description: Token de canal ausente o inválido }
+        "404": { description: Código inexistente, vencido, usado o de usuario inactivo (sin distinguir) }
+        "429": { description: Demasiados intentos }
+  /asistente/canal/token:
+    post:
+      summary: Canal WhatsApp (opcional). Token por mensaje para el usuario vinculado a un número
+      description: |
+        Lo llama el asistente con la cabecera `Authorization` (Bearer <token_canal>). Sin `confirmacion` ni `huella` → token de
+        lectura; con ambas → token de escritura (CANAL_WHATSAPP.md §4.1). Los claims llevan `canal: "whatsapp"`.
+        Un `404` significa «sin vínculo activo» y el asistente lo toma como definitivo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canal, wa_id]
+              properties:
+                canal: { type: string, enum: [whatsapp] }
+                wa_id: { type: string }
+                confirmacion: { type: string, pattern: "^[A-Za-z0-9._-]{1,128}$" }
+                huella: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        "200":
+          description: Token emitido
+          content:
+            application/json:
+              schema: { $ref: "schemas/token-respuesta.schema.json" }
+        "400": { description: Cuerpo mal formado }
+        "403": { description: Token de canal inválido, o escritura para una tool destructiva }
+        "404": { description: Sin vínculo activo, caducado, revocado o usuario inactivo }
+        "429": { description: Demasiadas emisiones }
   /asistente/salud:
     get:
       summary: Salud (opcional)

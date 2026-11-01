@@ -331,6 +331,11 @@ FALLOS: dict[str, list[float]] = {}  # wa_id -> instantes de intentos fallidos
 _ALFABETO = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # sin 0 O 1 I L
 
 
+def _hash(codigo: str) -> str:
+    """Contrato §3.2: el código se compara sin distinguir mayúsculas ni espacios de los bordes."""
+    return hashlib.sha256(codigo.strip().upper().encode()).hexdigest()
+
+
 def _token_canal(authorization: str | None) -> None:
     dado = (authorization or "").removeprefix("Bearer ").strip()
     if not hmac.compare_digest(dado.encode(), TOKEN_CANAL.encode()):
@@ -346,7 +351,7 @@ async def canal_codigo(usuario: str) -> dict:
         del CODIGOS[h]
     codigo = f"{ID[:3].upper()}-" + "".join(secrets.choice(_ALFABETO) for _ in range(8))
     exp = int(time.time()) + 600
-    CODIGOS[hashlib.sha256(codigo.encode()).hexdigest()] = {"sub": usuario, "exp": exp}
+    CODIGOS[_hash(codigo)] = {"sub": usuario, "exp": exp}
     return {"codigo": codigo, "expira": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(exp))}
 
 
@@ -361,7 +366,7 @@ async def canal_vincular(request: Request, authorization: str | None = Header(de
     fallos = FALLOS[wa_id] = [t for t in FALLOS.get(wa_id, []) if t > ahora - 3600]
     if len(fallos) >= 5:  # contrato §3.2; shortcut: sin tope global por minuto
         raise HTTPException(429, "demasiados intentos")
-    c = CODIGOS.pop(hashlib.sha256(codigo.encode()).hexdigest(), None)
+    c = CODIGOS.pop(_hash(codigo), None)
     if c is None or c["exp"] < ahora:
         fallos.append(ahora)
         raise HTTPException(404, "código inválido")
