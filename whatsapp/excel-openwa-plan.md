@@ -1,7 +1,7 @@
 # Excel descargable desde WhatsApp (OpenWA)
 
 Estado: integración del flujo de turnos implementada, con pruebas automatizadas.
-Pendiente la prueba real autorizada de envío, apertura y contenido en WhatsApp.
+Prueba real de recepción, apertura y contenido confirmada por el usuario el 2026-11-04; límites observados al final de este documento.
 Fecha: 2026-11-04.
 
 ## Objetivo
@@ -122,13 +122,13 @@ cola durable y recuperación automática tras reinicios quedan fuera de esta eta
 - Meta no ofrece `generar_excel` en esta etapa; el widget y OpenWA la ofrecen solo cuando están habilitados
   la exportación y el servicio de archivos, y existe capacidad de entrega en el canal correspondiente.
 
-## Validación técnica pendiente
+## Validación técnica
 
 Contrato de OpenWA 0.26.0 contrastado con el código de la imagen instalada: admite base64,
 nombre y MIME, sin exigir URL. Adaptador y pruebas de transporte añadidos (parte del paso 2).
 Detalles y límites documentados en [openwa-documentos.md](openwa-documentos.md).
 La integración de los pasos 2–6 está implementada. El paso 7 tiene cobertura automatizada;
-falta la prueba real a un contacto autorizado del paso 1 para cerrar la aceptación manual.
+la recepción y apertura de la prueba real fueron confirmadas por el usuario (ver resultado abajo).
 
 ## Avance del 2026-11-04: integración del turno
 
@@ -151,8 +151,8 @@ falta la prueba real a un contacto autorizado del paso 1 para cerrar la aceptaci
 - [x] **Pruebas automatizadas (paso 7).** Nuevos casos verifican deduplicación, persistencia previa, ausencia
   de envío si el turno falla, fallos parciales sin reintentos, filtro de identidad y registro sin contenido.
   También se prueba generación de un `.xlsx` real y habilitación según capacidad con LLM simulado.
-- [ ] **Prueba manual real (pasos 1 y 7).** Falta identificar y autorizar el contacto de prueba. No se envió
-  ningún documento real durante esta implementación. Ver procedimiento en `openwa-documentos.md`.
+- [x] **Prueba manual real (pasos 1 y 7).** El usuario confirmó que descargó el adjunto de WhatsApp
+  y pudo abrirlo. Archivo y registro saliente comprobados; ver evidencia y límites en `openwa-documentos.md`.
 
 Decisiones de comportamiento: la frase «sin Excel» del prompt solo se añade si el sistema tiene `exportar_excel` y
 almacenamiento pero el canal no puede entregar. Los documentos se envían antes del texto final del modelo (así
@@ -165,7 +165,24 @@ una caída entre envío y registro. Las cuotas, límites y descarga autenticada 
 Validación ejecutada en el contenedor de desarrollo: **235 pruebas pasaron** (2026-11-04, tras los ajustes de la revisión) con
 `pytest -q tests/test_canal.py tests/test_canal_excel.py tests/test_api.py tests/test_agent.py tests/test_seguridad.py tests/test_memoria.py`.
 Incluye pruebas del chat web, del transporte OpenWA simulado y del aislamiento de archivos en Postgres.
-No se ejecutó el navegador E2E del widget ni se confirmó recepción real en WhatsApp.
+No se ejecutó el navegador E2E del widget. La recepción real en WhatsApp y apertura fueron confirmadas después por el usuario.
+
+## Aceptación manual del 2026-11-04
+
+La suite solicitada se volvió a ejecutar en el contenedor de desarrollo: **235 passed**.
+Se revisó un XLSX descargado aportado por el usuario para fiscalST: 4.885 bytes,
+estructura válida, columnas y valor de prueba correctos. Existe un registro saliente
+`documento` con ID no vacío, temporalmente coincidente. El nombre descargado lleva
+`[DEV]`; falta contrastarlo con el almacenado. Versión de contrato de referencia:
+OpenWA 0.26.0, sin nueva comprobación de la versión efectiva ni del MIME transmitido.
+El usuario confirmó explícitamente que lo descargó del adjunto recibido en WhatsApp
+y pudo abrirlo. Se marca la aceptación manual como cumplida para este caso pequeño,
+con los límites indicados. Detalle en `openwa-documentos.md`.
+
+Conviene evaluar una cola durable si se necesita recuperación tras reinicios, junto
+con conciliación de envíos ambiguos. Una cola sola no elimina la ventana entre envío
+y registro; no debe reenviar automáticamente un timeout o una aceptación incierta.
+No se implementó esta ampliación.
 
 ## Referencias
 

@@ -41,8 +41,8 @@ La capacidad ya está conectada con tools/prompts y con la persistencia y entreg
 La exportación requiere `exportar_excel`, servicio de archivos y capacidad de documentos del canal.
 Meta no ofrece esta herramienta. El widget conserva su botón y descarga autenticada.
 
-Pendiente: envío real de un Excel pequeño a un contacto de prueba autorizado y
-comprobación manual de nombre, apertura y contenido. La aceptación automatizada no reemplaza esa validación.
+Prueba real de archivo pequeño realizada en fiscalST: recepción y apertura confirmadas
+por el usuario, con revisión del archivo descargado y del registro saliente. Ver resultado y límites abajo.
 
 ## Uso y errores del flujo integrado
 
@@ -56,7 +56,7 @@ se procesa una sola vez. El nombre, MIME y contenido se recuperan del almacenami
 - Turno incompleto o fallo de persistencia: no se envían documentos.
 - La copia del asistente vence según la retención configurada; la enviada por WhatsApp permanece fuera de ese control.
 
-## Prueba manual pendiente
+## Procedimiento de prueba manual
 
 1. Identificar la sesión, sistema y contacto vinculado de prueba, con autorización explícita para enviarle el documento.
 2. Pedir desde ese contacto una planilla pequeña con dos columnas y un valor conocido.
@@ -65,3 +65,25 @@ se procesa una sola vez. El nombre, MIME y contenido se recuperan del almacenami
 5. Anotar aquí fecha, versión, resultado y cualquier límite observado, sin teléfonos, credenciales ni contenido sensible.
 
 Fuente: [OpenAPI de v0.26.0](https://raw.githubusercontent.com/rmyndharis/OpenWA/v0.26.0/openapi.json).
+
+## Prueba manual cumplida del 2026-11-04
+
+En desarrollo con fiscalST, el usuario aportó el archivo descargado
+`[DEV] prueba_excel.xlsx`: 4.885 bytes, ZIP sin errores de integridad y estructura
+XLSX válida. La hoja contiene las columnas `Concepto` e `Importe`, con la fila
+de prueba `Prueba` y el valor numérico `42`. El nombre descargado incluye `[DEV]`;
+no se comprobó todavía si coincide con el nombre almacenado y enviado.
+
+Existe un único registro saliente de tipo `documento` para este sistema, con ID
+no vacío, a las 21:45:15 UTC (18:45:15 local), coincidente con la descarga aportada.
+Su estado almacenado es `enviado`: acredita el registro de aceptación del proveedor,
+no demuestra por sí solo recepción. El usuario confirmó explícitamente que descargó
+el archivo del adjunto recibido en WhatsApp y pudo abrirlo. Esa confirmación acredita
+la recepción y apertura observadas en esta prueba; no se deducen del estado del proveedor. No se enviaron mensajes desde esta revisión.
+
+Versión de referencia del contrato: OpenWA 0.26.0; no se volvió a consultar la versión
+efectiva en esta revisión. No se midió el MIME transmitido ni el máximo de tamaño:
+solo se verificó este archivo pequeño. Se marca la aceptación manual como cumplida
+para este caso, sin extender el resultado a otros tamaños o nombres ni afirmar una
+comparación exacta con el nombre almacenado. No se verificó por separado el texto
+final del modelo ni el identificador de sesión efectiva en esta revisión.
