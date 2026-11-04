@@ -9,11 +9,12 @@ type Fallo = { numero: string; tipo: string; codigo: string | null; motivo: stri
 
 const fecha = (iso: string) => new Date(iso).toLocaleString()
 
-/** Números vinculados (con revocar) y envíos fallidos de las últimas 24 h del canal de un sistema. */
+/** Números vinculados y envíos fallidos de las últimas 24 h del canal de un sistema. */
 export function CanalEstado({ id, puede }: { id: string; puede: boolean }) {
   const [vinculos, setVinculos] = useState<Vinculo[]>([])
   const [fallos, setFallos] = useState<Fallo[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [cambiando, setCambiando] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -30,13 +31,20 @@ export function CanalEstado({ id, puede }: { id: string; puede: boolean }) {
   }, [id])
   useEffect(() => void cargar(), [cargar])
 
-  const revocar = async (v: Vinculo) => {
-    if (!window.confirm(`¿Cortar el acceso de ${v.numero}? Para borrarlo del todo, revóquelo también en el sistema.`)) return
+  const cambiarEstado = async (v: Vinculo) => {
+    const accion = v.activo ? 'revocar' : 'reactivar'
+    const confirmacion = v.activo
+      ? `¿Cortar el acceso de ${v.numero}? Para borrarlo del todo, revóquelo también en el sistema.`
+      : `¿Reactivar el acceso de ${v.numero}? El vínculo también debe seguir vigente en el sistema de origen.`
+    if (!window.confirm(confirmacion)) return
+    setCambiando(true)
     try {
-      await api('POST', `/sistemas/${id}/canal/vinculos/revocar`, { ref: v.ref })
+      await api('POST', `/sistemas/${id}/canal/vinculos/${accion}`, { ref: v.ref })
       await cargar()
     } catch (e) {
       setError(mensaje(e))
+    } finally {
+      setCambiando(false)
     }
   }
 
@@ -65,8 +73,10 @@ export function CanalEstado({ id, puede }: { id: string; puede: boolean }) {
                 <TableCell>{fecha(v.creado_en)}</TableCell>
                 <TableCell>{fecha(v.ultimo_uso)}</TableCell>
                 <TableCell>
-                  {puede && v.activo && (
-                    <Button type="button" variant="outline" size="sm" onClick={() => void revocar(v)}>Revocar</Button>
+                  {puede && (
+                    <Button type="button" variant="outline" size="sm" disabled={cambiando} onClick={() => void cambiarEstado(v)}>
+                      {v.activo ? 'Revocar' : 'Reactivar'}
+                    </Button>
                   )}
                 </TableCell>
               </TableRow>

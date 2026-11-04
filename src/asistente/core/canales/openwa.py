@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 import httpx
 
+from asistente.core.canales.entorno import marcar_mensaje
 from asistente.core.canales.base import Entrante, ErrorCanal, EstadoEnvio
 from asistente.core.canales.config import SECRETOS_CANAL, CanalOpenWAConfig
 
@@ -116,7 +117,7 @@ class CanalOpenWA:
 
     async def enviar_texto(self, contacto: str, texto: str) -> str:
         d = await self._json("POST", f"{self._base}/messages/send-text",
-                             json={"chatId": f"{contacto}@c.us", "text": texto[:MAX_TEXTO]})
+                             json={"chatId": f"{contacto}@c.us", "text": marcar_mensaje(texto)[:MAX_TEXTO]})
         if not d.get("messageId"):
             raise ErrorCanal("OpenWA no devolvió el id del mensaje")
         return str(d["messageId"])
@@ -129,7 +130,7 @@ class CanalOpenWA:
         # no repetir esta operación ni recurrir a enlaces.
         d = await self._json("POST", f"{self._base}/messages/send-document", json={
             "chatId": f"{contacto}@c.us", "base64": base64.b64encode(contenido).decode("ascii"),
-            "filename": nombre, "mimetype": mime,
+            "filename": marcar_mensaje(nombre), "mimetype": mime,
         })
         if not isinstance(d.get("messageId"), str) or not d["messageId"].strip():
             raise ErrorCanal("OpenWA no devolvió el id del documento")

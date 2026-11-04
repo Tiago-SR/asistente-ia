@@ -868,18 +868,31 @@ async def vinculos_canal(sistema_id: str, svc: Servicios = _LEER) -> dict:
                          for v in await _vinculos(svc)[0].listar(sistema_id)]}
 
 
-class _Revocar(BaseModel):
+class _ReferenciaVinculo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ref: str = Field(min_length=1, max_length=32)
 
 
 @router.post("/sistemas/{sistema_id}/canal/vinculos/revocar")
-async def revocar_vinculo(sistema_id: str, datos: _Revocar, request: Request, svc: Servicios = _ESCRIBIR) -> dict:
+async def revocar_vinculo(sistema_id: str, datos: _ReferenciaVinculo, request: Request, svc: Servicios = _ESCRIBIR) -> dict:
     """Corta el acceso desde el asistente. El vínculo autoritativo vive en el sistema: allí también hay que revocarlo."""
     if svc.registro.obtener(sistema_id) is None:
         raise ErrorApi(404, "sistema_inexistente")
     await _vinculos(svc)[0].desactivar(sistema_id, datos.ref)
     await _store(svc).auditar(request.state.actor.nombre, "canal_revocar", sistema_id,
+                              despues={"numero": _enmascarar(datos.ref)}, ip=_ip(request))
+    return {"ok": True}
+
+
+@router.post("/sistemas/{sistema_id}/canal/vinculos/reactivar")
+async def reactivar_vinculo(sistema_id: str, datos: _ReferenciaVinculo, request: Request,
+                           svc: Servicios = _ESCRIBIR) -> dict:
+    """Restablece el acceso local; el sistema anfitrión sigue autorizando cada mensaje."""
+    if svc.registro.obtener(sistema_id) is None:
+        raise ErrorApi(404, "sistema_inexistente")
+    if not await _vinculos(svc)[0].reactivar(sistema_id, datos.ref):
+        raise ErrorApi(404, "vinculo_inexistente")
+    await _store(svc).auditar(request.state.actor.nombre, "canal_reactivar", sistema_id,
                               despues={"numero": _enmascarar(datos.ref)}, ip=_ip(request))
     return {"ok": True}
 

@@ -75,6 +75,13 @@ class VinculosCanal:
     async def desactivar(self, sistema_id: str, contacto: str) -> None:
         await self._poner(sistema_id, contacto, activo=False)
 
+    async def reactivar(self, sistema_id: str, contacto: str) -> bool:
+        """Reactiva solo un vínculo existente, sin alterar sus fechas ni crear otro."""
+        async with self._sesiones.begin() as s:
+            r = await s.execute(update(CanalVinculo).where(
+                CanalVinculo.sistema_id == sistema_id, CanalVinculo.contacto == contacto).values(activo=True))
+            return r.rowcount == 1
+
     async def tocar(self, sistema_id: str, contacto: str) -> datetime | None:
         """Marca el uso y devuelve el anterior (None si no hay vínculo)."""
         async with self._sesiones.begin() as s:

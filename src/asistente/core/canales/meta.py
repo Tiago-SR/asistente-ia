@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from asistente.core.canales.entorno import marcar_mensaje
 from asistente.core.canales.base import Entrante, ErrorCanal, EstadoEnvio
 from asistente.core.canales.config import SECRETOS_CANAL, CanalMetaConfig
 
@@ -115,7 +116,7 @@ class CanalMeta:
     async def enviar_texto(self, contacto: str, texto: str) -> str:
         d = await self._json("POST", f"{self._base}/{self._cfg.phone_number_id}/messages", json={
             "messaging_product": "whatsapp", "to": contacto, "type": "text",
-            "text": {"body": texto[:MAX_TEXTO], "preview_url": False}})
+            "text": {"body": marcar_mensaje(texto)[:MAX_TEXTO], "preview_url": False}})
         try:
             return d["messages"][0]["id"]
         except (KeyError, IndexError, TypeError) as e:
@@ -125,7 +126,7 @@ class CanalMeta:
         # Límites de Meta: cuerpo 1024, hasta 3 botones, título 20, id 256.
         d = await self._json("POST", f"{self._base}/{self._cfg.phone_number_id}/messages", json={
             "messaging_product": "whatsapp", "to": contacto, "type": "interactive",
-            "interactive": {"type": "button", "body": {"text": cuerpo[:1024]}, "action": {"buttons": [
+            "interactive": {"type": "button", "body": {"text": marcar_mensaje(cuerpo)[:1024]}, "action": {"buttons": [
                 {"type": "reply", "reply": {"id": i[:256], "title": t[:20]}} for i, t in botones[:3]]}}})
         try:
             return d["messages"][0]["id"]

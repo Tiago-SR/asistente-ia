@@ -42,6 +42,26 @@ def _payload(wamid=None, numero=NUM, **value) -> bytes:
     return json.dumps({"entry": [{"changes": [{"value": value}]}]}).encode()
 
 
+async def test_reactivar_vinculo_existente_y_aislado(sesiones):
+    from asistente.store.canal import VinculosCanal
+
+    vinculos = VinculosCanal(sesiones)
+    contacto = "598" + uuid.uuid4().hex[:10]
+    for sistema in ("mock-a", "mock-b"):
+        await vinculos.guardar(sistema, contacto)
+        await vinculos.desactivar(sistema, contacto)
+    previo = next(v for v in await vinculos.listar("mock-a") if v.contacto == contacto)
+    assert not await vinculos.activo("mock-a", contacto)
+    assert await vinculos.reactivar("mock-a", contacto)
+    assert await vinculos.activo("mock-a", contacto)
+    assert not await vinculos.activo("mock-b", contacto)
+    actual = next(v for v in await vinculos.listar("mock-a") if v.contacto == contacto)
+    assert (actual.creado_en, actual.ultimo_uso) == (previo.creado_en, previo.ultimo_uso)
+    assert await vinculos.reactivar("mock-a", contacto)
+    assert not await vinculos.reactivar("mock-a", "inexistente")
+    assert not await vinculos.activo("mock-a", "inexistente")
+
+
 # --- fábrica / strategy ---
 
 def test_fabrica_sin_canal_o_sin_secretos_es_none(tmp_path):
@@ -241,7 +261,8 @@ def test_openwa_parsear_filtros():
     assert (img.tipo, img.mime, img.medio_ref) == ("imagen", "image/jpeg", "59899111222@c.us/3EB0A1")
 
 
-async def test_openwa_enviar_probar_y_medio():
+async def test_openwa_enviar_probar_y_medio(monkeypatch):
+    monkeypatch.setenv("ASISTENTE_ENTORNO", "prod")
     vistos = []
 
     def h(req):
@@ -268,7 +289,8 @@ def test_openwa_admite_acciones_y_valida_url():
     assert secretos_canal({"canal_mensajeria": {"proveedor": "openwa"}}) == ("owa_api_key", "owa_webhook_secret")
 
 
-async def test_openwa_documento_xlsx():
+async def test_openwa_documento_xlsx(monkeypatch):
+    monkeypatch.setenv("ASISTENTE_ENTORNO", "prod")
     from io import BytesIO
 
     from openpyxl import Workbook, load_workbook

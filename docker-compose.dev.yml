@@ -9,6 +9,7 @@ services:
     environment:
       ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml
+      ASISTENTE_ENTORNO: dev
       ASISTENTE_LOG_LEVEL: DEBUG
       ASISTENTE_DOCS: "1"   # /docs y /openapi.json
       # Dev: el puerto solo se publica en 127.0.0.1 y el Host cambia (8100, Vite en 5174); sin restricción de Host.
