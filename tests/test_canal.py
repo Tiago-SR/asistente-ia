@@ -1,6 +1,7 @@
 # ruff: noqa: F811  (se reutilizan fixtures de test_api.py por importación)
 """Canal de mensajería (strategy): proveedor Meta, fábrica por sistema y webhook."""
 
+import base64
 import hashlib
 import hmac
 import json
@@ -265,6 +266,62 @@ def test_openwa_admite_acciones_y_valida_url():
     with pytest.raises(ValueError):
         CanalOpenWAConfig(proveedor="openwa", base_url="ftp://x", session_id="s")
     assert secretos_canal({"canal_mensajeria": {"proveedor": "openwa"}}) == ("owa_api_key", "owa_webhook_secret")
+
+
+async def test_openwa_documento_xlsx():
+    from io import BytesIO
+
+    from openpyxl import Workbook, load_workbook
+
+    libro = Workbook()
+    libro.active.append(["Producto", "Cantidad"])
+    libro.active.append(["Prueba", 3])
+    salida = BytesIO()
+    libro.save(salida)
+    contenido = salida.getvalue()
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def h(req):
+        assert req.method == "POST"
+        assert req.url.path == "/api/sessions/s1/messages/send-document"
+        assert req.headers["x-api-key"] == "key"
+        datos = json.loads(req.content)
+        assert datos == {"chatId": "598@c.us", "base64": base64.b64encode(contenido).decode(),
+                         "filename": "reporte.xlsx", "mimetype": mime}
+        recuperado = load_workbook(BytesIO(base64.b64decode(datos["base64"])))
+        assert recuperado.active["B2"].value == 3
+        return httpx.Response(201, json={"messageId": "doc1", "timestamp": 1})
+
+    canal = _owa(h)
+    assert canal.tiene_documentos
+    assert await canal.enviar_documento("598", contenido, "reporte.xlsx", mime) == "doc1"
+
+
+@pytest.mark.parametrize("caso", ["timeout", "rechazo", "json", "sin_id", "id_vacio", "id_invalido"])
+async def test_openwa_documento_fallido_no_se_reintenta(caso):
+    llamadas = []
+
+    def h(req):
+        llamadas.append(req)
+        if caso == "timeout":
+            raise httpx.ReadTimeout("timeout", request=req)
+        if caso == "rechazo":
+            return httpx.Response(413)
+        if caso == "json":
+            return httpx.Response(201, content=b"no json")
+        return httpx.Response(201, json={"messageId": {"sin_id": None, "id_vacio": " ",
+                                                     "id_invalido": 42}[caso]})
+
+    with pytest.raises(ErrorCanal):
+        await _owa(h).enviar_documento("598", b"xlsx", "reporte.xlsx", "application/octet-stream")
+    assert len(llamadas) == 1
+
+
+async def test_meta_sin_capacidad_documentos():
+    canal = _canal()
+    assert not canal.tiene_documentos
+    with pytest.raises(ErrorCanal, match="Meta no admite documentos"):
+        await canal.enviar_documento("598", b"xlsx", "reporte.xlsx", "application/octet-stream")
 
 
 async def test_privacidad_es_publica_y_muestra_el_contacto(wa):

@@ -1,23 +1,22 @@
 # Pendientes
 
-Único documento de pendientes (2026-10-19). Cada punto se verificó contra el código: nada de lo listado existe aún.
+Documento central de pendientes (revisión de Producto: 2026-11-04). El detalle de investigación y los planes de
+Producto están en [`PLAN_PRODUCTO.md`](PLAN_PRODUCTO.md); son propuestas, no funcionalidades implementadas.
+Las otras secciones conservan la revisión del 2026-10-19 y pueden requerir comprobar su vigencia.
 Reglas del proyecto: responder en español, no hacer `git commit` (sugerir el mensaje), consultar al `asesor` antes de
 decisiones de API pública o difíciles de revertir.
 
 ## Producto
 
-- **Deshacer acciones (`reversible_con`).** Si una tool lo declara, la tarjeta ofrece «Deshacer» con la misma maquinaria
-  (propuesta, confirmación, token propio). Hoy no hay nada y el contrato dice que no se ofrece.
-- **Voces por sistema.** El catálogo (`config/voces.yaml`) es global; falta activar/desactivar por sistema, con al
-  menos una voz de cada género.
-- **Ajustes del widget en el servidor por usuario.** Hoy solo `localStorage`. Abierto: qué fija el administrador del
-  sistema y qué deja libre al usuario.
-- **Imágenes de referencia.** `AlmacenAdjuntos` es `NoGuarda`. Decidir si se conservan; si sí: retención, borrado con la
-  conversación y política de privacidad. No cambia el contrato del chat.
-- **Manifiesto por rol de usuario.** Hoy es global; el sistema rechaza lo no permitido, pero el modelo ofrece tools que
-  fallarán. Esperar a que algún sistema tenga roles con tools distintas.
-- **Fase 6, proactivo (a evaluar).** Webhooks del sistema hacia el asistente o consultas programadas; exige cola o cron
-  en el contenedor. Decisión de producto pendiente.
+- **Deshacer acciones (`reversible_con`).** Plan de implementación y pruebas en `PLAN_PRODUCTO.md`, sección 1.
+  Requiere contrato de compensación con el anfitrión, resultado persistido y una nueva confirmación con token propio.
+- **Conservar imágenes de referencia.** Decidido: conservarlas hasta crear una nueva conversación para ese usuario;
+  en ese momento borrar las anteriores. Plan de persistencia, recuperación, borrado y pruebas en `PLAN_PRODUCTO.md`,
+  sección 2. Aislamiento por sistema y usuario; el texto de conversaciones anteriores no se borra por esta regla.
+- **Manifiesto por rol de usuario.** Investigación y alternativas en `PLAN_PRODUCTO.md`, sección 3. Propuesta inicial:
+  catálogo global más capacidades efectivas emitidas por el anfitrión; los permisos siguen validándose al ejecutar.
+- **Fase 6, proactivo (a evaluar).** Investigación en `PLAN_PRODUCTO.md`, sección 4. Empezar por avisos de solo lectura
+  en el widget, con eventos persistidos y deduplicación; programaciones y canales externos serían etapas posteriores.
 
 ## Modo voz continuo en el celular (spike sin probar)
 

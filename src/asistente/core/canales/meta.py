@@ -23,6 +23,10 @@ _ESTADOS = {"sent": "enviado", "delivered": "entregado", "read": "leido", "faile
 
 class CanalMeta:
     tiene_botones = True
+    tiene_documentos = False
+
+    async def enviar_documento(self, contacto: str, contenido: bytes, nombre: str, mime: str) -> str:
+        raise ErrorCanal("Meta no admite documentos en esta integración")
 
     def __init__(self, cfg: CanalMetaConfig, token: str, app_secret: str, verify_token: str,
                  http: httpx.AsyncClient | None = None, *, timeout_s: float = 20.0, espera_s: float = 1.0) -> None:

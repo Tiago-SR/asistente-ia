@@ -2,6 +2,7 @@
 
 Los formatos salen del código de OpenWA v0.26.0 (IncomingMessage, `type` = text|image|document...), no de capturas reales: verificar con un webhook real."""
 
+import base64
 import hashlib
 import hmac
 import json
@@ -29,6 +30,7 @@ def _tapar(v: object) -> str:
 
 class CanalOpenWA:
     tiene_botones = False
+    tiene_documentos = True
 
     def __init__(self, cfg: CanalOpenWAConfig, api_key: str, webhook_secret: str,
                  http: httpx.AsyncClient | None = None, *, timeout_s: float = 20.0) -> None:
@@ -121,6 +123,17 @@ class CanalOpenWA:
 
     async def enviar_botones(self, contacto: str, cuerpo: str, botones: list[tuple[str, str]]) -> str:
         raise ErrorCanal("OpenWA no admite botones")
+
+    async def enviar_documento(self, contacto: str, contenido: bytes, nombre: str, mime: str) -> str:
+        # OpenWA 0.26.0 admite base64 crudo. Un timeout puede ocurrir después del envío:
+        # no repetir esta operación ni recurrir a enlaces.
+        d = await self._json("POST", f"{self._base}/messages/send-document", json={
+            "chatId": f"{contacto}@c.us", "base64": base64.b64encode(contenido).decode("ascii"),
+            "filename": nombre, "mimetype": mime,
+        })
+        if not isinstance(d.get("messageId"), str) or not d["messageId"].strip():
+            raise ErrorCanal("OpenWA no devolvió el id del documento")
+        return d["messageId"]
 
     async def descargar_medio(self, ref: str, max_bytes: int) -> tuple[bytes, str]:
         chat, _, mid = ref.partition("/")

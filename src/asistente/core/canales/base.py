@@ -42,6 +42,7 @@ MOTIVOS_FALLO = {131047: "fuera de la ventana de 24 h", 131026: "número no entr
 
 class Canal(Protocol):
     tiene_botones: bool  # False: las confirmaciones se piden por texto con un código (`enviar_botones` no sirve)
+    tiene_documentos: bool
 
     def verificar_suscripcion(self, params: dict[str, str]) -> str | None:
         """Handshake GET del webhook: el desafío a devolver, o None si no corresponde (403)."""
@@ -54,6 +55,9 @@ class Canal(Protocol):
 
     async def enviar_texto(self, contacto: str, texto: str) -> str:
         """Devuelve el id del mensaje enviado."""
+
+    async def enviar_documento(self, contacto: str, contenido: bytes, nombre: str, mime: str) -> str:
+        """Devuelve el id aceptado por el proveedor; no confirma recepción. Sin reintentos ambiguos."""
 
     async def enviar_botones(self, contacto: str, cuerpo: str, botones: list[tuple[str, str]]) -> str:
         """Mensaje con botones de respuesta `(id, título)`. Devuelve el id del mensaje; ErrorCanal si el proveedor no puede."""
