@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -44,6 +45,8 @@ class OpenAICompat:
         soporta_imagenes: bool = False,
     ) -> None:
         self._url = base_url.rstrip("/") + "/chat/completions"
+        # OpenAI rechaza `max_tokens` en sus modelos actuales; el resto de servidores compatibles solo conocen ese.
+        self._param_max = "max_completion_tokens" if urlsplit(base_url).hostname == "api.openai.com" else "max_tokens"
         self._api_key = api_key
         # Sin timeout de lectura global: un stream largo es normal; se acota por chunk.
         self._cliente = cliente or httpx.AsyncClient(follow_redirects=False)
@@ -63,11 +66,14 @@ class OpenAICompat:
         cuerpo: dict = {
             "model": modelo,
             "messages": [{"role": "system", "content": system}, *_traducir(messages)],
-            "max_tokens": max_tokens,
+            self._param_max: max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
         if tools:
+            if self._param_max == "max_completion_tokens":
+                # En chat/completions OpenAI no admite tools con razonamiento activo (sí en /v1/responses).
+                cuerpo["reasoning_effort"] = "none"
             cuerpo["tools"] = [
                 {
                     "type": "function",

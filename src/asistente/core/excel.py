@@ -1,6 +1,6 @@
 """Tool local `generar_excel`: arma un .xlsx con una tabla y lo deja para que el usuario lo descargue.
 
-No toca al sistema del cliente. Lo que el usuario recibe es un botón de descarga (evento `ui` de tipo `descarga`);
+No toca al sistema del cliente. Emite un evento `ui` de tipo `descarga` para que el canal entregue el archivo;
 el modelo solo ve `{id, nombre, filas}`. Las filas son datos de negocio: ni el historial ni la auditoría las guardan
 (ver `compactar_parametros`).
 """
@@ -40,8 +40,8 @@ TOOL = ToolDef(
     NOMBRE,
     "Genera un archivo Excel (.xlsx) descargable con una tabla. Úsala solo cuando el usuario pida un Excel o una "
     "planilla. Los datos salen de lo que consultaste con tus herramientas o de lo que el usuario escribió o mostró "
-    "en esta conversación; no inventes ni completes valores. Después de llamarla el usuario ve un botón de descarga: "
-    "díselo en una frase, sin enlaces ni repetir la tabla.",
+    "en esta conversación; no inventes ni completes valores. Describe el contenido en una frase, "
+    "sin enlaces ni repetir la tabla; sigue las instrucciones de entrega del canal.",
     PARAMETROS,
 )
 
@@ -49,7 +49,7 @@ _VALIDADOR = Draft202012Validator(PARAMETROS)
 _NUMERO = re.compile(r"^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$")  # sin ceros a la izquierda (códigos) ni más de 15 dígitos
 _PELIGROSO = ("=", "+", "-", "@", "\t", "\r")  # Excel lo ejecutaría como fórmula
 _NOMBRE_VALIDO = re.compile(r"[^\w .-]")
-_INSTRUCCION = "El usuario ve un botón para descargar el archivo. No incluyas enlaces ni repitas toda la tabla."
+_INSTRUCCION = "Archivo generado. Describe su contenido según el canal, sin asegurar entrega ni incluir enlaces o toda la tabla."
 
 
 def compactar_parametros(nombre: str, parametros: dict) -> dict:

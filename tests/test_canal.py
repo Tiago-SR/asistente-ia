@@ -637,3 +637,47 @@ async def test_lecturas_bloqueadas_no_se_ofrecen_por_el_canal():
 
     c = _ConectorCanal(Base(), frozenset({"anotar"}), frozenset({"ver_b"}))
     assert [t.nombre for t in await c.tools()] == ["ver_a", "anotar"]
+
+
+@pytest.mark.parametrize("documentos", [True, False])
+async def test_excel_canal_generacion_y_capacidad(flujo, sesiones, monkeypatch, documentos):
+    from io import BytesIO
+    from unittest.mock import AsyncMock
+
+    from openpyxl import load_workbook
+
+    from asistente.api.canal_flujo import procesar
+    from asistente.core.excel import MIME
+    from asistente.core.llm.base import LlamadaTool
+    from asistente.core.llm.falso import pide, texto
+    from asistente.core.prompts import Prompts
+    from asistente.store.archivos import ArchivosSql
+
+    svc, salida, _, vinculados, llm = flujo
+    contacto = "598" + str(uuid.uuid4().int)[:10]
+    vinculados[contacto] = "excel-" + uuid.uuid4().hex
+    obtener = svc.registro.obtener
+    monkeypatch.setattr(svc.registro, "obtener", lambda sid: obtener(sid).model_copy(update={"exportar_excel": True}))
+    svc.archivos = ArchivosSql(sesiones, ttl_horas=24, max_por_dia=100)
+    svc.prompts = Prompts("/app/prompts")
+    salida.tiene_documentos = documentos
+    salida.enviar_documento = AsyncMock(return_value="doc-excel")
+    await svc.canal_vinculos.guardar("mock-a", contacto)
+    if documentos:
+        llm.usar(pide(LlamadaTool("excel1", "generar_excel", {
+            "nombre": "reporte", "columnas": ["Concepto", "Importe"], "filas": [["Venta", 42]]})),
+            texto("El archivo contiene la venta y su importe."))
+    else:
+        llm.usar(texto("La exportación no está disponible en este canal."))
+    await procesar(svc, "mock-a", salida, _msg("Generá un Excel con Venta por 42", contacto))
+    llamadas = llm.actual.llamadas
+    assert ("generar_excel" in [t.nombre for t in llamadas[-1].tools]) is documentos
+    if documentos:
+        salida.enviar_documento.assert_awaited_once()
+        destino, datos, nombre, mime = salida.enviar_documento.call_args.args
+        assert (destino, nombre, mime) == (contacto, "reporte.xlsx", MIME)
+        assert list(load_workbook(BytesIO(datos)).active.values) == [("Concepto", "Importe"), ("Venta", 42)]
+        assert "no menciones botones ni asegures" in llamadas[-1].system
+    else:
+        salida.enviar_documento.assert_not_awaited()
+        assert "No ofrezcas generar ni adjuntar planillas" in llamadas[-1].system

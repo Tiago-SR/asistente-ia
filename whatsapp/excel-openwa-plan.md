@@ -1,7 +1,7 @@
 # Excel descargable desde WhatsApp (OpenWA)
 
-Estado: implementación iniciada; contrato versionado e instalado contrastados y adaptador de documentos añadido.
-Pendientes la prueba real autorizada y la integración del flujo de turnos.
+Estado: integración del flujo de turnos implementada, con pruebas automatizadas.
+Pendiente la prueba real autorizada de envío, apertura y contenido en WhatsApp.
 Fecha: 2026-11-04.
 
 ## Objetivo
@@ -127,7 +127,45 @@ cola durable y recuperación automática tras reinicios quedan fuera de esta eta
 Contrato de OpenWA 0.26.0 contrastado con el código de la imagen instalada: admite base64,
 nombre y MIME, sin exigir URL. Adaptador y pruebas de transporte añadidos (parte del paso 2).
 Detalles y límites documentados en [openwa-documentos.md](openwa-documentos.md).
-Falta la prueba real a un contacto autorizado del paso 1 y completar los pasos 2–7.
+La integración de los pasos 2–6 está implementada. El paso 7 tiene cobertura automatizada;
+falta la prueba real a un contacto autorizado del paso 1 para cerrar la aceptación manual.
+
+## Avance del 2026-11-04: integración del turno
+
+- [x] **Capacidad y habilitación (paso 2).** `armar_turno` recibe la disponibilidad de entrega del canal.
+  Solo ofrece Excel cuando también existen exportación habilitada y almacenamiento. Meta queda sin la tool;
+  su prompt indica que no ofrezca planillas. Motivo: evitar generar un resultado que el canal no puede entregar.
+- [x] **Recolección y persistencia (pasos 3–4).** `_turno` recoge eventos `descarga`, deduplica por ID y guarda
+  sus referencias en el mensaje final con el mecanismo del widget. Solo después de guardar un turno completo
+  empieza la entrega. Motivo: no enviar documentos de turnos incompletos o cuya persistencia falló.
+- [x] **Entrega autorizada (pasos 3–4).** Cada lectura usa `sistema_id`, `usuario_ref` y el filtro de vigencia
+  de `ArchivosSql.obtener`; bytes, nombre y MIME proceden del almacenamiento, no del evento del modelo.
+  Motivo: conservar el aislamiento y la caducidad existentes sin URLs ni credenciales en el modelo.
+- [x] **Errores y respuestas (paso 5).** Se informa por archivo si está indisponible o si no pudo confirmarse
+  el envío; un rechazo de documento permite continuar con los siguientes. No hay reintentos ni regeneración.
+  La descripción y el resultado de la tool son neutrales respecto del canal; el prompt distingue botón del widget
+  y adjunto de WhatsApp. Motivo: evitar promesas de recepción y duplicados ante timeouts ambiguos.
+- [x] **Registro (paso 6).** `_Registrando.enviar_documento` guarda el ID aceptado y tipo `documento`, sin
+  bytes ni filas. Motivo: seguir las salidas mediante el mecanismo existente sin registrar la planilla.
+  La aceptación sigue sin equivaler a entrega confirmada; no se agregó un estado de recepción ficticio.
+- [x] **Pruebas automatizadas (paso 7).** Nuevos casos verifican deduplicación, persistencia previa, ausencia
+  de envío si el turno falla, fallos parciales sin reintentos, filtro de identidad y registro sin contenido.
+  También se prueba generación de un `.xlsx` real y habilitación según capacidad con LLM simulado.
+- [ ] **Prueba manual real (pasos 1 y 7).** Falta identificar y autorizar el contacto de prueba. No se envió
+  ningún documento real durante esta implementación. Ver procedimiento en `openwa-documentos.md`.
+
+Decisiones de comportamiento: la frase «sin Excel» del prompt solo se añade si el sistema tiene `exportar_excel` y
+almacenamiento pero el canal no puede entregar. Los documentos se envían antes del texto final del modelo (así
+el usuario no pierde el archivo si falla ese texto). Si no se puede guardar el turno no se entrega nada ni se
+responde, igual que en el resto del flujo.
+
+No se cambió la deduplicación de webhooks ni se añadió recuperación durable. Sigue vigente el límite ante
+una caída entre envío y registro. Las cuotas, límites y descarga autenticada del widget se reutilizan.
+
+Validación ejecutada en el contenedor de desarrollo: **235 pruebas pasaron** (2026-11-04, tras los ajustes de la revisión) con
+`pytest -q tests/test_canal.py tests/test_canal_excel.py tests/test_api.py tests/test_agent.py tests/test_seguridad.py tests/test_memoria.py`.
+Incluye pruebas del chat web, del transporte OpenWA simulado y del aislamiento de archivos en Postgres.
+No se ejecutó el navegador E2E del widget ni se confirmó recepción real en WhatsApp.
 
 ## Referencias
 

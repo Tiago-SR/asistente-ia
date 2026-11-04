@@ -77,6 +77,7 @@ class Prompts:
         web: bool = False,
         leer_imagenes: bool = False,
         excel: bool = False,
+        excel_sin_entrega: bool = False,
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -103,6 +104,10 @@ class Prompts:
         if canal == "whatsapp" and self._whatsapp:
             partes.append("## Canal de WhatsApp\n" + self._whatsapp)
             version += f"+a{_hash(self._whatsapp)}"
+        if excel_sin_entrega:
+            sin_excel = "Este canal no tiene exportación Excel disponible. No ofrezcas generar ni adjuntar planillas."
+            partes.append(sin_excel)
+            version += f"+sx{_hash(sin_excel)}"
         partes.append("## Contexto de la sesión\n" + "\n".join(sesion))
         # Lo que el usuario pidió recordar es por usuario: va al final para no romper el prefijo cacheable (base y
         # dominio) y no entra en la versión, solo una marca.

@@ -143,6 +143,10 @@ class _Registrando:
     async def enviar_botones(self, contacto: str, cuerpo: str, botones: list[tuple[str, str]]) -> str:
         return await self._anotar(await self._canal.enviar_botones(contacto, cuerpo, botones), contacto, "botones")
 
+    async def enviar_documento(self, contacto: str, contenido: bytes, nombre: str, mime: str) -> str:
+        return await self._anotar(
+            await self._canal.enviar_documento(contacto, contenido, nombre, mime), contacto, "documento")
+
     def __getattr__(self, nombre: str):
         return getattr(self._canal, nombre)
 
@@ -343,7 +347,9 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     if es_medio and not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
         await canal.enviar_texto(m.contacto, SIN_IMAGENES)
         return
-    ctx, config, _, web, excel, version = await armar_turno(svc, sistema, u, modelo, request_id, canal="whatsapp")
+    ctx, config, _, web, excel, version = await armar_turno(
+        svc, sistema, u, modelo, request_id, canal="whatsapp",
+        entrega_excel=getattr(canal, "tiene_documentos", False))
     # La cuota se reserva antes de descargar y leer el medio: es lo caro, y un medio inválido también cuenta.
     if await reservar_cuota(ctx, svc.limites, svc.metricas):
         await canal.enviar_texto(m.contacto, FALLO)
@@ -373,12 +379,17 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     error: list[str] = []
 
     tarjetas: list[dict] = []
+    generados: dict[str, dict] = {}
 
     async def emit(evento: str, datos) -> None:
         if evento == events.ERROR:
             error.append(str(datos))
         elif evento == events.CONFIRMACION:
             tarjetas.append(datos)
+        elif evento == events.UI and excel:
+            for a in datos:
+                if a.get("tipo") == "descarga":
+                    generados.setdefault(a["id"], {"id": a["id"], "nombre": a["nombre"]})
 
     lectura = (asyncio.create_task(adj.leer(llm, modelo, adjuntos, svc.settings.max_output_tokens))
                if adjuntos and sistema.leer_imagenes else None)
@@ -403,7 +414,29 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     leidos, uso_lectura = await lectura if lectura else ([], Uso())
     nuevos = [await adj.para_guardar(x, svc.adjuntos, sistema_id, u.usuario_ref, leidos) for x in res.nuevos]
     await asyncio.shield(svc.repo.guardar_turno(sistema_id, u.usuario_ref, conv_id, "WhatsApp", nuevos,
-                                                res.uso + uso_lectura, modelo, version))
+                                                res.uso + uso_lectura, modelo, version, list(generados.values())))
+    # El turno ya está persistido: un fallo externo nunca vuelve a ejecutar el modelo.
+    await _entregar_archivos(svc, sistema_id, u, canal, m.contacto, list(generados))
     await canal.enviar_texto(m.contacto, a_whatsapp(res.texto or FALLO)[:MAX_RESPUESTA])
     if escribe:
         await _ofrecer(svc, sistema_id, canal, u, m.contacto, clave, tarjetas)
+
+
+async def _entregar_archivos(svc: Servicios, sistema_id: str, u: Usuario, canal: Canal,
+                            contacto: str, ids: list[str]) -> None:
+    for id_ in dict.fromkeys(ids):
+        try:
+            archivo = await svc.archivos.obtener(sistema_id, u.usuario_ref, uuid.UUID(id_))
+        except ValueError:
+            archivo = None
+        if archivo is None:
+            log.warning("canal %s: archivo %s no disponible, ajeno o vencido", sistema_id, id_)
+            await canal.enviar_texto(contacto, "No pude adjuntar uno de los archivos: no está disponible o venció.")
+            continue
+        try:
+            await canal.enviar_documento(contacto, archivo.datos, archivo.nombre, archivo.tipo_mime)
+        except ErrorCanal as e:
+            # Un timeout puede ocultar una aceptación: una sola solicitud, sin reintentos.
+            log.warning("canal %s: envío de documento sin confirmar (código %s)", sistema_id, e.codigo)
+            await canal.enviar_texto(
+                contacto, f"No pude confirmar el envío de {archivo.nombre}. No lo reintenté automáticamente.")

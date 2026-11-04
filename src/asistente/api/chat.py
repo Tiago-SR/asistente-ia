@@ -55,7 +55,8 @@ def _frame(evento: str, datos) -> bytes:
 
 
 async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, *,
-                      canal: Literal["texto", "voz", "whatsapp"] = "texto", zona_cliente: str | None = None):
+                      canal: Literal["texto", "voz", "whatsapp"] = "texto", zona_cliente: str | None = None,
+                      entrega_excel: bool = True):
     """Lo común a todo turno (chat web y canales de mensajería): zona, memoria, prompt, contexto y config.
     Devuelve (ctx, config, memoria, web, excel, version del prompt)."""
     cfg = svc.settings
@@ -69,12 +70,14 @@ async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, 
         except Exception:
             log.exception("[%s] no se pudo leer la memoria del usuario", request_id)
     web = svc.web if sistema.busqueda_web else None
-    excel = sistema.exportar_excel and svc.archivos is not None
+    habilitado = sistema.exportar_excel and svc.archivos is not None
+    excel = habilitado and entrega_excel
     prompt, version = svc.prompts.componer(
         sistema_nombre=sistema.nombre, prompt_dominio=sistema.prompt_dominio,
         usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
         canal=canal, memoria=recuerdos, web=web is not None,
         leer_imagenes=sistema.leer_imagenes, excel=excel,
+        excel_sin_entrega=habilitado and not entrega_excel,
     )
     lim = sistema.limites
     ctx = Contexto(
