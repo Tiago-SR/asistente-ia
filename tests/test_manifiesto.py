@@ -179,3 +179,19 @@ async def test_no_sigue_redirecciones(registro_dos):
 async def test_sistema_desconocido(registro_dos, cliente_mocks):
     with pytest.raises(ManifiestoInvalido):
         await CacheManifiestos(registro_dos, cliente_mocks).obtener("nope")
+
+
+@pytest.mark.parametrize("destructiva,marca,nombre,tipo,maximo,aceptar", [
+    (False, True, "lineas", "object", 100, True),
+    (False, False, "lineas", "object", 100, False),
+    (False, True, "ids", "object", 100, False),
+    (False, True, "lineas", "integer", 100, False),
+    (True, True, "lineas", "object", 100, False),
+    (False, True, "lineas", "object", 101, False),
+])
+def test_lineas_documento_acotadas(destructiva, marca, nombre, tipo, maximo, aceptar):
+    params = {"type": "object", "properties": {nombre: {
+        "type": "array", "items": {"type": tipo}, "maxItems": maximo, "x-lineas-documento": marca}}}
+    m = parsear_manifiesto(manifiesto(tool("crear_documento", efecto="escritura", parametros=params,
+                                         destructiva=destructiva, confirmacion={"ttl_s": 120})))
+    assert ("crear_documento" in m.tools) is aceptar

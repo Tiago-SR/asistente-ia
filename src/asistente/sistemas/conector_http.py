@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 # `conflicto` (v1.1): el dato cambió entre la propuesta y la confirmación de una acción.
 ERRORES_NEGOCIO = {"no_encontrado", "sin_acceso", "parametros_invalidos", "no_disponible", "conflicto"}
 MAX_RESUMEN = 300
-MAX_LINEAS = 10
-MAX_LINEA = 200
+MAX_LINEAS = 500
+MAX_LINEA = 1000
 DEFAULT_TIMEOUT_S = 15.0
 
 
@@ -209,13 +209,15 @@ def _interpretar_propuesta(r: httpx.Response, ttl_s: int) -> ResultadoPropuesta:
         return _fallo_propuesta("respuesta_invalida", "falta `huella`", r.status_code)
     if not isinstance(lineas, list) or not all(isinstance(x, str) for x in lineas):
         return _fallo_propuesta("respuesta_invalida", "`detalle` debe ser una lista de textos", r.status_code)
+    if len(lineas) > MAX_LINEAS or any(len(x) > MAX_LINEA for x in lineas):
+        return _fallo_propuesta("respuesta_invalida", "El detalle excede el límite de confirmación; no se puede mostrar completo", r.status_code)
     expira_s = cuerpo.get("expira_s", ttl_s)
     if isinstance(expira_s, bool) or not isinstance(expira_s, int) or expira_s <= 0:
         expira_s = ttl_s
     return ResultadoPropuesta(
         ok=True,
         resumen=resumen.strip()[:MAX_RESUMEN],
-        lineas=tuple(x[:MAX_LINEA] for x in lineas[:MAX_LINEAS]),
+        lineas=tuple(lineas),
         huella=huella,
         expira_s=min(expira_s, ttl_s),  # el operador de la tool fija el tope, no la respuesta
         status_http=r.status_code,

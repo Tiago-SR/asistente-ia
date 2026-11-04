@@ -161,11 +161,26 @@ def _parsear_tool(t: object) -> Tool:
         raise ManifiestoInvalido(f"{nombre}: `destructiva` debe ser booleano")
     destructiva = destructiva or bool(NOMBRE_DESTRUCTIVO_RE.search(nombre))
     if efecto == "escritura" and any(
-        isinstance(p, dict) and p.get("type") == "array" for p in (params.get("properties") or {}).values()
+        isinstance(p, dict) and p.get("type") == "array"
+        and not (not destructiva and nombre_param == "lineas" and p.get("x-lineas-documento") is True
+                 and isinstance(p.get("maxItems"), int) and not isinstance(p["maxItems"], bool)
+                 and 1 <= p["maxItems"] <= 100 and _items_objeto(params, p))
+        for nombre_param, p in (params.get("properties") or {}).items()
     ):
         raise ManifiestoInvalido(f"{nombre}: una escritura opera sobre una entidad; sin parámetros array")
     return Tool(nombre, desc, params, efecto, float(timeout) if timeout is not None else None,
                 ttl, destructiva)
+
+
+def _items_objeto(params: dict, propiedad: dict) -> bool:
+    """Solo detalles de un documento; nunca listas de ids para operaciones en lote."""
+    items = propiedad.get("items", {})
+    if not isinstance(items, dict):
+        return False
+    ref = items.get("$ref", "")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        items = (params.get("$defs") or {}).get(ref[len("#/$defs/"):], {})
+    return isinstance(items, dict) and items.get("type") == "object"
 
 
 class CacheManifiestos:

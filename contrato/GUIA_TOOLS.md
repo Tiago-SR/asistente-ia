@@ -187,3 +187,8 @@ python herramientas/verificar_sistema.py --base-url http://localhost:8201 \
 ```
 
 Si la ruta de token exige sesión, `--cabecera-token-env VAR` (con `VAR="Cookie: …"` o `"Authorization: …"`) la envía sin imprimirla. Las pruebas de ids ajenos necesitan una tool de lectura con un id obligatorio y otro usuario (`--token-url-otro` o `--id-ajeno`); si no, se informan como omitidas. Sale con código distinto de cero si algo falla. **Un sistema no se habilita en producción sin pasar el verificador.**
+
+
+### Extensión: líneas de un documento
+
+Una escritura no destructiva puede recibir `lineas` como array de objetos (también mediante `$ref` local a `$defs`), con `maxItems` entre 1 y 100 y `x-lineas-documento: true`. Son detalles de **una sola entidad**, como un comprobante; no permite acciones en lote ni arrays de ids. Esta excepción sustituye la prohibición general de arrays de primer nivel para este caso. La confirmación admite hasta 500 textos de 1000 caracteres: se muestran todos y se rechaza el detalle que exceda esos límites, sin truncarlo.

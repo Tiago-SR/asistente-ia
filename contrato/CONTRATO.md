@@ -709,3 +709,8 @@ Una tool que borra o anula se declara con `"destructiva": true` y `confirmacion`
 ## 9. Canal WhatsApp (opcional)
 
 Un sistema puede dejar que sus usuarios hablen con el asistente por WhatsApp. El sistema, no el asistente, decide a qué usuario corresponde cada número: el usuario vincula su número desde su sesión web con un código de un solo uso, y el asistente pide un token por mensaje con una credencial de servicio propia (el **token de canal**). Es opcional y compatible: no cambia ningún endpoint existente ni sube `"contrato"`. Endpoints, claims (`canal: "whatsapp"`), reglas de escritura y casos de prueba en [`CANAL_WHATSAPP.md`](CANAL_WHATSAPP.md).
+
+
+### Extensión: líneas de un documento
+
+Una escritura no destructiva puede recibir `lineas` como array de objetos (también mediante `$ref` local a `$defs`), con `maxItems` entre 1 y 100 y `x-lineas-documento: true`. Son detalles de **una sola entidad**, como un comprobante; no permite acciones en lote ni arrays de ids. Esta excepción sustituye la prohibición general de arrays de primer nivel para este caso. La confirmación admite hasta 500 textos de 1000 caracteres: se muestran todos y se rechaza el detalle que exceda esos límites, sin truncarlo.

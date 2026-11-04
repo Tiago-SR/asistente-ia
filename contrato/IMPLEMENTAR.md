@@ -143,3 +143,8 @@ Sale con código `0` si todo cumple. Sin `--accion` se omiten las pruebas de esc
 3. Registrar el sistema en el asistente (`CONTRATO.md` §6.3: `id`, `base_url`, clave pública o secreto, `origenes_permitidos`).
 4. Insertar el widget (`CONTRATO.md` §7) apuntando a tu `token-url`.
 5. Opcional: escrituras (§3 de esta guía), de a una tool; verificador con `--accion`.
+
+
+### Extensión: líneas de un documento
+
+Una escritura no destructiva puede recibir `lineas` como array de objetos (también mediante `$ref` local a `$defs`), con `maxItems` entre 1 y 100 y `x-lineas-documento: true`. Son detalles de **una sola entidad**, como un comprobante; no permite acciones en lote ni arrays de ids. Esta excepción sustituye la prohibición general de arrays de primer nivel para este caso. La confirmación admite hasta 500 textos de 1000 caracteres: se muestran todos y se rechaza el detalle que exceda esos límites, sin truncarlo.
