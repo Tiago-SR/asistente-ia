@@ -134,8 +134,10 @@ services:
       - "127.0.0.1:8201:8000"
 
   # Referencia PHP del contrato (ejemplos/sistema-php). HS256 con secretos ficticios de desarrollo.
+  # Opcional junto con SearXNG: docker compose -f docker-compose.dev.yml --profile busqueda up -d
   # Página: http://localhost:8203/?usuario=ana. Para RS256 ver ejemplos/sistema-php/README.md.
   sistema-php:
+    profiles: ["busqueda"]
     build:
       context: ./ejemplos/sistema-php
     environment:
