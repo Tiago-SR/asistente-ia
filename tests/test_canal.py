@@ -681,3 +681,22 @@ async def test_excel_canal_generacion_y_capacidad(flujo, sesiones, monkeypatch, 
     else:
         salida.enviar_documento.assert_not_awaited()
         assert "No ofrezcas generar ni adjuntar planillas" in llamadas[-1].system
+
+
+async def test_whatsapp_no_ofrece_la_tool(flujo):
+    from asistente.api.canal_flujo import procesar
+    from asistente.core.llm.base import LlamadaTool
+    from asistente.core.llm.falso import pide, texto
+    svc, salida, _, vinculados, llm = flujo
+    contacto = "598" + str(uuid.uuid4().int)[:10]
+    vinculados[contacto] = "ana"
+    await svc.canal_vinculos.guardar("mock-a", contacto)
+    g = llm.usar(texto("Hola"))
+    await procesar(svc, "mock-a", salida, _msg("hola", contacto))
+    assert "pedir_datos" not in [t.nombre for t in g.llamadas[0].tools]
+    assert "Formularios" not in g.llamadas[0].system
+    # aunque el modelo la invoque, no hay formulario que mostrar: cae como tool desconocida
+    llm.usar(pide(LlamadaTool("f1", "pedir_datos", {"titulo": "T", "campos": []})), texto("Preguntame en texto"))
+    salida.enviados.clear()
+    await procesar(svc, "mock-a", salida, _msg("factura", contacto))
+    assert salida.enviados[-1][1] == "Preguntame en texto"

@@ -29,6 +29,7 @@ from asistente.store.models import LlamadaTool as FilaLlamada
 from asistente.store.recientes import RecientesSql
 from asistente.store.repo import Repo, recortar
 from conftest import entorno, entrada_sistema, escribir_registro, firmar, registro_desde_yaml
+from test_formulario import pedido
 
 URL = os.environ.get("ASISTENTE_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="sin ASISTENTE_DATABASE_URL")
@@ -886,3 +887,37 @@ async def test_voz_rechazada_por_limite_se_registra(construir_app, monkeypatch):
         assert (await sintetizar(c)).status_code == 429
     assert [(e.tipo, e.resultado, e.motivo) for e in m.eventos] == [
         ("stt", "limite", "voz_min"), ("tts", "limite", "voz_min")]
+
+
+# --- formularios (tool local `pedir_datos`; ver tests/test_formulario.py) ----------------------
+
+
+async def test_api_solo_se_ofrece_en_texto_y_si_el_widget_lo_declara(api, llm):
+    async def tools(**cuerpo):
+        g = llm.usar(texto("ok"))
+        await api.post("/v1/chat", json={"mensaje": "hola", **cuerpo}, headers=auth())
+        return [t.nombre for t in g.llamadas[0].tools]
+
+    assert "pedir_datos" not in await tools()                                    # widget anterior
+    assert "pedir_datos" in await tools(formularios=True)
+    assert "pedir_datos" not in await tools(formularios=True, canal="voz")      # sin dónde completarlo
+
+
+async def test_api_guarda_el_formulario_y_lo_devuelve_al_reabrir(api, llm):
+    llm.usar(pide(LlamadaTool("f1", "pedir_datos", pedido(3, aplicar_a_todos=True))), texto("Completá las tasas."))
+    r = await api.post("/v1/chat", json={"mensaje": "factura", "formularios": True}, headers=auth())
+    ev = sse(r)
+    conv = ev[-1][1]["conversacion_id"]
+    (_, enviado), = [e for e in ev if e[0] == "ui"]
+    msgs = (await api.get(f"/v1/conversaciones/{conv}", headers=auth())).json()["mensajes"]
+    guardado = msgs[-1]["formularios"]
+    assert len(guardado) == 1 and guardado[0]["id"] == enviado["acciones"][0]["id"]
+    assert [c["etiqueta"] for c in guardado[0]["campos"]] == ["Línea 0", "Línea 1", "Línea 2"]
+    assert guardado[0]["aplicar_a_todos"] is True and "tipo" not in guardado[0]
+
+    # el historial que ve el modelo en el turno siguiente no lleva los campos
+    g = llm.usar(texto("Gracias"))
+    await api.post("/v1/chat", json={"mensaje": "Respuesta del formulario «Tasa de IVA»:\n- Línea 0: 22 %",
+                                     "conversacion_id": conv, "formularios": True}, headers=auth())
+    previo = json.dumps([[m.texto, [c.parametros for c in m.llamadas]] for m in g.llamadas[0].messages[:-1]])
+    assert "Línea 2" not in previo and '"n_campos": 3' in previo

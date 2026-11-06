@@ -611,6 +611,15 @@ Con `exportar_excel: true` en el sistema, el asistente puede armar una tabla (p.
 - **Topes** (por env): `ASISTENTE_EXCEL_MAX_FILAS` (5000), `ASISTENTE_EXCEL_MAX_COLUMNAS` (50), `ASISTENTE_EXCEL_MAX_KB` (2048) y `ASISTENTE_EXCEL_MAX_POR_DIA` por usuario (20).
 - **Seguridad.** Las celdas de texto que empiezan con `=`, `+`, `-`, `@` se guardan como texto, nunca como fórmula.
 
+### 7.9 Formularios en el widget (`pedir_datos`)
+
+Cuando faltan datos para varias filas o líneas (p. ej. la tasa de IVA de cada línea de una factura), el asistente puede mostrar un formulario en la conversación en vez de pedirlos en prosa. Es una herramienta propia del asistente: **no toca el sistema ni cambia este contrato**; los sistemas no tienen que implementar nada.
+
+- **Evento `ui`.** El widget recibe `{"tipo":"formulario","id","titulo","instruccion?","campos":[{"id","etiqueta","tipo":"opcion|numero|texto","opciones?":[{"valor","etiqueta"}],"valor_sugerido?","contexto?"}],"aplicar_a_todos"}` (hasta 100 campos y 10 opciones por campo; textos de una línea, sin HTML ni enlaces). El modelo no ve el evento: solo recibe «formulario mostrado».
+- **Respuesta.** Al enviar, el widget manda un turno normal del usuario («Respuesta del formulario «título»:» y una línea por campo). Así cuenta como lo que el usuario escribió, y escribir en el sistema sigue pasando por la tarjeta de confirmación de siempre.
+- **Alcance.** Solo el widget en canal de texto: el widget lo declara con `formularios: true` en `POST /v1/chat` (un widget anterior no lo declara y no recibe formularios). No se ofrece en el modo voz ni en WhatsApp, donde el asistente pregunta en texto.
+- **Qué se guarda.** El formulario queda en el mensaje del asistente para repintarlo al reabrir la conversación (`formularios` en `GET /v1/conversaciones/{id}`), de solo lectura y con lo respondido si el turno siguiente lo trae. Para el historial del modelo y la auditoría solo quedan el título y la cantidad de campos. Un formulario por turno.
+
 ## 8. Acciones con confirmación (opcional)
 
 Un sistema puede dejar que el asistente **proponga** escrituras acotadas (agregar, modificar o, con las salvaguardas de [8.6](#86-tools-destructivas-borrar-anular), borrar un dato). Nunca se ejecutan sin que el usuario las confirme con un clic en el widget. Es opcional y está apagado por defecto: un sistema que no lo implemente sigue siendo de solo lectura. El borrado es un cambio aditivo del contrato (sigue siendo la versión `"1"`): un asistente o un sistema que no lo conozca lo trata como cualquier otra escritura.

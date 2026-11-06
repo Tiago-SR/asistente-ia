@@ -130,6 +130,15 @@
     descargar: "Descargar ",
     descargaNoDisponible: "Ya no está disponible",
     descargaFallo: "No se pudo descargar; intenta de nuevo",
+    formElegir: "Elegir…",
+    formTodas: "Aplicar a todas",
+    formEnviar: "Enviar",
+    formEnviado: "Enviado",
+    formCerrado: "Cerrado",
+    formFalta: "Completá todos los datos con valores válidos (faltan {n}).",
+    formOcupado: "Esperá a que termine la respuesta para enviar.",
+    formLargo: "Son demasiados datos para un solo envío. Escribí la respuesta en el chat.",
+    formRespuesta: "Respuesta del formulario «{titulo}»:",
     dictar: "Dictar",
     adjuntar: "Adjuntar imagen",
     quitarImagen: "Quitar imagen",
@@ -840,6 +849,29 @@
     }
     .msg .acciones button.descarga:hover:not(:disabled) { background: var(--c); color: var(--ct); }
     .msg .acciones button.descarga:disabled { opacity: .6; cursor: default; }
+    .formulario { flex: 1 1 100%; box-sizing: border-box; min-width: 0; padding: 12px 14px; border: 1px solid var(--c); border-radius: calc(var(--r) * 1.5); background: var(--f); }
+    .formulario.cerrado { border-color: var(--b); }
+    .formulario:focus { outline: none; }
+    .formulario fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+    .form-titulo { padding: 0; font-weight: 600; margin-bottom: 4px; }
+    .form-instruccion { color: var(--apagado); font-size: 13px; margin-bottom: 8px; }
+    .form-todas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--b); }
+    .form-todas label { font-size: 13px; color: var(--apagado); }
+    .form-filas { max-height: min(60vh, 420px); overflow-y: auto; }
+    .form-filas:focus-visible { outline: 2px solid var(--c); outline-offset: 1px; }
+    .form-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--b) 55%, transparent); }
+    .form-fila:last-child { border-bottom: 0; }
+    .form-texto { flex: 1 1 200px; min-width: 0; display: grid; gap: 1px; }
+    .form-ctx { font-size: 12px; color: var(--apagado); }
+    .formulario select, .formulario input { box-sizing: border-box; flex: 0 1 180px; width: 180px; max-width: 100%; padding: 6px 10px; font: inherit; color: var(--t); background: var(--f); border: 1px solid var(--b); border-radius: var(--r); }
+    .formulario [aria-invalid="true"] { border-color: var(--p-err-t); }
+    .formulario select:focus-visible, .formulario input:focus-visible, .formulario button:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+    .formulario :disabled { opacity: .7; cursor: default; }
+    .form-pie { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+    .form-pie button { flex: none; width: auto; height: auto; display: inline-block; padding: 6px 16px; border-radius: 999px; border: 1px solid var(--c); background: var(--c); color: var(--ct); font: inherit; cursor: pointer; }
+    .form-pie button:disabled { opacity: .45; cursor: default; }
+    .form-error { color: var(--p-err-t); font-size: 13px; }
+    .form-estado { color: var(--apagado); font-size: 13px; }
     .web { font-size: 12px; color: var(--apagado); margin-bottom: 8px; display: grid; gap: 2px; }
     .web-fuentes { display: inline; }
     .msg .web a { color: var(--apagado); margin-left: 6px; }
@@ -1052,6 +1084,38 @@
     }
     e.append(...hijos);
     return e;
+  }
+
+  // ───────────────────────── Formularios (tool `pedir_datos`) ─────────────────────────
+
+  const FORM_LIMITE = 3900;   // el servidor rechaza mensajes de más de 4000 caracteres
+  let formSeq = 0;
+  const recortar = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+  const textoOpcion = (o) => (o.etiqueta === o.valor ? o.etiqueta : `${o.etiqueta} (${o.valor})`);
+  const campoValido = (c) => !!c && typeof c.id === "string" && typeof c.etiqueta === "string" && ["opcion", "numero", "texto"].includes(c.tipo)
+    && (c.tipo !== "opcion" || (Array.isArray(c.opciones) && c.opciones.length > 0 && c.opciones.every((o) => !!o && typeof o.valor === "string" && typeof o.etiqueta === "string")));
+  // Cómo se nombra cada campo en el resumen, de más a menos legible: si no entra en el tope se acortan las etiquetas y al final se usa el id.
+  const rotulos = (c) => [recortar(c.etiqueta, 60), recortar(c.etiqueta, 30), recortar(c.etiqueta, 15), c.id];
+  const encabezadoForm = (titulo) => TEXTOS.formRespuesta.replace("{titulo}", titulo);
+  function resumenFormulario(titulo, campos, valores) {
+    let t = "";
+    for (let nivel = 0; nivel < 4; nivel++) {
+      t = encabezadoForm(titulo) + "\n" + campos.map((c, i) => `- ${rotulos(c)[nivel]}: ${valores[i]}`).join("\n");
+      if (t.length <= FORM_LIMITE) break;
+    }
+    return t;
+  }
+  // Lo inverso, para mostrar lo respondido al reabrir la conversación: una línea por campo, en el orden del formulario.
+  function valoresDeResumen(texto, titulo, campos) {
+    const lineas = String(texto || "").split("\n");
+    if (lineas[0] !== encabezadoForm(titulo) || lineas.length !== campos.length + 1) return null;
+    const valores = [];
+    for (const [i, c] of campos.entries()) {
+      const rotulo = rotulos(c).map((r) => `- ${r}: `).find((p) => lineas[i + 1].startsWith(p));
+      if (!rotulo) return null;
+      valores.push(lineas[i + 1].slice(rotulo.length));
+    }
+    return valores;
   }
 
   // ───────────────────────── Componente ─────────────────────────
@@ -1438,10 +1502,13 @@
         if (!r.ok) throw new Error(r.status);
         const d = await r.json();
         this._convId = id; this._mensajes.replaceChildren(); this._tarjetas.clear(); this._propuestaTurno = false; this._mostrarBienvenida();
-        for (const m of d.mensajes) {
+        for (const [i, m] of d.mensajes.entries()) {
           const b = this._burbuja(m.rol);
           if (m.rol === "assistant") { markdown(m.texto, b); this._botonEscuchar(b, m.texto); } else b.textContent = m.texto;
           for (const f of m.archivos || []) this._descarga(f.id, f.nombre, b, f.vigente !== false);
+          // Solo de lectura, con lo respondido si el turno siguiente lo trae; sin respuesta y siendo lo último, sigue disponible.
+          const siguiente = d.mensajes[i + 1];
+          for (const f of m.formularios || []) this._formulario(f, b, { respuesta: siguiente && siguiente.rol === "user" ? siguiente.texto : null, vivo: !siguiente });
         }
         // Una propuesta que sigue vigente vuelve a mostrarse con su cuenta regresiva (el servidor es la fuente).
         for (const p of d.pendientes || (d.pendiente ? [d.pendiente] : [])) this._confirmacion(p);
@@ -2586,6 +2653,7 @@
       this._pararVoz();
       // un turno nuevo empieza sin «interrumpido» (decir la palabra de activación para dictar lo deja en true hasta la respuesta)
       this._dichoTurno = false; this._propuestaTurno = false; this._leerCortado = false; this._mhDicho.replaceChildren();
+      this._cerrarFormularios();   // un formulario sin enviar queda viejo en cuanto el usuario sigue por otro lado
       if (this._mhActivo()) { this._metricasIniciar(); this._acuseProgramar(); } else this._t = null;
       if (this._mhActivo()) this._mhEstado("respondiendo");   // también si se envió con Enter o el botón
       this._bloquear(true);
@@ -2617,7 +2685,7 @@
     // Devuelve "ok" | "token_expirado" | "error".
     async _turno(texto, burbuja, estado, imagenes = []) {
       const canalVoz = this._mhActivo();   // en el modo voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual)
-      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria(),
+      const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria(), formularios: true,
         ...(imagenes.length ? { imagenes: imagenes.map((i) => ({ tipo: i.tipo, datos: i.datos })) } : {}) });
       const r = await this._conToken((h) => fetchConTimeout(this._servidor + "/v1/chat", {
         method: "POST", signal: this._abort.signal, body: cuerpo,
@@ -3159,8 +3227,100 @@
       caja.append(boton);
     }
 
+    _cerrarFormularios() {
+      for (const f of this._mensajes.querySelectorAll(".formulario:not(.cerrado)")) {
+        f.classList.add("cerrado");
+        f.querySelector("fieldset").disabled = true;
+        f.querySelector(".form-estado").textContent = f.dataset.enviado ? TEXTOS.formEnviado : TEXTOS.formCerrado;
+      }
+    }
+
+    // Formulario de `pedir_datos`: una fila por dato. Al enviar sale como un turno normal del usuario (el mismo camino que el chat).
+    // `respuesta`: el mensaje del usuario que lo contestó (al reabrir); `vivo`: si todavía se puede completar.
+    _formulario(d, burbuja, { respuesta = null, vivo = true } = {}) {
+      const campos = Array.isArray(d.campos) ? d.campos.filter(campoValido) : [];
+      if (!campos.length || typeof d.titulo !== "string") return;
+      let caja = burbuja.querySelector(".acciones");
+      if (!caja) { caja = el("div", { class: "acciones" }); burbuja.append(caja); }
+      const n = ++formSeq, titulo = d.titulo;
+      const previos = respuesta ? valoresDeResumen(respuesta, titulo, campos) : null;
+      const controles = [];
+      const filas = el("div", { class: "form-filas" });
+      if (campos.length > 6) { filas.tabIndex = 0; filas.setAttribute("role", "region"); filas.setAttribute("aria-label", titulo); }
+      for (const [i, c] of campos.entries()) {
+        const cid = `f${n}-${i}`;
+        let ctl;
+        if (c.tipo === "opcion") {
+          ctl = el("select", { id: cid }, el("option", { value: "", textContent: TEXTOS.formElegir }),
+            ...c.opciones.map((o) => el("option", { value: o.valor, textContent: o.etiqueta })));
+          const previo = previos && c.opciones.find((o) => textoOpcion(o) === previos[i]);
+          const inicial = previo ? previo.valor : (!previos && c.opciones.some((o) => o.valor === c.valor_sugerido) ? c.valor_sugerido : "");
+          ctl.value = inicial;
+        } else {
+          ctl = el("input", { id: cid, type: c.tipo === "numero" ? "number" : "text" });
+          if (c.tipo === "numero") { ctl.step = "any"; ctl.inputMode = "decimal"; } else ctl.maxLength = 300;
+          const sug = previos ? previos[i] : (c.valor_sugerido == null ? "" : String(c.valor_sugerido).replace(",", c.tipo === "numero" ? "." : ","));
+          ctl.value = sug;
+        }
+        const texto = el("div", { class: "form-texto" }, el("label", { for: cid, textContent: c.etiqueta }));
+        if (typeof c.contexto === "string" && c.contexto) {
+          texto.append(el("span", { class: "form-ctx", id: cid + "c", textContent: c.contexto }));
+          ctl.setAttribute("aria-describedby", cid + "c");
+        }
+        filas.append(el("div", { class: "form-fila" }, texto, ctl));
+        controles.push({ c, ctl });
+      }
+      const campo = el("fieldset", {}, el("legend", { class: "form-titulo", textContent: titulo }));
+      if (typeof d.instruccion === "string" && d.instruccion) campo.append(el("div", { class: "form-instruccion", textContent: d.instruccion }));
+      // «Aplicar a todas»: solo si hay varios campos de opción con las mismas opciones.
+      const sel = controles.filter((k) => k.c.tipo === "opcion");
+      const claves = (k) => k.c.opciones.map((o) => o.valor).join("\u0000");
+      if (d.aplicar_a_todos === true && sel.length > 1 && sel.every((k) => claves(k) === claves(sel[0]))) {
+        const todas = el("select", { id: `f${n}-todas` }, el("option", { value: "", textContent: TEXTOS.formElegir }),
+          ...sel[0].c.opciones.map((o) => el("option", { value: o.valor, textContent: o.etiqueta })));
+        todas.addEventListener("change", () => { if (todas.value) for (const k of sel) k.ctl.value = todas.value; });
+        campo.append(el("div", { class: "form-todas" }, el("label", { for: todas.id, textContent: TEXTOS.formTodas }), todas));
+      }
+      const error = el("div", { class: "form-error", role: "alert" });
+      const estado = el("span", { class: "form-estado", role: "status" });
+      const enviar = el("button", { type: "submit", textContent: TEXTOS.formEnviar });
+      campo.append(filas, el("div", { class: "form-pie" }, enviar, error));
+      const tarjeta = el("form", { class: "formulario", noValidate: true, tabIndex: -1 }, campo, estado);
+      tarjeta.setAttribute("aria-label", titulo);
+      tarjeta.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        if (campo.disabled) return;
+        error.textContent = "";
+        const valores = [], faltan = [];
+        for (const { c, ctl } of controles) {
+          ctl.removeAttribute("aria-invalid");
+          let v = null;
+          if (c.tipo === "opcion") { const o = c.opciones.find((x) => x.valor === ctl.value); v = o ? textoOpcion(o) : null; }
+          else if (c.tipo === "numero") v = ctl.value !== "" && !ctl.validity.badInput && Number.isFinite(Number(ctl.value)) ? ctl.value : null;
+          else v = ctl.value.trim() || null;
+          if (v === null) { ctl.setAttribute("aria-invalid", "true"); faltan.push(ctl); }
+          valores.push(v);
+        }
+        if (faltan.length) { error.textContent = TEXTOS.formFalta.replace("{n}", faltan.length); faltan[0].focus(); return; }
+        if (this._ocupado) { error.textContent = TEXTOS.formOcupado; return; }
+        const texto = resumenFormulario(titulo, campos, valores);
+        if (texto.length > FORM_LIMITE) { error.textContent = TEXTOS.formLargo; return; }
+        tarjeta.dataset.enviado = "1";
+        this._enviarMensaje(texto);   // cierra el formulario (y cualquier otro abierto) al empezar el turno
+        tarjeta.focus({ preventScroll: true });
+      });
+      if (!vivo || previos) {
+        tarjeta.classList.add("cerrado"); campo.disabled = true;
+        estado.textContent = previos ? TEXTOS.formEnviado : TEXTOS.formCerrado;
+        if (previos) tarjeta.dataset.enviado = "1";
+      }
+      caja.append(tarjeta);
+      this._bajar();
+    }
+
     _acciones(lista, burbuja) {
       for (const a of lista) {
+        if (a && a.tipo === "formulario") { this._formulario(a, burbuja); continue; }
         if (a && a.tipo === "descarga" && typeof a.id === "string" && typeof a.nombre === "string") { this._descarga(a.id, a.nombre, burbuja); continue; }
         if (!a || a.tipo !== "navegar" || typeof a.url !== "string") continue;
         const ev = new CustomEvent("asistente:accion", {

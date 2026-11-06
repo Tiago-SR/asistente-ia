@@ -40,6 +40,9 @@ class Prompts:
         # Capa del Excel descargable (solo en los sistemas con `exportar_excel`).
         archivo_excel = self._dir / "excel.md"
         self._excel = archivo_excel.read_text(encoding="utf-8").strip() if archivo_excel.is_file() else ""
+        # Capa de los formularios del widget (tool `pedir_datos`): solo donde el canal puede dibujarlos.
+        archivo_form = self._dir / "formularios.md"
+        self._formularios = archivo_form.read_text(encoding="utf-8").strip() if archivo_form.is_file() else ""
 
     def validar_dominio(self, ruta: str | None) -> str:
         """Texto del dominio. Lanza `ValueError` si la ruta se sale de prompts/, pesa de más o no se lee."""
@@ -78,6 +81,7 @@ class Prompts:
         leer_imagenes: bool = False,
         excel: bool = False,
         excel_sin_entrega: bool = False,
+        formularios: bool = False,
     ) -> tuple[str, str]:
         dominio = self._dominio(prompt_dominio)
         sesion = [f"Sistema: {sistema_nombre}.", f"Fecha de hoy: {hoy.isoformat()}."]
@@ -98,6 +102,9 @@ class Prompts:
         if excel and self._excel:
             partes.append("## Excel descargable\n" + self._excel)
             version += f"+x{_hash(self._excel)}"
+        if formularios and self._formularios:
+            partes.append("## Formularios\n" + self._formularios)
+            version += f"+f{_hash(self._formularios)}"
         if canal == "voz" and self._voz:
             partes.append("## Canal de voz\n" + self._voz)
             version += f"+v{_hash(self._voz)}"

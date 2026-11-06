@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from asistente.core.adjuntos import contenido_leido
 from asistente.core.excel import compactar_parametros
+from asistente.core.formulario import compactar_parametros as compactar_formulario
 from asistente.core.llm.base import Adjunto, LlamadaTool, Mensaje, Uso
 from asistente.core.web.herramientas import compactar as compactar_busqueda
 from asistente.store.models import Archivo, Conversacion
@@ -21,11 +22,11 @@ _RESULTADO_ANTIGUO = json.dumps(
 )
 
 
-def _a_json(m: Mensaje, archivos: list[dict] | None = None) -> dict:
+def _a_json(m: Mensaje, archivos: list[dict] | None = None, formularios: list[dict] | None = None) -> dict:
     return {
         "texto": m.texto,
         # las filas de un Excel no se guardan: ni en el historial ni se reenvían al modelo
-        "llamadas": [{"id": c.id, "nombre": c.nombre, "parametros": compactar_parametros(c.nombre, c.parametros)}
+        "llamadas": [{"id": c.id, "nombre": c.nombre, "parametros": compactar_parametros(c.nombre, compactar_formulario(c.nombre, c.parametros))}
                      for c in m.llamadas],
         "llamada_id": m.llamada_id,
         # solo metadata: los bytes de una imagen nunca se guardan aquí
@@ -34,6 +35,8 @@ def _a_json(m: Mensaje, archivos: list[dict] | None = None) -> dict:
            if m.adjuntos else {}),
         # referencia a los archivos generados (solo id y nombre); `_desde_json` la ignora: el modelo no la ve
         **({"archivos": archivos} if archivos else {}),
+        # formularios mostrados (para repintarlos de solo lectura); como `archivos`, el modelo no los ve
+        **({"formularios": formularios} if formularios else {}),
     }
 
 
@@ -107,7 +110,8 @@ class Repo:
             return None
         return [
             {"rol": f.rol, "texto": f.contenido["texto"], "creado": f.creado.isoformat(),
-             **({"archivos": [dict(a) for a in f.contenido["archivos"]]} if f.contenido.get("archivos") else {})}
+             **({"archivos": [dict(a) for a in f.contenido["archivos"]]} if f.contenido.get("archivos") else {}),
+             **({"formularios": list(f.contenido["formularios"])} if f.contenido.get("formularios") else {})}
             for f in filas
             if f.rol in ("user", "assistant") and f.contenido.get("texto")
         ]
@@ -121,7 +125,7 @@ class Repo:
     async def guardar_turno(
         self, sistema_id: str, usuario_ref: str, conv_id: uuid.UUID, titulo: str,
         nuevos: list[Mensaje], uso: Uso, modelo: str, prompt_version: str,
-        archivos: list[dict] | None = None,
+        archivos: list[dict] | None = None, formularios: list[dict] | None = None,
     ) -> None:
         """Crea la conversación si es nueva y agrega los mensajes en una sola transacción."""
         async with self._sesiones.begin() as s:
@@ -138,7 +142,7 @@ class Repo:
             for i, m in enumerate(nuevos):
                 s.add(FilaMensaje(
                     conversacion_id=conv_id, rol=m.rol,
-                    contenido=_a_json(m, archivos if i == ultimo else None),
+                    contenido=_a_json(m, archivos if i == ultimo else None, formularios if i == ultimo else None),
                     # el uso del turno completo se registra en su mensaje final
                     tokens_in=uso.tokens_in if i == ultimo else None,
                     tokens_out=uso.tokens_out if i == ultimo else None,

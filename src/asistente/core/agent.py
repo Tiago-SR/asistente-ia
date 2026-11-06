@@ -14,6 +14,7 @@ from typing import Any
 
 from asistente.core import events
 from asistente.core import excel as excels
+from asistente.core import formulario as formularios_tool
 from asistente.core import memoria as memorias
 from asistente.core import recientes as consultas
 from asistente.core.llm.base import Adjunto, LlamadaTool, LLMError, Mensaje, Uso
@@ -111,6 +112,7 @@ async def run_turn(
     web: Web | None = None,
     metricas: Metricas | None = None,
     excel: Archivos | None = None,
+    formularios: bool = False,  # tool local `pedir_datos`: solo si el canal puede dibujar el formulario (widget)
     reservar: bool = True,  # False: el llamador ya reservó el mensaje (`reservar_cuota`) antes de gastar en medios
 ) -> ResultadoTurno:
     config = config or ConfigTurno()
@@ -135,7 +137,7 @@ async def run_turn(
         try:
             async with asyncio.timeout(config.timeout_turno_s):
                 await _loop(ctx, llm, conector, auditoria, limites, historial, texto, emitir,
-                            conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web, excel)
+                            conversacion_id, config, estado, acciones, recientes, memoria, adjuntos, web, excel, formularios)
         except TimeoutError:
             estado.motivo, estado.nuevos = "error", []
             await emitir(events.ERROR, "timeout_turno")
@@ -186,7 +188,7 @@ def _medir(metricas: Metricas, ctx: Contexto, config: ConfigTurno, estado: Resul
 
 async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 conversacion_id, config, estado, acciones=None, recientes=None, memoria=None,
-                adjuntos=(), web=None, excel=None) -> None:
+                adjuntos=(), web=None, excel=None, formularios=False) -> None:
     tools = await conector.tools()
     escrituras = {t.nombre for t in tools if t.escritura}
     destructivas = {t.nombre for t in tools if t.destructiva}
@@ -199,12 +201,15 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         tools = [*tools, *webtools.TOOLS]  # `buscar_web` y `leer_pagina`: internet, aparte de los datos del sistema
     if excel is not None:
         tools = [*tools, excels.TOOL]  # `generar_excel`: un archivo para descargar, no toca al sistema
+    if formularios:
+        tools = [*tools, formularios_tool.TOOL]  # `pedir_datos`: un formulario en el widget, no toca al sistema
     propuestas = 0  # propuestas de este turno (cruza las iteraciones)
     exclusiva = False  # una destructiva o local va sola: nada más se propone en el turno
     guardar = asyncio.Lock()  # las `crear` del turno corren en serie: así el duplicado y el tope horario se ven
     inicio_turno = datetime.now(UTC)  # las pendientes anteriores a él se reemplazan; las del turno conviven
     web_usadas = 0  # búsquedas y lecturas web de este turno
     datos_sistema = False  # el turno ya trajo resultados de tools del sistema (o de recientes)
+    formulario_mostrado = False  # un solo formulario por turno: el usuario responde a ese antes de pedir otro
     leyo_web = False  # el turno ya leyó una página: su texto no es confiable y podría inducir una búsqueda con datos
     reintento_vacio = False  # una respuesta vacía se pide de nuevo una vez
     nuevos = [Mensaje("user", texto, adjuntos=adjuntos)]
@@ -290,6 +295,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         await emit(events.TOOL, [
             _LEGIBLE_WEB[c.nombre] if web is not None and c.nombre in webtools.NOMBRES
             else "Generando el Excel" if excel is not None and c.nombre == excels.NOMBRE
+            else "Preparando el formulario" if formularios and c.nombre == formularios_tool.NOMBRE
             else (_LEGIBLE_ACCION if c.nombre in escrituras or (memoria is not None and c.nombre in memorias.NOMBRES)
                   else _LEGIBLE).format(nombre=c.nombre)
             for c in llamadas
@@ -316,19 +322,22 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
                 if web_usadas > config.web_max_por_turno:
                     atenciones.append(_tope_web(config))
                     continue
-                if c.nombre == webtools.BUSCAR and (leyo_web or datos_sistema or any(_es_dato_sistema(x.nombre, excel, recientes, memoria) for x in llamadas)):
+                if c.nombre == webtools.BUSCAR and (leyo_web or datos_sistema or any(_es_dato_sistema(x.nombre, excel, recientes, memoria, formularios) for x in llamadas)):
                     atenciones.append(_web_tras_datos())
                     continue
                 atenciones.append(_web(ctx, web, limites, auditoria, conversacion_id, c, config, emit,
                                        [*historial, *nuevos]))
             elif excel is not None and c.nombre == excels.NOMBRE:
                 atenciones.append(_generar_excel(ctx, excel, auditoria, conversacion_id, c, config))
+            elif formularios and c.nombre == formularios_tool.NOMBRE:
+                atenciones.append(_pedir_datos(ctx, auditoria, conversacion_id, c, repetido=formulario_mostrado))
+                formulario_mostrado = True
             elif recientes is not None and c.nombre == consultas.NOMBRE:
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
                 atenciones.append(_ejecutar(ctx, conector, auditoria, conversacion_id, c, sem, config))
         leyo_web = leyo_web or any(c.nombre in webtools.NOMBRES for c in llamadas)
-        datos_sistema = datos_sistema or any(_es_dato_sistema(c.nombre, excel, recientes, memoria) for c in llamadas)
+        datos_sistema = datos_sistema or any(_es_dato_sistema(c.nombre, excel, recientes, memoria, formularios) for c in llamadas)
         resultados = await asyncio.gather(*atenciones)
         for c, r in zip(llamadas, resultados, strict=True):
             if r.token_expirado:
@@ -411,6 +420,23 @@ async def _generar_excel(ctx, archivos, auditoria, conversacion_id, c: LlamadaTo
     return r
 
 
+async def _pedir_datos(ctx, auditoria, conversacion_id, c: LlamadaTool, repetido: bool) -> ResultadoTool:
+    """Tool local: valida el formulario y lo deja para el widget (evento `ui`). Se audita sin los campos."""
+    if repetido:
+        r = ResultadoTool(False, error="un_formulario_por_turno",
+                          detalle="ya mostraste un formulario en este turno: termina el turno y espera la respuesta")
+    elif c.argumentos_invalidos:
+        r = ResultadoTool(False, error="parametros_invalidos", detalle="los argumentos no son un objeto JSON")
+    else:
+        r = formularios_tool.ejecutar(c.parametros)
+    try:
+        await auditoria.registrar_tool(ctx, conversacion_id, c.nombre,
+                                       formularios_tool.compactar_parametros(c.nombre, c.parametros), r, 0)
+    except Exception:
+        log.exception("[%s] no se pudo auditar %s", ctx.request_id, c.nombre)
+    return r
+
+
 async def _web(ctx, web, limites, auditoria, conversacion_id, c: LlamadaTool, config, emit, vistos) -> ResultadoTool:
     """Tools locales de internet. Lo buscado o leído se muestra al usuario (evento `web`) y se audita con sus
     parámetros: así una fuga de datos del sistema en la consulta queda a la vista."""
@@ -455,9 +481,10 @@ async def _tope_web(config) -> ResultadoTool:
                                  "responde con lo que tienes")
 
 
-def _es_dato_sistema(nombre: str, excel, recientes, memoria) -> bool:
-    """Una tool que devuelve datos del sistema: ni web, ni Excel, ni memoria local."""
+def _es_dato_sistema(nombre: str, excel, recientes, memoria, formularios=False) -> bool:
+    """Una tool que devuelve datos del sistema: ni web, ni Excel, ni formulario, ni memoria local."""
     return not (nombre in webtools.NOMBRES or (excel is not None and nombre == excels.NOMBRE)
+                or (formularios and nombre == formularios_tool.NOMBRE)
                 or (memoria is not None and nombre in memorias.NOMBRES))
 
 

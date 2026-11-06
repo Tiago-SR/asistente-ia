@@ -26,6 +26,8 @@ from asistente.servicios import LLMNoConfigurado, Servicios
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+FORMULARIO_GUARDADO = ("id", "titulo", "instruccion", "campos", "aplicar_a_todos")  # lo que se repinta al reabrir
+
 
 class ImagenIn(BaseModel):
     tipo: str  # image/jpeg | image/png
@@ -41,6 +43,8 @@ class ChatIn(BaseModel):
     canal: Literal["texto", "voz"] = "texto"
     # Zona del navegador (IANA). Opcional y nunca bloquea: una inválida se ignora y rige la del sistema, luego UTC.
     zona_horaria: str | None = None
+    # El widget que sabe dibujar formularios (tool `pedir_datos`) lo declara; uno anterior no los recibiría bien.
+    formularios: bool = False
 
 
 def _frame(evento: str, datos) -> bytes:
@@ -56,7 +60,7 @@ def _frame(evento: str, datos) -> bytes:
 
 async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, *,
                       canal: Literal["texto", "voz", "whatsapp"] = "texto", zona_cliente: str | None = None,
-                      entrega_excel: bool = True):
+                      entrega_excel: bool = True, formularios: bool = False):
     """Lo común a todo turno (chat web y canales de mensajería): zona, memoria, prompt, contexto y config.
     Devuelve (ctx, config, memoria, web, excel, version del prompt)."""
     cfg = svc.settings
@@ -77,7 +81,7 @@ async def armar_turno(svc: Servicios, sistema, u, modelo: str, request_id: str, 
         usuario_nombre=u.nombre, locale=u.locale, hoy=datetime.now(ZoneInfo(zona_usuario)).date(),
         canal=canal, memoria=recuerdos, web=web is not None,
         leer_imagenes=sistema.leer_imagenes, excel=excel,
-        excel_sin_entrega=habilitado and not entrega_excel,
+        excel_sin_entrega=habilitado and not entrega_excel, formularios=formularios,
     )
     lim = sistema.limites
     ctx = Contexto(
@@ -138,8 +142,10 @@ async def chat(
         conv_id, nueva = uuid.uuid4(), True
 
     request_id = uuid.uuid4().hex
+    ofrece_formularios = body.formularios and body.canal == "texto"  # en voz no hay dónde completarlo
     ctx, config, memoria, web, excel, version = await armar_turno(
-        svc, sistema, u, modelo, request_id, canal=body.canal, zona_cliente=body.zona_horaria)
+        svc, sistema, u, modelo, request_id, canal=body.canal, zona_cliente=body.zona_horaria,
+        formularios=ofrece_formularios)
     historial = [] if nueva else await svc.repo.historial(
         u.sistema_id, u.usuario_ref, conv_id, cfg.max_turnos_historial
     )
@@ -155,6 +161,7 @@ async def chat(
     lectura: asyncio.Task | None = None  # se lanza tras reservar la cuota: leer la imagen es lo caro
 
     generados: list[dict] = []  # tarjetas de descarga del turno: se guardan en el mensaje final para rehidratarlas
+    formularios: list[dict] = []  # ídem para los formularios mostrados
 
     async def turno() -> None:
         nonlocal lectura
@@ -168,6 +175,8 @@ async def chat(
             async def filtrado(evento: str, datos) -> None:
                 if evento == events.UI:
                     generados.extend({"id": a["id"], "nombre": a["nombre"]} for a in datos if a.get("tipo") == "descarga")
+                    formularios.extend({k: a[k] for k in FORMULARIO_GUARDADO if k in a}
+                                       for a in datos if a.get("tipo") == "formulario")
                 if evento != events.DONE:  # `done` se emite recién cuando el turno está guardado
                     await emit(evento, datos)
 
@@ -175,7 +184,8 @@ async def chat(
                                  texto, filtrado, conv_id, config, acciones=svc.acciones,
                                  recientes=svc.recientes if sistema.consultas_recientes else None,
                                  memoria=memoria, adjuntos=adjuntos, web=web, metricas=svc.metricas,
-                                 excel=svc.archivos if excel else None, reservar=False)
+                                 excel=svc.archivos if excel else None, formularios=ofrece_formularios,
+                                 reservar=False)
             if res.completo:
                 try:
                     leidos, uso_lectura = await lectura if lectura else ([], Uso())
@@ -184,7 +194,7 @@ async def chat(
                               for m in res.nuevos]
                     await asyncio.shield(svc.repo.guardar_turno(
                         u.sistema_id, u.usuario_ref, conv_id, (texto or "Imagen")[:60], nuevos,
-                        res.uso + uso_lectura, modelo, version, generados))
+                        res.uso + uso_lectura, modelo, version, generados, formularios))
                 except Exception:
                     log.exception("[%s] no se pudo guardar el turno", request_id)
                     await emit(events.ERROR, "no_se_pudo_guardar")
