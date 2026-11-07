@@ -15,6 +15,9 @@ decisiones de API pública o difíciles de revertir.
   sección 2. Aislamiento por sistema y usuario; el texto de conversaciones anteriores no se borra por esta regla.
 - **Manifiesto por rol de usuario.** Investigación y alternativas en `PLAN_PRODUCTO.md`, sección 3. Propuesta inicial:
   catálogo global más capacidades efectivas emitidas por el anfitrión; los permisos siguen validándose al ejecutar.
+- **Formulario pedido por una tool del sistema.** Hoy `pedir_datos` solo lo llama el modelo; que `crear_comprobante` devuelva un
+  borrador estructurado y el widget lo dibuje exige un cambio de contrato. Detalle y contexto en `PLAN_CREAR_COMPROBANTE.md`
+  de fiscalST (punto 3). Consultar al `asesor` antes.
 - **Fase 6, proactivo (a evaluar).** Investigación en `PLAN_PRODUCTO.md`, sección 4. Empezar por avisos de solo lectura
   en el widget, con eventos persistidos y deduplicación; programaciones y canales externos serían etapas posteriores.
 

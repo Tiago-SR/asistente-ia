@@ -184,3 +184,12 @@ def test_prompt_real_de_formularios_mantiene_las_reglas_de_seguridad():
     texto_prompt = (Prompts("prompts")._formularios)
     assert "VARIAS filas" in texto_prompt and "valor_sugerido" in texto_prompt
     assert "botón de confirmación" in texto_prompt and "contenido de terceros" in texto_prompt
+
+
+def test_campo_opcional_y_borrador_en_el_prompt():
+    r = formulario.ejecutar({"titulo": "Revisá el comprobante", "campos": [
+        {"id": "emisor", "etiqueta": "Emisor", "tipo": "texto", "valor_sugerido": "Frigorífico Las Piedras S.A."},
+        {"id": "serie", "etiqueta": "Serie", "tipo": "texto", "opcional": True}]})
+    assert r.ok and r.ui[0]["campos"][1]["opcional"] is True
+    assert not formulario.ejecutar({"titulo": "x", "campos": [{"id": "a", "etiqueta": "A", "tipo": "texto", "opcional": "si"}]}).ok
+    assert "Borrador de comprobante" in Prompts("prompts")._formularios

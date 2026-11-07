@@ -42,6 +42,7 @@ _CAMPO = {
         "opciones": {"type": "array", "items": _OPCION, "minItems": 2, "maxItems": MAX_OPCIONES},
         "valor_sugerido": {"type": ["string", "number"]},
         "contexto": _texto(100),
+        "opcional": {"type": "boolean", "description": "El usuario puede dejarlo vacío (p. ej. serie, número o RUT que el documento no muestra)."},
     },
     "required": ["id", "etiqueta", "tipo"],
     "additionalProperties": False,
@@ -65,7 +66,8 @@ TOOL = ToolDef(
     "Muestra al usuario un formulario con un campo por fila para completar datos que faltan en VARIAS filas o líneas "
     "(no para una pregunta simple). Cada campo es de tipo «opcion» (con 2 a 10 opciones {valor, etiqueta}), «numero» o "
     "«texto»; en «valor_sugerido» pon la respuesta probable si tienes una pista razonable, y en «contexto» un dato "
-    "informativo de la fila (p. ej. su importe). El usuario responde con un mensaje normal. Después de llamarla termina "
+    "informativo de la fila (p. ej. su importe). Los datos que el documento no tiene y no son imprescindibles van con "
+    "«opcional»: true. El usuario responde con un mensaje normal. Después de llamarla termina "
     "tu turno con una frase breve, sin repetir los campos ni llamar otras herramientas ni asumir valores.",
     PARAMETROS,
 )

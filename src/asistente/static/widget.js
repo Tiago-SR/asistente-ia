@@ -135,6 +135,8 @@
     formEnviar: "Enviar",
     formEnviado: "Enviado",
     formCerrado: "Cerrado",
+    formOpcional: " (opcional)",
+    formSinDato: "(sin dato)",
     formFalta: "Completá todos los datos con valores válidos (faltan {n}).",
     formOcupado: "Esperá a que termine la respuesta para enviar.",
     formLargo: "Son demasiados datos para un solo envío. Escribí la respuesta en el chat.",
@@ -3262,10 +3264,10 @@
         } else {
           ctl = el("input", { id: cid, type: c.tipo === "numero" ? "number" : "text" });
           if (c.tipo === "numero") { ctl.step = "any"; ctl.inputMode = "decimal"; } else ctl.maxLength = 300;
-          const sug = previos ? previos[i] : (c.valor_sugerido == null ? "" : String(c.valor_sugerido).replace(",", c.tipo === "numero" ? "." : ","));
+          const sug = previos ? (previos[i] === TEXTOS.formSinDato ? "" : previos[i]) : (c.valor_sugerido == null ? "" : String(c.valor_sugerido).replace(",", c.tipo === "numero" ? "." : ","));
           ctl.value = sug;
         }
-        const texto = el("div", { class: "form-texto" }, el("label", { for: cid, textContent: c.etiqueta }));
+        const texto = el("div", { class: "form-texto" }, el("label", { for: cid, textContent: c.etiqueta + (c.opcional === true ? TEXTOS.formOpcional : "") }));
         if (typeof c.contexto === "string" && c.contexto) {
           texto.append(el("span", { class: "form-ctx", id: cid + "c", textContent: c.contexto }));
           ctl.setAttribute("aria-describedby", cid + "c");
@@ -3301,6 +3303,7 @@
           if (c.tipo === "opcion") { const o = c.opciones.find((x) => x.valor === ctl.value); v = o ? textoOpcion(o) : null; }
           else if (c.tipo === "numero") v = ctl.value !== "" && !ctl.validity.badInput && Number.isFinite(Number(ctl.value)) ? ctl.value : null;
           else v = ctl.value.trim() || null;
+          if (v === null && c.opcional === true && ctl.value === "") v = TEXTOS.formSinDato;   // vacío a propósito: viaja marcado
           if (v === null) { ctl.setAttribute("aria-invalid", "true"); faltan.push(ctl); }
           valores.push(v);
         }
