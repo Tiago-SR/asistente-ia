@@ -1040,7 +1040,8 @@
   // Reduce una imagen a JPEG de a lo sumo `maxBytes`: baja el lado y la calidad hasta que entra. Lanza si no se puede leer.
   async function reducirImagen(archivo, maxBytes) {
     const bmp = await createImageBitmap(archivo);
-    let lado = 1280, calidad = 0.85;
+    // 2048 y no menos: un ticket largo y angosto (718×2048) con 1280 deja el texto ilegible para el modelo.
+    let lado = 2048, calidad = 0.85;
     try {
       for (let i = 0; i < 6; i++) {
         const k = Math.min(1, lado / Math.max(bmp.width, bmp.height));
@@ -2684,7 +2685,9 @@
 
     // Devuelve "ok" | "token_expirado" | "error".
     async _turno(texto, burbuja, estado, imagenes = []) {
-      const canalVoz = this._mhActivo();   // en el modo voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual)
+      // En la escena de voz el asistente agrega un resumen hablado (la respuesta completa va al chat igual). Con el modo voz
+      // encendido pero el chat a la vista, el usuario escribe y lee: canal «texto», que es donde se ofrecen los formularios.
+      const canalVoz = this._mhActivo() && this._vista === "voz";
       const cuerpo = JSON.stringify({ conversacion_id: this._convId, mensaje: texto, canal: canalVoz ? "voz" : "texto", zona_horaria: zonaHoraria(), formularios: true,
         ...(imagenes.length ? { imagenes: imagenes.map((i) => ({ tipo: i.tipo, datos: i.datos })) } : {}) });
       const r = await this._conToken((h) => fetchConTimeout(this._servidor + "/v1/chat", {

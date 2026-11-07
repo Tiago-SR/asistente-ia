@@ -617,7 +617,7 @@ Cuando faltan datos para varias filas o líneas (p. ej. la tasa de IVA de cada l
 
 - **Evento `ui`.** El widget recibe `{"tipo":"formulario","id","titulo","instruccion?","campos":[{"id","etiqueta","tipo":"opcion|numero|texto","opciones?":[{"valor","etiqueta"}],"valor_sugerido?","contexto?"}],"aplicar_a_todos"}` (hasta 100 campos y 10 opciones por campo; textos de una línea, sin HTML ni enlaces). El modelo no ve el evento: solo recibe «formulario mostrado».
 - **Respuesta.** Al enviar, el widget manda un turno normal del usuario («Respuesta del formulario «título»:» y una línea por campo). Así cuenta como lo que el usuario escribió, y escribir en el sistema sigue pasando por la tarjeta de confirmación de siempre.
-- **Alcance.** Solo el widget en canal de texto: el widget lo declara con `formularios: true` en `POST /v1/chat` (un widget anterior no lo declara y no recibe formularios). No se ofrece en el modo voz ni en WhatsApp, donde el asistente pregunta en texto.
+- **Alcance.** Solo el widget en canal de texto: el widget lo declara con `formularios: true` en `POST /v1/chat` (un widget anterior no lo declara y no recibe formularios). No se ofrece en la escena del modo voz (con el modo voz encendido y el chat a la vista, el widget pide el canal de texto) ni en WhatsApp, donde el asistente pregunta en texto.
 - **Qué se guarda.** El formulario queda en el mensaje del asistente para repintarlo al reabrir la conversación (`formularios` en `GET /v1/conversaciones/{id}`), de solo lectura y con lo respondido si el turno siguiente lo trae. Para el historial del modelo y la auditoría solo quedan el título y la cantidad de campos. Un formulario por turno.
 
 ## 8. Acciones con confirmación (opcional)

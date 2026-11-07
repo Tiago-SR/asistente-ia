@@ -152,6 +152,20 @@ async def test_agente_un_formulario_por_turno_y_parametros_invalidos():
     assert not [e for e in ev if e[0] == "ui"] and aud.registros[0][4] == "parametros_invalidos"
 
 
+async def test_agente_formulario_invalido_se_puede_corregir_en_el_mismo_turno():
+    llm = LLMFalso([pide(LlamadaTool("f1", "pedir_datos", {"titulo": "x", "campos": []})),
+                    pide(LlamadaTool("f2", "pedir_datos", pedido())), texto("listo")])
+    _, ev, aud = await correr(llm)
+    assert len([e for e in ev if e[0] == "ui"]) == 1                      # el segundo, ya válido, sí se muestra
+    assert [r[4] for r in aud.registros[:2]] == ["parametros_invalidos", None]
+
+    llm = LLMFalso([pide(LlamadaTool("f1", "pedir_datos", pedido())),
+                    pide(LlamadaTool("f2", "pedir_datos", pedido())), texto("listo")])
+    _, ev, _ = await correr(llm)
+    assert len([e for e in ev if e[0] == "ui"]) == 1                      # mostrado uno, el siguiente sigue bloqueado
+    assert "un_formulario_por_turno" in llm.llamadas[2].messages[-1].texto
+
+
 # --- prompt ------------------------------------------------------------------------------------
 
 

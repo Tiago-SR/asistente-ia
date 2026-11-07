@@ -301,6 +301,7 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
             for c in llamadas
         ])
         atenciones = []
+        formulario_en_lote = False  # dos `pedir_datos` en la misma tanda: solo atiende la primera
         for c in llamadas:
             local = memoria is not None and c.nombre in memorias.NOMBRES
             if c.nombre in escrituras or local:
@@ -330,8 +331,9 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
             elif excel is not None and c.nombre == excels.NOMBRE:
                 atenciones.append(_generar_excel(ctx, excel, auditoria, conversacion_id, c, config))
             elif formularios and c.nombre == formularios_tool.NOMBRE:
-                atenciones.append(_pedir_datos(ctx, auditoria, conversacion_id, c, repetido=formulario_mostrado))
-                formulario_mostrado = True
+                atenciones.append(_pedir_datos(ctx, auditoria, conversacion_id, c,
+                                               repetido=formulario_mostrado or formulario_en_lote))
+                formulario_en_lote = True
             elif recientes is not None and c.nombre == consultas.NOMBRE:
                 atenciones.append(_consultar_recientes(ctx, recientes, lectura, auditoria, conversacion_id, c))
             else:
@@ -339,6 +341,9 @@ async def _loop(ctx, llm, conector, auditoria, limites, historial, texto, emit,
         leyo_web = leyo_web or any(c.nombre in webtools.NOMBRES for c in llamadas)
         datos_sistema = datos_sistema or any(_es_dato_sistema(c.nombre, excel, recientes, memoria, formularios) for c in llamadas)
         resultados = await asyncio.gather(*atenciones)
+        # Solo cuenta el formulario que llegó a mostrarse: uno con parámetros inválidos se puede corregir y reintentar.
+        formulario_mostrado = formulario_mostrado or any(
+            c.nombre == formularios_tool.NOMBRE and r.ok for c, r in zip(llamadas, resultados, strict=True))
         for c, r in zip(llamadas, resultados, strict=True):
             if r.token_expirado:
                 estado.motivo, estado.nuevos = "token_expirado", []
