@@ -6,6 +6,8 @@ services:
       context: .
       target: dev
     env_file: .env
+    # Como prod: migra al arrancar (idempotente); sin esto, una migración nueva deja el servicio roto hasta correrla a mano.
+    command: sh -c "python -m asistente.store.migrar && exec uvicorn asistente.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src"
     environment:
       ASISTENTE_DATABASE_URL: postgresql+asyncpg://asistente:asistente@postgres:5432/asistente
       ASISTENTE_SISTEMAS_PATH: /config/sistemas.yaml

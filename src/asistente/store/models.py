@@ -362,8 +362,44 @@ class CanalVinculo(Base):
     sistema_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     contacto: Mapped[str] = mapped_column(String(32), primary_key=True)  # sin «+»
     activo: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    # Quién es según el sistema anfitrión: se aprende en el primer token emitido (no es autoritativo); sirve para
+    # comprobar a quién va dirigido un aviso. NULL = aún no identificado (o re-vinculado).
+    usuario_ref: Mapped[str | None] = mapped_column(String(256))
     creado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
     ultimo_uso: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+
+
+class Aviso(Base):
+    """Aviso saliente iniciado por el sistema anfitrión (`contrato/AVISOS.md`). `(sistema_id, id_evento)` lo hace
+    idempotente; `texto` se borra al terminar el envío (es dato de negocio ajeno al asistente)."""
+
+    __tablename__ = "avisos"
+    __table_args__ = (
+        UniqueConstraint("sistema_id", "id_evento"),
+        Index("ix_aviso_cola", "estado", "proximo_intento"),  # reclamo del worker
+        Index("ix_aviso_numero", "sistema_id", "wa_id", "enviado_en"),  # topes diarios y pendientes por número
+        Index("ix_aviso_creado", "creado_en"),  # purga
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sistema_id: Mapped[str] = mapped_column(String(64))
+    id_evento: Mapped[str] = mapped_column(String(128))
+    hash: Mapped[str] = mapped_column(String(64))  # sha256 del payload canónico
+    wa_id: Mapped[str] = mapped_column(String(32))
+    usuario_ref: Mapped[str] = mapped_column(String(256))
+    tipo: Mapped[str] = mapped_column(String(64))
+    ref: Mapped[str | None] = mapped_column(String(40))  # el único dato del contexto que llega al historial
+    texto: Mapped[str | None] = mapped_column(Text)
+    estado: Mapped[str] = mapped_column(String(16), server_default="pendiente")
+    intentos: Mapped[int] = mapped_column(Integer, server_default="0")
+    proximo_intento: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    lease_hasta: Mapped[datetime | None] = mapped_column(_ahora())
+    caduca_en: Mapped[datetime] = mapped_column(_ahora())
+    error: Mapped[str | None] = mapped_column(String(200))
+    mensaje_id: Mapped[str | None] = mapped_column(String(128))
+    enviado_en: Mapped[datetime | None] = mapped_column(_ahora())
+    creado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
+    actualizado_en: Mapped[datetime] = mapped_column(_ahora(), server_default=func.now())
 
 
 class ToolEstado(Base):

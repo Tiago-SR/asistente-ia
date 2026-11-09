@@ -21,6 +21,8 @@ const CAMPOS_SECRETOS: Record<string, string> = {
   auth_hs256: 'Secreto HS256 (solo si el algoritmo es HS256, 32 bytes o más)',
   llm_api_key: 'API key del LLM propio (solo con llm.base_url propio)',
   token_canal: 'Token de canal (el sistema lo exige en /asistente/canal/*; vincular y emitir tokens por mensaje)',
+  token_avisos: 'Token de avisos (el sistema lo envía a /sistemas/{id}/avisos; solo con avisos habilitados)',
+  token_avisos_anterior: 'Token de avisos anterior (solo durante una rotación: cargue el nuevo arriba y retire este después)',
   wa_token: 'WhatsApp (Meta): token permanente del System User',
   wa_app_secret: 'WhatsApp (Meta): App Secret (valida la firma del webhook)',
   wa_verify_token: 'WhatsApp (Meta): verify token (handshake del webhook)',
@@ -316,6 +318,7 @@ export function Sistema({ id, yo, ir }: { id: string; yo: Yo; ir: (r: string) =>
             {interruptor('busqueda_web', 'Búsqueda web')}
             {interruptor('consultas_recientes', 'Consultas recientes')}
             {interruptor('exportar_excel', 'Exportar a Excel')}
+            {interruptor('avisos.habilitado', 'Avisos del sistema por WhatsApp (solo OpenWA; requiere el token de avisos en Secretos)')}
             {interruptor('adjuntos.habilitado', 'Adjuntar imágenes (además requiere un modelo con visión)')}
             {interruptor('leer_imagenes', 'Leer imágenes de cualquier tema y conservar su texto en la conversación (el texto leído, no la imagen, queda guardado y se envía al proveedor del modelo)')}
             <div className="grid gap-4 sm:grid-cols-2">

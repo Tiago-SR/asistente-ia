@@ -188,7 +188,80 @@ paths:
                 type: object
                 required: [ok]
                 properties: { ok: { type: boolean } }
+  /sistemas/{sistema_id}/avisos:
+    servers:
+      - url: https://asistente.example.com
+        description: Lo implementa el ASISTENTE; el sistema es el cliente (AVISOS.md)
+    post:
+      summary: Avisos (opcional). El sistema pide un aviso saliente por WhatsApp a un usuario vinculado
+      description: |
+        Cabecera `Authorization` (Bearer <token_avisos>), distinta del token de canal. Idempotente por `id_evento`:
+        el mismo contenido da `200` con el estado guardado, otro contenido `409`. `202` solo tras persistir. La
+        aceptación no implica entrega. `texto` es una plantilla del sistema: no se interpreta ni llega al modelo.
+        Ver AVISOS.md.
+      parameters:
+        - { name: sistema_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id_evento, tipo, destinatario, texto, contexto]
+              properties:
+                id_evento: { type: string, pattern: "^[A-Za-z0-9._:-]{1,128}$" }
+                tipo: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$", example: refacturacion_pendiente }
+                destinatario:
+                  type: object
+                  additionalProperties: false
+                  required: [usuario_ref, wa_id]
+                  properties:
+                    usuario_ref: { type: string, minLength: 1, maxLength: 256 }
+                    wa_id: { type: string, pattern: "^[0-9]{8,15}$" }
+                texto: { type: string, minLength: 1, maxLength: 4000, description: Máximo efectivo = `avisos.max_texto` del sistema }
+                contexto:
+                  type: object
+                  additionalProperties: false
+                  required: [ref]
+                  properties:
+                    ref: { type: string, pattern: "^[A-Za-z0-9._:-]{1,40}$" }
+                    comprobante_id: { type: [integer, string, "null"] }
+                adjunto: { type: "null", description: Reservado; cualquier otro valor da 422 }
+      responses:
+        "202": { description: Aviso nuevo persistido, content: { application/json: { schema: { $ref: "#/components/schemas/Aviso" } } } }
+        "200": { description: Repetido con el mismo contenido (estado guardado), content: { application/json: { schema: { $ref: "#/components/schemas/Aviso" } } } }
+        "403": { description: Credencial inválida, sistema desconocido, deshabilitado o sin avisos (indistinguibles) }
+        "409": { description: "`id_evento` repetido con contenido distinto" }
+        "413": { description: Cuerpo mayor de 16 KB }
+        "422": { description: Cuerpo inválido, tipo no permitido, texto demasiado largo, adjunto no nulo o destinatario sin vínculo vigente de ese usuario }
+        "429": { description: Demasiados avisos pendientes para ese número (`Retry-After`) }
+  /sistemas/{sistema_id}/avisos/{id_evento}:
+    servers:
+      - url: https://asistente.example.com
+    get:
+      summary: Avisos (opcional). Estado de un aviso
+      parameters:
+        - { name: sistema_id, in: path, required: true, schema: { type: string } }
+        - { name: id_evento, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Estado, content: { application/json: { schema: { $ref: "#/components/schemas/Aviso" } } } }
+        "403": { description: Credencial inválida o sistema sin avisos }
+        "404": { description: Aviso inexistente }
 components:
+  schemas:
+    Aviso:
+      type: object
+      required: [id_evento, tipo, estado, intentos]
+      properties:
+        id_evento: { type: string }
+        tipo: { type: string }
+        estado: { type: string, enum: [pendiente, enviando, enviado, fallido, incierto] }
+        intentos: { type: integer }
+        error: { type: [string, "null"] }
+        creado_en: { type: string, format: date-time }
+        actualizado_en: { type: string, format: date-time }
+        enviado_en: { type: [string, "null"], format: date-time }
   securitySchemes:
     tokenUsuario:
       type: http
@@ -199,3 +272,7 @@ components:
       type: http
       scheme: bearer
       description: Credencial de servicio, solo válida para leer el manifiesto
+    tokenAvisos:
+      type: http
+      scheme: bearer
+      description: Credencial de servicio del sistema hacia el asistente, solo para /sistemas/{id}/avisos (distinta del token de canal)

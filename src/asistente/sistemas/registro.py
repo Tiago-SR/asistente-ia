@@ -15,6 +15,7 @@ Un sistema inválido queda deshabilitado (con el error registrado en `errores`) 
 import copy
 import logging
 import os
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,6 +137,38 @@ class AdjuntosConfig(_Modelo):
     max_kb: int | None = Field(default=None, ge=1)
 
 
+TIPO_AVISO_RE = r"^[a-z][a-z0-9_]{0,63}$"
+
+
+class AvisosConfig(_Modelo):
+    """Avisos salientes iniciados por el sistema anfitrión (`contrato/AVISOS.md`). Apagados por defecto. Los topes
+    protegen el número de WhatsApp (OpenWA no es oficial): lo que no cabe espera en cola hasta `caducidad_h`."""
+
+    habilitado: bool = False
+    # Whitelist de `tipo`; lo no listado se rechaza con 422.
+    tipos: tuple[str, ...] = Field(default=("refacturacion_pendiente", "refacturacion_resultado"), max_length=20)
+    max_texto: int = Field(default=1000, ge=1, le=4000)
+    tope_diario_numero: int = Field(default=20, ge=1, le=1000)  # enviados en 24 h a un mismo número
+    tope_diario_sistema: int = Field(default=200, ge=1, le=10000)  # enviados en 24 h por sistema
+    max_pendientes_numero: int = Field(default=50, ge=1, le=1000)  # en cola por número; más = 429 (contrapresión)
+    caducidad_h: int = Field(default=48, ge=1, le=720)  # un aviso que no salió en este plazo pasa a `vencido`
+    pausa_min_s: float = Field(default=8, ge=0, le=300)  # espaciado entre envíos del sistema, con jitter
+    pausa_max_s: float = Field(default=20, ge=0, le=600)
+
+    @field_validator("tipos")
+    @classmethod
+    def _tipos(cls, valor: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not re.match(TIPO_AVISO_RE, t) for t in valor):
+            raise ValueError(f"tipo de aviso inválido (esperado {TIPO_AVISO_RE})")
+        return valor
+
+    @model_validator(mode="after")
+    def _pausas(self) -> Self:
+        if self.pausa_max_s < self.pausa_min_s:
+            raise ValueError("pausa_max_s no puede ser menor que pausa_min_s")
+        return self
+
+
 class Sistema(_Modelo):
     id: str = Field(pattern=ID_RE)
     nombre: str = Field(min_length=1, max_length=200)
@@ -172,6 +205,8 @@ class Sistema(_Modelo):
     adjuntos: AdjuntosConfig = AdjuntosConfig()
     # Canal de mensajería (strategy): None = ninguno; `proveedor` elige la variante y con ella sus campos y secretos.
     canal_mensajeria: ConfigCanal | None = None
+    # Avisos salientes del anfitrión por el canal de mensajería (hoy solo OpenWA). None = sin avisos.
+    avisos: AvisosConfig | None = None
     # Leer imágenes de cualquier tema cuando el usuario lo pide (facturas, planillas…) y conservar el texto leído en la
     # conversación para los turnos siguientes. Apagado: solo se usan las imágenes pertinentes a las tools del sistema.
     leer_imagenes: bool = False
@@ -214,9 +249,20 @@ class Sistema(_Modelo):
         _url_http(self.base_url, "base_url")
         return self
 
+    @model_validator(mode="after")
+    def _avisos_con_openwa(self) -> Self:
+        # Con Meta, el texto libre fuera de la ventana de 24 h falla de forma asíncrona: no hay entrega fiable.
+        if self.avisos and self.avisos.habilitado and (
+                self.canal_mensajeria is None or self.canal_mensajeria.proveedor != "openwa"):
+            raise ValueError("avisos requiere canal_mensajeria con proveedor openwa")
+        return self
+
 
 # Secretos canónicos de un sistema. Se escriben, nunca se devuelven en claro.
-SECRETOS_BASE = ("auth_hs256", "token_manifiesto", "llm_api_key", "token_canal")
+# `token_avisos` es la credencial que el anfitrión usa PARA llamarnos (entra, no sale): `token_avisos_anterior` es el
+# anterior durante una rotación. A diferencia de los otros bearer, no se borra al cambiar `base_url`.
+SECRETOS_BASE = ("auth_hs256", "token_manifiesto", "llm_api_key", "token_canal", "token_avisos",
+                 "token_avisos_anterior")
 CAMPOS_SECRETOS = SECRETOS_BASE + tuple(c for cs in SECRETOS_CANAL.values() for c in cs)
 
 
@@ -245,6 +291,8 @@ def validar_sistema(config: Mapping, secretos: Mapping[str, str]) -> Sistema:
             faltan.append("auth_hs256")
         if not secretos.get("token_manifiesto"):
             faltan.append("token_manifiesto")
+        if sistema.avisos and sistema.avisos.habilitado and not secretos.get("token_avisos"):
+            faltan.append("token_avisos")
         if faltan:
             raise ValueError(f"faltan secretos: {', '.join(faltan)}")
     return sistema
@@ -288,6 +336,11 @@ def desde_yaml(entrada: Mapping, env: Mapping[str, str]) -> tuple[dict, dict[str
     # Opcional: sin él el sistema no habilita el canal de mensajería (vinculación y token por mensaje).
     if isinstance(conector, dict) and (v := valor(conector.pop("token_canal_env", None))):
         secretos["token_canal"] = v
+    avisos = cfg.get("avisos")
+    if isinstance(avisos, dict):
+        for campo in ("token_avisos", "token_avisos_anterior"):
+            if v := valor(avisos.pop(f"{campo}_env", None)):
+                secretos[campo] = v
     llm = cfg.get("llm")
     if isinstance(llm, dict):
         # Opcionales: sin variable se hereda de la configuración global.

@@ -130,6 +130,7 @@ Demo local: el sistema mock sirve una página con el widget (`MOCK_ASISTENTE_URL
 
 - [`contrato/CONTRATO.md`](contrato/CONTRATO.md): lo que debe implementar el sistema (token, manifiesto, ejecución), credenciales y widget.
 - [`contrato/CANAL_WHATSAPP.md`](contrato/CANAL_WHATSAPP.md): canal WhatsApp opcional (vinculación número-usuario en el sistema, token por mensaje).
+- [`contrato/AVISOS.md`](contrato/AVISOS.md): avisos salientes opcionales (el sistema pide enviar un WhatsApp a un usuario vinculado).
 - [`contrato/GUIA_TOOLS.md`](contrato/GUIA_TOOLS.md): cómo diseñar las tools (elegirlas, describirlas, qué devolver, errores de negocio).
 - `ejemplos/sistema-mock/`: implementación de referencia con datos ficticios. `MOCK_DEFECTO=<nombre>` rompe una regla del contrato a propósito (lo usan los tests del verificador).
 - `ejemplos/sistema-php/`: implementación de referencia en PHP 8.2+ (router mínimo, portable a CodeIgniter 4), con tests PHPUnit y su [README](ejemplos/sistema-php/README.md). Servicio `sistema-php` en `docker-compose.dev.yml` (puerto 8203).
@@ -187,6 +188,35 @@ secretos `owa_api_key` y `owa_webhook_secret`. `RESOLVE_LID_TO_PHONE`, `SSRF_ALL
 WhatsApp vive en el volumen `openwa-data` (es una credencial: no respaldar sin cifrar; si se pierde, escanear el QR otra vez).
 Los medios llegan en base64 por el webhook solo hasta 1 MiB; por encima, el canal los baja por REST
 (`WEBHOOK_MEDIA_INLINE_MAX_BYTES=0` para no enviarlos nunca).
+
+### Avisos salientes del sistema anfitrión (OpenWA)
+
+El sistema puede pedir un aviso por WhatsApp a un usuario ya vinculado: `POST /sistemas/{sistema_id}/avisos` (idempotente por
+`id_evento`) y `GET /sistemas/{sistema_id}/avisos/{id_evento}` (estado). Contrato, requisitos `AVI-*` y casos en
+[`contrato/AVISOS.md`](contrato/AVISOS.md); es aditivo (no sube `"contrato": "1"`). El asistente solo transporta: el texto es una
+plantilla del sistema, no pasa por el modelo ni dispara tools, y en el historial solo queda «Aviso enviado: <tipo>, ref <ref>».
+Se habilita por sistema (apagado por defecto, solo con canal `openwa`):
+
+```yaml
+avisos:
+  habilitado: true
+  tipos: [refacturacion_pendiente, refacturacion_resultado]   # whitelist
+  tope_diario_numero: 20      # enviados en 24 h a un mismo número
+  tope_diario_sistema: 200
+  max_pendientes_numero: 50   # más en cola = 429
+  caducidad_h: 48             # lo que no salió en este plazo queda fallido (vencido)
+  pausa_min_s: 8              # espaciado entre envíos del sistema, con jitter
+  pausa_max_s: 20
+```
+
+Exige el secreto `token_avisos` (panel → Secretos; el interruptor «Avisos» está en Funciones). Es la credencial con la que el
+sistema nos llama: distinta del token de canal y no se borra al cambiar la URL. Rotación: pasar el actual a
+`token_avisos_anterior`, cargar el nuevo, cambiarlo en el sistema y borrar el anterior. Un worker del lifespan toma los avisos con
+`FOR UPDATE SKIP LOCKED` y un lease; un timeout o resultado ambiguo deja el aviso `incierto` (sin reintento) y solo un rechazo
+seguro del canal (conexión fallida, 4xx) se reintenta con espera creciente. La tabla `avisos` se purga con la retención del
+sistema (solo los terminados); el texto se borra al terminar el envío. Un aviso entregado no cuenta como uso del vínculo.
+Los vínculos guardan ahora el `usuario_ref` que el sistema indicó al emitir el primer token (migración 0016): un número recién
+vinculado no recibe avisos hasta ser identificado (se hace al vincular).
 
 Webhook: `GET/POST /canal/{sistema_id}/webhook` (sin sesión ni CSRF; autentica la firma del proveedor; todo fallo es 403).
 El `location /` del nginx de ejemplo ya lo deja pasar (`/admin` y `/panel` siguen cerrados). En dev, un túnel HTTPS

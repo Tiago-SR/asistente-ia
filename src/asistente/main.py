@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from asistente.api import (
     admin,
+    avisos,
     canal,
     chat,
     confirmaciones,
@@ -24,6 +25,7 @@ from asistente.api import (
     widget,
 )
 from asistente.api.acceso_admin import AccesoAdmin
+from asistente.api.avisos_flujo import bucle_avisos
 from asistente.api.cors import CorsSistemas
 from asistente.api.errores import ErrorApi, manejar_error_api
 from asistente.api.tope_cuerpo import TopeCuerpo
@@ -57,10 +59,13 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
                             svc.admin or (AdminSql(svc.sesiones) if svc.sesiones is not None else None),
                             svc.settings.admin_auditoria_dias,
                             ResumenSql(svc.sesiones) if svc.sesiones is not None else None,
-                            svc.archivos, svc.canal_mensajes, svc.canal_vinculos))
+                            svc.archivos, svc.canal_mensajes, svc.canal_vinculos, svc.avisos))
         escritor = None
         if propio and app.state.servicios.metricas is not None:
             escritor = asyncio.create_task(app.state.servicios.metricas.bucle())
+        entrega = None
+        if propio and app.state.servicios.avisos is not None:  # SKIP LOCKED: varias réplicas no duplican envíos
+            entrega = asyncio.create_task(bucle_avisos(app.state.servicios))
         sondeo = None
         fuente = app.state.servicios.registro.fuente_bd
         if propio and fuente is not None:
@@ -74,7 +79,7 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
         try:
             yield
         finally:
-            for tarea in (purga, sondeo, escritor):
+            for tarea in (purga, sondeo, escritor, entrega):
                 if tarea:
                     tarea.cancel()
             svc = app.state.servicios
@@ -112,7 +117,8 @@ def create_app(servicios: Servicios | None = None) -> FastAPI:
     app.add_middleware(AccesoAdmin)  # el último añadido es el más externo: corta antes que CORS
     app.add_middleware(TopeCuerpo)  # el más externo: corta antes que nadie parsee el cuerpo
     routers = (chat.router, confirmaciones.router, conversaciones.router, estado.router, memoria.router,
-               voz.router, admin.router, widget.router, descargas.router, canal.router, privacidad.router)
+               voz.router, admin.router, widget.router, descargas.router, canal.router, avisos.router,
+               privacidad.router)
     for r in routers:
         app.include_router(r)
     panel.montar(app)  # solo si la imagen trae el panel compilado (prod); en dev lo sirve Vite

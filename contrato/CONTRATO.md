@@ -719,6 +719,10 @@ Una tool que borra o anula se declara con `"destructiva": true` y `confirmacion`
 
 Un sistema puede dejar que sus usuarios hablen con el asistente por WhatsApp. El sistema, no el asistente, decide a qué usuario corresponde cada número: el usuario vincula su número desde su sesión web con un código de un solo uso, y el asistente pide un token por mensaje con una credencial de servicio propia (el **token de canal**). Es opcional y compatible: no cambia ningún endpoint existente ni sube `"contrato"`. Endpoints, claims (`canal: "whatsapp"`), reglas de escritura y casos de prueba en [`CANAL_WHATSAPP.md`](CANAL_WHATSAPP.md).
 
+### 9.1 Avisos salientes (opcional)
+
+El sistema puede pedir al asistente que avise por WhatsApp a un usuario ya vinculado (`POST /sistemas/{id}/avisos`, idempotente, con un **token de avisos** propio, distinto del de canal). Aquí el asistente implementa los endpoints y el sistema es el cliente; el texto es una plantilla del sistema y no llega al modelo. Aditivo: no sube `"contrato"`. Requisitos (`AVI-*`), payload, estados y casos en [`AVISOS.md`](AVISOS.md).
+
 
 ### Extensión: líneas de un documento
 

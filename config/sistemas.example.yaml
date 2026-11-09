@@ -17,6 +17,12 @@ sistemas:
       #   clave_publica_env: PHP_PUBKEY   # PEM de la clave pública; sin `secreto_env`
     conector:
       token_manifiesto_env: PHP_MANIFEST_TOKEN
+    # Avisos salientes del sistema por WhatsApp (contrato/AVISOS.md). Apagado por defecto; solo con canal_mensajeria openwa.
+    # Exige el secreto `token_avisos` (aquí por variable de entorno; en el panel, en Secretos).
+    # avisos:
+    #   habilitado: true
+    #   token_avisos_env: PHP_AVISOS_TOKEN      # lo que el sistema envía como Bearer; opcional `token_avisos_anterior_env` al rotar
+    #   tipos: [refacturacion_pendiente, refacturacion_resultado]
     # Opcional: idioma de los usuarios cuyo token no trae el claim `locale` (el claim, si viene, manda).
     # locale_defecto: es-UY
     # Fase 5 (opcional): escrituras que el modelo puede PROPONER; el usuario confirma cada una en pantalla.

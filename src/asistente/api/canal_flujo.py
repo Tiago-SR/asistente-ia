@@ -95,8 +95,7 @@ async def procesar(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -
                 return  # silencio, igual que con un código inválido
             await _vincular(svc, sistema_id, canal, m, cod.group(1))
         elif await svc.canal_vinculos.activo(sistema_id, m.contacto):
-            lock = _locks.get((sistema_id, m.contacto)) or _locks.setdefault((sistema_id, m.contacto), asyncio.Lock())
-            async with lock:
+            async with candado(sistema_id, m.contacto):
                 if m.tipo == "boton":
                     await _boton(svc, sistema_id, canal, m)
                 elif not canal.tiene_botones and m.tipo == "texto" and (c := _CODIGO.match(m.texto or "")):
@@ -157,6 +156,7 @@ async def _vincular(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante, 
     except _SistemaRechaza:
         return  # código inválido (404) o sistema sin canal: silencio, sin distinguir
     await svc.canal_vinculos.guardar(sistema_id, m.contacto)
+    await _identificar(svc, sistema_id, m.contacto)  # aprende el usuario del vínculo: sin él no se aceptan avisos
     nombre = r.get("nombre")
     await canal.enviar_texto(m.contacto, f"Listo{', ' + nombre if isinstance(nombre, str) and nombre else ''}: "
                                          "tu número quedó vinculado. Escribime lo que necesites.")
@@ -176,7 +176,10 @@ async def _identificar(svc: Servicios, sistema_id: str, contacto: str, extra: di
     except (TokenInvalido, KeyError, TypeError) as e:
         log.warning("canal %s: token de canal inválido (%s)", sistema_id, type(e).__name__)
         return None
-    return u if u.sistema_id == sistema_id else None  # el sistema emisor debe ser el de la ruta
+    if u.sistema_id != sistema_id:  # el sistema emisor debe ser el de la ruta
+        return None
+    await svc.canal_vinculos.identificar(sistema_id, contacto, u.usuario_ref)  # a quién van los avisos
+    return u
 
 
 def _mac(clave: str, decision: str, accion_id: str, contacto: str) -> str:
@@ -199,9 +202,18 @@ def _codigo(clave: str, accion_id: str, contacto: str) -> str:
     return "".join(_ALFABETO[b % len(_ALFABETO)] for b in d[:5])
 
 
-def _conv_id(sistema_id: str, u: Usuario) -> uuid.UUID:
+def conv_id_de(sistema_id: str, usuario_ref: str) -> uuid.UUID:
     """Una conversación por número y usuario: el id es determinista y guardar_turno la crea la primera vez."""
-    return uuid.uuid5(_NS, f"{sistema_id}:{u.usuario_ref}")
+    return uuid.uuid5(_NS, f"{sistema_id}:{usuario_ref}")
+
+
+def _conv_id(sistema_id: str, u: Usuario) -> uuid.UUID:
+    return conv_id_de(sistema_id, u.usuario_ref)
+
+
+def candado(sistema_id: str, contacto: str) -> asyncio.Lock:
+    """El lock por número de los turnos: un aviso no se intercala con la respuesta que se está enviando."""
+    return _locks.get((sistema_id, contacto)) or _locks.setdefault((sistema_id, contacto), asyncio.Lock())
 
 
 class _ConectorCanal:
@@ -255,6 +267,7 @@ async def _boton(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     u = await _identificar(svc, sistema_id, m.contacto)
     if sistema is None or u is None:
         return
+    await svc.canal_vinculos.tocar(sistema_id, m.contacto)  # el sistema lo cuenta como uso: el vínculo local también
     await _resolver(svc, sistema_id, sistema, canal, m, u, f[1], uuid.UUID(f[2]))
 
 
@@ -268,6 +281,7 @@ async def _codigo_texto(svc: Servicios, sistema_id: str, canal: Canal, m: Entran
     u = await _identificar(svc, sistema_id, m.contacto)
     if sistema is None or u is None:
         return
+    await svc.canal_vinculos.tocar(sistema_id, m.contacto)  # el sistema lo cuenta como uso: el vínculo local también
     cod = f[2].upper()
     for a in await svc.acciones.pendientes_de(sistema_id, u.usuario_ref, _conv_id(sistema_id, u)):
         if hmac.compare_digest(_codigo(clave, str(a.id), m.contacto), cod):

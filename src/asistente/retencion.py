@@ -8,6 +8,7 @@ from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
 from asistente.store.archivos import ArchivosSql
 from asistente.store.auditoria import AuditoriaSql
+from asistente.store.avisos import AvisosSql
 from asistente.store.canal import MensajesCanal, VinculosCanal
 from asistente.store.memoria import MemoriaSql
 from asistente.store.repo import Repo
@@ -23,7 +24,7 @@ async def purgar_todos(
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
     admin: AdminSql | None = None, admin_auditoria_dias: int = 0, resumen: ResumenSql | None = None,
     archivos: ArchivosSql | None = None, canal_mensajes: MensajesCanal | None = None,
-    canal_vinculos: VinculosCanal | None = None,
+    canal_vinculos: VinculosCanal | None = None, avisos: AvisosSql | None = None,
 ) -> dict[str, int]:
     """Una pasada. Un sistema que falle no impide purgar a los demás."""
     borradas: dict[str, int] = {}
@@ -45,6 +46,8 @@ async def purgar_todos(
                 await resumen.purgar_eventos(sistema.id, sistema.retencion_dias)
             if canal_vinculos is not None:  # teléfonos vinculados sin uso
                 await canal_vinculos.purgar(sistema.id, sistema.retencion_dias)
+            if avisos is not None:  # teléfonos y referencias de avisos ya terminados
+                await avisos.purgar(sistema.id, sistema.retencion_dias)
         except Exception:
             log.exception("purga de %s fallida", sistema.id)
     if acciones is not None:  # no es de ningún sistema: fuera del bucle
@@ -86,10 +89,10 @@ async def bucle_purga(
     auditoria: AuditoriaSql | None = None, memoria: MemoriaSql | None = None,
     admin: AdminSql | None = None, admin_auditoria_dias: int = 0, resumen: ResumenSql | None = None,
     archivos: ArchivosSql | None = None, canal_mensajes: MensajesCanal | None = None,
-    canal_vinculos: VinculosCanal | None = None,
+    canal_vinculos: VinculosCanal | None = None, avisos: AvisosSql | None = None,
 ) -> None:
     """Purga al arrancar y luego cada `intervalo_s`. Se cancela al apagar."""
     while True:
         await purgar_todos(registro, repo, acciones, auditoria, memoria, admin, admin_auditoria_dias,
-                           resumen, archivos, canal_mensajes, canal_vinculos)
+                           resumen, archivos, canal_mensajes, canal_vinculos, avisos)
         await asyncio.sleep(intervalo_s)

@@ -10,11 +10,13 @@ EstadoEnvioT = Literal["enviado", "entregado", "leido", "fallido", "otro"]
 
 
 class ErrorCanal(Exception):
-    """Falla del proveedor. `codigo` es el código de error propio del proveedor, si vino."""
+    """Falla del proveedor. `codigo` es el código de error propio del proveedor, si vino. `no_enviado` solo es True
+    cuando es seguro que el mensaje no salió (el proveedor lo rechazó o ni se conectó): lo demás es incierto."""
 
-    def __init__(self, mensaje: str, *, estado: int | None = None, codigo: int | None = None) -> None:
+    def __init__(self, mensaje: str, *, estado: int | None = None, codigo: int | None = None,
+                 no_enviado: bool = False) -> None:
         super().__init__(mensaje)
-        self.estado, self.codigo = estado, codigo
+        self.estado, self.codigo, self.no_enviado = estado, codigo, no_enviado
 
 
 @dataclass(frozen=True)

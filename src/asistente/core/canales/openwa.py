@@ -99,10 +99,14 @@ class CanalOpenWA:
         try:
             r = await self._http.request(metodo, url, headers={"X-API-Key": self._api_key},
                                          timeout=self._timeout, **kw)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as e:  # ni llegó a OpenWA
+            raise ErrorCanal(f"OpenWA inaccesible: {type(e).__name__}", no_enviado=True) from e
         except httpx.HTTPError as e:
             raise ErrorCanal(f"OpenWA inaccesible: {type(e).__name__}") from e
         if r.status_code >= 400:
-            raise ErrorCanal(f"OpenWA HTTP {r.status_code}", estado=r.status_code)
+            # Un 4xx (salvo 408) es un rechazo previo al envío; un 5xx o un 408 pueden ocultar un envío ya hecho.
+            raise ErrorCanal(f"OpenWA HTTP {r.status_code}", estado=r.status_code,
+                             no_enviado=400 <= r.status_code < 500 and r.status_code != 408)
         return r
 
     async def _json(self, metodo: str, url: str, **kw) -> dict:

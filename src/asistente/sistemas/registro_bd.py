@@ -212,6 +212,9 @@ async def exportar_yaml(sesiones: async_sessionmaker[AsyncSession]) -> dict:
             d["conector"] = {**d["conector"], "token_manifiesto_env": _env_de(f.id, "token_manifiesto")}
         if "token_canal" in tiene:
             d["conector"] = {**d["conector"], "token_canal_env": _env_de(f.id, "token_canal")}
+        for campo in ("token_avisos", "token_avisos_anterior"):
+            if campo in tiene:
+                d["avisos"] = {**(d.get("avisos") or {}), f"{campo}_env": _env_de(f.id, campo)}
         if "llm_api_key" in tiene:
             d["llm"] = {**(d.get("llm") or {}), "api_key_env": _env_de(f.id, "llm_api_key")}
         salida.append(d)

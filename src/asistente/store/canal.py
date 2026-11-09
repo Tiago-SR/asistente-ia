@@ -62,10 +62,28 @@ class VinculosCanal:
             return bool((await s.execute(q)).scalar())
 
     async def guardar(self, sistema_id: str, contacto: str) -> None:
+        """Alta o re-vinculación: el vínculo empieza de cero (fechas y usuario), el sistema dirá quién es."""
         async with self._sesiones.begin() as s:
             await s.execute(pg_insert(CanalVinculo).values(sistema_id=sistema_id, contacto=contacto, activo=True)
                             .on_conflict_do_update(index_elements=["sistema_id", "contacto"],
-                                                   set_={"activo": True, "ultimo_uso": func.now()}))
+                                                   set_={"activo": True, "ultimo_uso": func.now(),
+                                                         "creado_en": func.now(), "usuario_ref": None}))
+
+    async def vigente(self, sistema_id: str, contacto: str, usuario_ref: str) -> bool:
+        """¿Hay un vínculo activo de este usuario que el sistema anfitrión aún daría por bueno? Mismos plazos que
+        CAN-08 (90 días desde el alta, 30 sin uso). No llama al sistema ni cuenta como uso."""
+        ahora = datetime.now(UTC)
+        async with self._sesiones() as s:
+            q = select(CanalVinculo.contacto).where(
+                CanalVinculo.sistema_id == sistema_id, CanalVinculo.contacto == contacto,
+                CanalVinculo.activo.is_(True), CanalVinculo.usuario_ref == usuario_ref,
+                CanalVinculo.ultimo_uso > ahora - timedelta(days=30),
+                CanalVinculo.creado_en > ahora - timedelta(days=90))
+            return (await s.execute(q)).first() is not None
+
+    async def identificar(self, sistema_id: str, contacto: str, usuario_ref: str) -> None:
+        """El sistema emitió un token para este número: aprende de quién es (el uso se marca aparte, con `tocar`)."""
+        await self._poner(sistema_id, contacto, usuario_ref=usuario_ref)
 
     async def listar(self, sistema_id: str) -> list[CanalVinculo]:
         async with self._sesiones() as s:

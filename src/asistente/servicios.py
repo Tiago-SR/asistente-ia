@@ -34,6 +34,7 @@ from asistente.store.acciones import AccionesSql
 from asistente.store.admin import AdminSql
 from asistente.store.archivos import ArchivosSql
 from asistente.store.auditoria import AuditoriaSql
+from asistente.store.avisos import AvisosSql
 from asistente.store.canal import MensajesCanal, VinculosCanal
 from asistente.store.memoria import MemoriaSql
 from asistente.store.metricas import MetricasSql
@@ -76,6 +77,7 @@ class Servicios:
     metricas: Metricas | None = None  # None = sin métricas de uso (tests)
     canal_mensajes: MensajesCanal | None = None  # dedupe de entrantes del canal de mensajería
     canal_vinculos: VinculosCanal | None = None  # contactos vinculados por sistema
+    avisos: AvisosSql | None = None  # cola de avisos salientes del anfitrión
     http: httpx.AsyncClient | None = None  # cliente saliente compartido (canales de mensajería)
 
 
@@ -223,5 +225,6 @@ def construir(settings: Settings) -> Servicios:
         metricas=MetricasSql(sesiones, Tarifas(settings.precios_path)),
         canal_mensajes=MensajesCanal(sesiones),
         canal_vinculos=VinculosCanal(sesiones),
+        avisos=AvisosSql(sesiones),
         http=saliente,
     )

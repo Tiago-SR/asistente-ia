@@ -9,6 +9,8 @@ Reglas que protegen el acceso a terceros:
 - cambiar `base_url` borra `token_manifiesto` y `token_canal` (el conector lo reenvía a esa URL); cambiar `llm.base_url` borra
   `llm_api_key`. Un secreto nuevo en el mismo cambio los reemplaza; sin él, y con el sistema habilitado, se
   rechaza (`base_url_requiere_token`) en vez de apagarlo en silencio.
+- `token_avisos` (y `_anterior`) NO se borran al cambiar `base_url`: es la credencial con la que el anfitrión nos
+  llama, no una que enviemos a esa URL. Con avisos habilitados, `token_avisos` es obligatorio (`faltan_secretos`).
 - los secretos se escriben, nunca se devuelven: solo `configurado`, huella y fecha.
 - la auditoría guarda la config sin secretos y, de los secretos, solo qué campos cambiaron.
 """
@@ -199,7 +201,8 @@ async def crear_sistema(sesiones: async_sessionmaker[AsyncSession], config: Mapp
 async def actualizar_sistema(
     sesiones: async_sessionmaker[AsyncSession], cifrador: Cifrador | None, sistema_id: str, cuerpo: Mapping,
     version: int, *, token_manifiesto: str | None = None, llm_api_key: str | None = None,
-    auth_hs256: str | None = None, token_canal: str | None = None, por: str, ip: str | None = None,
+    auth_hs256: str | None = None, token_canal: str | None = None, token_avisos: str | None = None,
+    token_avisos_anterior: str | None = None, por: str, ip: str | None = None,
 ) -> dict:
     """PUT de la configuración completa (no un parche) con control de `version`. Los secretos que lleguen se
     cifran en la misma transacción; ver las reglas de `base_url` y `llm.base_url` en la cabecera del módulo."""
@@ -207,7 +210,8 @@ async def actualizar_sistema(
         raise ErrorEscritura(422, "campo_reservado")
     nuevos = {c: v for c, v in (("token_manifiesto", token_manifiesto), ("llm_api_key", llm_api_key),
                                 ("auth_hs256", auth_hs256),
-                                ("token_canal", token_canal)) if v is not None}
+                                ("token_canal", token_canal), ("token_avisos", token_avisos),
+                                ("token_avisos_anterior", token_avisos_anterior)) if v is not None}
     for campo, valor in nuevos.items():
         _validar_secreto(campo, valor)
     if nuevos and cifrador is None:

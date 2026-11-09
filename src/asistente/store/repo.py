@@ -56,8 +56,8 @@ def recortar(mensajes: list[Mensaje], max_turnos: int) -> list[Mensaje]:
     resultados de tools son viejos y se reemplazan por una nota: contienen datos de clientes
     y ocupan contexto. Una búsqueda web queda reducida a títulos y URLs (ver `compactar`)."""
     inicios = [i for i, m in enumerate(mensajes) if m.rol == "user"]
-    if not inicios:
-        return []
+    if not inicios:  # solo avisos del sistema (conversación abierta por un aviso): el modelo debe verlos
+        return [m for m in mensajes if m.rol == "assistant" and not m.llamadas][-max_turnos:]
     desde = inicios[-max_turnos] if len(inicios) > max_turnos else 0
     salida = []
     for m in mensajes[desde:]:
@@ -165,6 +165,23 @@ class Repo:
             s.add(FilaMensaje(conversacion_id=conv_id, rol="assistant",
                               contenido=_a_json(Mensaje("assistant", texto))))
             return True
+
+    async def agregar_aviso(self, sistema_id: str, usuario_ref: str, conv_id: uuid.UUID, titulo: str,
+                            texto: str) -> None:
+        """Deja constancia de un aviso saliente: un mensaje del asistente (`origen: aviso`) escrito por el servidor.
+        Crea la conversación si todavía no existe. `texto` NUNCA lleva texto libre de terceros: es historial que el
+        modelo lee como propio."""
+        async with self._sesiones.begin() as s:
+            conv = (await s.execute(
+                select(Conversacion).where(*self._propia(sistema_id, usuario_ref, conv_id))
+            )).scalar_one_or_none()
+            if conv is None:
+                s.add(Conversacion(id=conv_id, sistema_id=sistema_id, usuario_ref=usuario_ref, titulo=titulo[:200]))
+                await s.flush()
+            else:
+                conv.actualizada = func.now()
+            s.add(FilaMensaje(conversacion_id=conv_id, rol="assistant",
+                              contenido={**_a_json(Mensaje("assistant", texto)), "origen": "aviso"}))
 
     async def borrar(self, sistema_id: str, usuario_ref: str, conv_id: uuid.UUID) -> bool:
         async with self._sesiones.begin() as s:

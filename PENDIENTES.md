@@ -18,9 +18,13 @@ decisiones de API pública o difíciles de revertir.
 - **Formulario pedido por una tool del sistema.** Hoy `pedir_datos` solo lo llama el modelo; que `crear_comprobante` devuelva un
   borrador estructurado y el widget lo dibuje exige un cambio de contrato. Detalle y contexto en `PLAN_CREAR_COMPROBANTE.md`
   de fiscalST (punto 3). Consultar al `asesor` antes.
-- **Fase 6, proactivo (a evaluar).** Investigación en `PLAN_PRODUCTO.md`, sección 4. Empezar por avisos de solo lectura
-  en el widget, con eventos persistidos y deduplicación; programaciones y canales externos serían etapas posteriores.
-
+- **Fase 6, proactivo (parcial).** Investigación en `PLAN_PRODUCTO.md`, sección 4. **Hecho (2026-11-09, fases A1–A3 del plan de
+  fiscalST `PLAN_NOTIFICAR_WHATSAPP.md`):** avisos salientes del anfitrión por WhatsApp/OpenWA (`contrato/AVISOS.md`, tabla `avisos`,
+  worker con lease, topes y espaciado, turno de contexto mínimo). Falta: **A4** adjunto PDF inline (nivel de tope de cuerpo
+  intermedio en `tope_cuerpo.py`; hoy `adjunto` solo admite `null`); bandeja de avisos en el widget; programaciones y otros
+  canales (Meta exigiría plantillas aprobadas); preferencias/baja por usuario. Atajos conocidos del worker: el espaciado y los topes
+  salen de la tabla, pero los topes son «blandos» con varias réplicas (dos workers podrían pasarse por uno), no hay tope de
+  intentos fallidos de autenticación por IP en `/sistemas/{id}/avisos` y `Meta` no está soportado para avisos.
 ## Modo voz continuo en el celular (spike sin probar)
 
 Hoy el modo voz usa `SpeechRecognition` del navegador (y, con `voz-motor="servidor"`, captura por turno con VAD por
