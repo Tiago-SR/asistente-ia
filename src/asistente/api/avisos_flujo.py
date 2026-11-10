@@ -57,7 +57,7 @@ async def _persistir(operacion: Callable, *args) -> bool:
 async def _contexto(svc: Servicios, a: Aviso) -> None:
     """Mejor esfuerzo: el aviso ya salió. Un turno mínimo del asistente en la conversación del usuario."""
     try:
-        await svc.repo.agregar_aviso(a.sistema_id, a.usuario_ref, conv_id_de(a.sistema_id, a.usuario_ref), "WhatsApp",
+        await svc.repo.agregar_aviso(a.sistema_id, a.usuario_ref, conv_id_de(a.sistema_id, a.usuario_ref, a.wa_id), "WhatsApp",
                                      texto_de_contexto(a.tipo, a.ref))
     except Exception:
         log.exception("avisos %s: no se pudo dejar el contexto de %s", a.sistema_id, a.id_evento)

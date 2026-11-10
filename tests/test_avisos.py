@@ -367,7 +367,7 @@ async def test_el_turno_de_contexto_no_lleva_texto_de_terceros(mundo):
     wa = await mundo.vincular(usuario="u-ctx")
     c = await _aceptar(mundo, wa, usuario="u-ctx", texto=inyeccion)
     await mundo.correr()
-    conv = conv_id_de(mundo.sid, "u-ctx")
+    conv = conv_id_de(mundo.sid, "u-ctx", wa)
     vis = await mundo.svc.repo.visibles(mundo.sid, "u-ctx", conv)
     assert [(m["rol"], m["texto"]) for m in vis] == [("assistant", "Aviso enviado: refacturación pendiente, ref F-1234")]
     hist = await mundo.svc.repo.historial(mundo.sid, "u-ctx", conv, 10)  # el modelo ve el aviso aunque no haya turno de usuario
@@ -458,3 +458,16 @@ async def test_re_vincular_reinicia_el_vinculo(mundo, sesiones):
     await mundo.svc.canal_vinculos.identificar(mundo.sid, wa, "9")
     assert await mundo.svc.canal_vinculos.vigente(mundo.sid, wa, "9")
     assert not await mundo.svc.canal_vinculos.vigente(mundo.sid, wa, "7")
+
+
+async def test_dos_numeros_del_mismo_usuario_no_comparten_conversacion(mundo):
+    """Varias personas bajo una cuenta compartida: el contexto del aviso queda en la conversación de SU número y las conversaciones no se mezclan."""
+    a, b = await mundo.vincular(usuario="u-comp"), await mundo.vincular(usuario="u-comp")
+    assert conv_id_de(mundo.sid, "u-comp", a) != conv_id_de(mundo.sid, "u-comp", b)
+    assert conv_id_de(mundo.sid, "u-comp", a) == conv_id_de(mundo.sid, "u-comp", a)  # determinista
+    await _aceptar(mundo, a, usuario="u-comp")
+    await mundo.correr()
+    va = await mundo.svc.repo.visibles(mundo.sid, "u-comp", conv_id_de(mundo.sid, "u-comp", a))
+    vb = await mundo.svc.repo.visibles(mundo.sid, "u-comp", conv_id_de(mundo.sid, "u-comp", b))
+    assert [m["texto"] for m in va] == ["Aviso enviado: refacturación pendiente, ref F-1234"]
+    assert not vb  # None: la conversación del otro número ni existe

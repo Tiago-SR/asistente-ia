@@ -560,14 +560,13 @@ def test_a_whatsapp_tabla_encabezados_y_negrita():
     assert a_whatsapp("| Campo | Ha |\n|---|---|\n| El Matorral | 540 |") == "- El Matorral: 540"
 
 
-# --- confirmación por código (canales sin botones, p. ej. OpenWA) ---
+# --- confirmación con 1 / 2 (canales sin botones, p. ej. OpenWA) ---
 
-async def _proponer_codigo(escribe):
-    import re
+async def _proponer_opciones(escribe):
     salida = escribe[1]
     salida.tiene_botones = False
     await _proponer_texto(escribe)
-    return re.search(r"CONFIRMAR (\w{5}) o CANCELAR", salida.enviados[-1][1])[1]
+    assert "Presioná 1 para confirmar" in salida.enviados[-1][1] and "Presioná 2 para cancelar" in salida.enviados[-1][1]
 
 
 async def _proponer_texto(escribe):
@@ -580,42 +579,35 @@ async def _proponer_texto(escribe):
     await procesar(svc, "mock-a", salida, _msg("anotá una helada"))
 
 
-async def test_codigo_confirma_una_sola_vez_y_no_llega_al_modelo(escribe):
-    from asistente.api.canal_flujo import VENCIDA, procesar
-    svc, salida, llm, mock_a, u = escribe
-    cod = await _proponer_codigo(escribe)
-    assert salida.botones == [] and mock_a.NOTAS[u] == []
-    antes = len(llm.actual.llamadas)
-    await procesar(svc, "mock-a", salida, _msg(f"confirmar {cod.lower()}"))
-    assert [n["texto"] for n in mock_a.NOTAS[u]] == ["Helada"]
-    await procesar(svc, "mock-a", salida, _msg(f"CONFIRMAR {cod}"))
-    assert len(mock_a.NOTAS[u]) == 1 and salida.enviados[-1][1] == VENCIDA
-    assert len(llm.actual.llamadas) == antes  # ni la confirmación ni el reintento llamaron al modelo
-
-
-async def test_codigo_cancelar_incorrecto_o_ajeno_no_escribe(escribe):
-    from asistente.api.canal_flujo import VENCIDA, procesar
-    svc, salida, _, mock_a, u = escribe
-    cod = await _proponer_codigo(escribe)
-    await svc.canal_vinculos.guardar("mock-a", "59800000001")
-    await procesar(svc, "mock-a", salida, _msg("CONFIRMAR AAAAA"))
-    assert salida.enviados[-1][1] == VENCIDA and mock_a.NOTAS[u] == []
-    await procesar(svc, "mock-a", salida, _msg(f"CONFIRMAR {cod}", "59800000001"))  # código de otro número
-    assert mock_a.NOTAS[u] == []
-    await procesar(svc, "mock-a", salida, _msg(f"cancelar {cod}"))
-    assert mock_a.NOTAS[u] == [] and "cancelado" in salida.enviados[-1][1]
-    await procesar(svc, "mock-a", salida, _msg(f"CONFIRMAR {cod}"))  # ya cancelada
-    assert mock_a.NOTAS[u] == []
-
-
-async def test_confirmar_sin_codigo_va_al_modelo_y_no_ejecuta(escribe):
+async def test_uno_confirma_una_sola_vez_y_no_llega_al_modelo(escribe):
     from asistente.api.canal_flujo import procesar
     svc, salida, llm, mock_a, u = escribe
-    await _proponer_codigo(escribe)
+    await _proponer_opciones(escribe)
+    assert salida.botones == [] and mock_a.NOTAS[u] == []
+    antes = len(llm.actual.llamadas)
+    await procesar(svc, "mock-a", salida, _msg(" 1 "))
+    assert [n["texto"] for n in mock_a.NOTAS[u]] == ["Helada"]
+    assert len(llm.actual.llamadas) == antes  # la confirmación no llamó al modelo
     from asistente.core.llm.falso import texto
-    llm.usar(texto("Necesito el código."))
-    await procesar(svc, "mock-a", salida, _msg("sí, confirmar"))
+    llm.usar(texto("No hay nada pendiente."))
+    await procesar(svc, "mock-a", salida, _msg("1"))  # ya no hay propuesta: es un mensaje normal
+    assert len(mock_a.NOTAS[u]) == 1 and len(llm.actual.llamadas) == 1  # llegó al modelo (usar reinicia el conteo)
+
+
+async def test_dos_cancela_y_ajeno_o_distinto_de_1_2_no_escribe(escribe):
+    from asistente.api.canal_flujo import procesar
+    svc, salida, llm, mock_a, u = escribe
+    await _proponer_opciones(escribe)
+    await svc.canal_vinculos.guardar("mock-a", "59800000001")
+    await procesar(svc, "mock-a", salida, _msg("1", "59800000001"))  # otro número: su propia conversación
     assert mock_a.NOTAS[u] == []
+    from asistente.core.llm.falso import texto
+    llm.usar(texto("Necesito que presiones 1."))
+    await procesar(svc, "mock-a", salida, _msg("sí, confirmar"))  # solo 1 / 2
+    await procesar(svc, "mock-a", salida, _msg("12"))
+    assert mock_a.NOTAS[u] == []
+    await procesar(svc, "mock-a", salida, _msg("2"))
+    assert mock_a.NOTAS[u] == [] and "cancelado" in salida.enviados[-1][1]
 
 
 def test_acuse_varia_y_saluda_solo_tras_una_pausa():

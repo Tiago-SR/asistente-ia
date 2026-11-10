@@ -86,6 +86,11 @@ class AvisosSql:
             return (await s.execute(select(func.max(Aviso.enviado_en)).where(
                 Aviso.sistema_id == sistema_id, Aviso.estado.in_(_CONSUMEN)))).scalar_one()
 
+    async def ultimo_envio_a(self, sistema_id: str, wa_id: str) -> datetime | None:
+        async with self._sesiones() as s:
+            return (await s.execute(select(func.max(Aviso.enviado_en)).where(
+                Aviso.sistema_id == sistema_id, Aviso.wa_id == wa_id, Aviso.estado.in_(_CONSUMEN)))).scalar_one()
+
     async def enviados_24h(self, sistema_id: str, wa_id: str | None = None) -> int:
         desde = datetime.now(UTC) - timedelta(hours=24)
         async with self._sesiones() as s:

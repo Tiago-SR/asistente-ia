@@ -23,7 +23,7 @@ class CanalMetaConfig(BaseModel):
 class CanalOpenWAConfig(BaseModel):
     """OpenWA (github.com/rmyndharis/OpenWA, MIT, autoalojado): automatiza WhatsApp Web, NO es la API oficial
     (riesgo de baneo del número). Sin botones: las escrituras de `acciones` se confirman escribiendo un código
-    (`CONFIRMAR <código>`). El alta de la sesión (QR) y del webhook en OpenWA es manual (ver README). El host de `base_url` interno debe figurar en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS."""
+    (`1` o `2`). El alta de la sesión (QR) y del webhook en OpenWA es manual (ver README). El host de `base_url` interno debe figurar en ASISTENTE_HOSTS_INTERNOS_PERMITIDOS."""
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     proveedor: Literal["openwa"]

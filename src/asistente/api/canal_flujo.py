@@ -45,8 +45,7 @@ FALLO = "No pude responder ahora. Probá de nuevo en un momento."
 MAX_RESPUESTA = 4096  # tope de un mensaje de texto de WhatsApp
 _VINCULAR = re.compile(r"^\s*vincular\s+([A-Za-z0-9-]{4,40})\s*$", re.IGNORECASE)
 _BOTON = re.compile(r"^(ok|no):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([0-9a-f]{16})$")
-_CODIGO = re.compile(r"^\s*(confirmar|cancelar)\s+([A-Za-z0-9]{5})\s*$", re.IGNORECASE)
-_ALFABETO = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # sin 0 O 1 I L
+_OPCION = re.compile(r"^\s*([12])\s*$")  # 1 = confirmar, 2 = cancelar (canales sin botones)
 VENCIDA = "Esa propuesta ya no está vigente. Pedímela de nuevo si todavía la querés."
 NO_CONFIRMADA = "No pude confirmar la acción. No se guardó nada."
 _NS = uuid.UUID("6f1f5f0e-7d52-4d0e-9c4f-2a1f0a7c9b11")
@@ -98,9 +97,8 @@ async def procesar(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -
             async with candado(sistema_id, m.contacto):
                 if m.tipo == "boton":
                     await _boton(svc, sistema_id, canal, m)
-                elif not canal.tiene_botones and m.tipo == "texto" and (c := _CODIGO.match(m.texto or "")):
-                    await _codigo_texto(svc, sistema_id, canal, m, c)  # nunca llega al LLM
-                else:
+                elif not (not canal.tiene_botones and m.tipo == "texto" and (c := _OPCION.match(m.texto or ""))
+                          and await _opcion_texto(svc, sistema_id, canal, m, c[1])):  # con una propuesta pendiente no llega al LLM
                     await _turno(svc, sistema_id, canal, m)
         # else: sin vínculo y sin código, silencio
     except ErrorCanal as e:
@@ -196,19 +194,15 @@ def _clave(svc: Servicios, sistema_id: str) -> str | None:
     return svc.registro.secreto(sistema_id, "wa_app_secret") or svc.registro.secreto(sistema_id, "owa_webhook_secret")
 
 
-def _codigo(clave: str, accion_id: str, contacto: str) -> str:
-    """Código de 5 caracteres atado a la acción y al número (sin guardarlo): reemplaza al botón donde no hay botones."""
-    d = hmac.new(clave.encode(), f"cod|{accion_id}|{contacto}".encode(), hashlib.sha256).digest()
-    return "".join(_ALFABETO[b % len(_ALFABETO)] for b in d[:5])
+def conv_id_de(sistema_id: str, usuario_ref: str, contacto: str) -> uuid.UUID:
+    """Una conversación por número (y usuario): el id es determinista y guardar_turno la crea la primera vez. Varias personas pueden estar
+    vinculadas bajo el mismo `usuario_ref` (una cuenta compartida): con una sola conversación se mezclarían sus historiales y el turno de una
+    reemplazaría la acción pendiente de otra. Las conversaciones anteriores (sin contacto en el id) quedan huérfanas: no se migran."""
+    return uuid.uuid5(_NS, f"{sistema_id}:{usuario_ref}:{contacto}")
 
 
-def conv_id_de(sistema_id: str, usuario_ref: str) -> uuid.UUID:
-    """Una conversación por número y usuario: el id es determinista y guardar_turno la crea la primera vez."""
-    return uuid.uuid5(_NS, f"{sistema_id}:{usuario_ref}")
-
-
-def _conv_id(sistema_id: str, u: Usuario) -> uuid.UUID:
-    return conv_id_de(sistema_id, u.usuario_ref)
+def _conv_id(sistema_id: str, u: Usuario, contacto: str) -> uuid.UUID:
+    return conv_id_de(sistema_id, u.usuario_ref, contacto)
 
 
 def candado(sistema_id: str, contacto: str) -> asyncio.Lock:
@@ -233,7 +227,7 @@ class _ConectorCanal:
 
 async def _ofrecer(svc: Servicios, sistema_id: str, canal: Canal, u: Usuario, contacto: str, clave: str,
                    tarjetas: list[dict]) -> None:
-    """Una propuesta por vez: la primera sale con botones (o con un código si el canal no los tiene), las demás se cancelan."""
+    """Una propuesta por vez: la primera sale con botones (o con «1 / 2» si el canal no los tiene), las demás se cancelan."""
     elegida = None
     for t in tarjetas:
         if elegida is None and not t.get("destructiva") and not t.get("local"):
@@ -249,8 +243,7 @@ async def _ofrecer(svc: Servicios, sistema_id: str, canal: Canal, u: Usuario, co
                 (_boton_id(clave, "ok", elegida["id"], contacto), "Confirmar"),
                 (_boton_id(clave, "no", elegida["id"], contacto), "Cancelar")])
         else:
-            cod = _codigo(clave, elegida["id"], contacto)
-            await canal.enviar_texto(contacto, f"{cuerpo}\n\nRespondé CONFIRMAR {cod} o CANCELAR {cod}. Vence pronto.")
+            await canal.enviar_texto(contacto, f"{cuerpo}\n\nPresioná 1 para confirmar.\nPresioná 2 para cancelar.\nVence en pocos minutos.")
     except ErrorCanal:
         await svc.acciones.cancelar(sistema_id, u.usuario_ref, uuid.UUID(elegida["id"]))  # sin botones nadie la confirma
         raise
@@ -271,23 +264,21 @@ async def _boton(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     await _resolver(svc, sistema_id, sistema, canal, m, u, f[1], uuid.UUID(f[2]))
 
 
-async def _codigo_texto(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante, f: re.Match) -> None:
-    """`CONFIRMAR|CANCELAR <código>` donde no hay botones. El código ata la decisión a una acción pendiente de este
-    número; si no corresponde a ninguna, «vencida» (y tope de intentos), y nunca se pasa al modelo."""
-    clave = _clave(svc, sistema_id)
-    if not (clave and svc.acciones is not None and await _cupo(svc, sistema_id, m.contacto, "codigo", 5, 20, 100, 1000)):
-        return
+async def _opcion_texto(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante, opcion: str) -> bool:
+    """`1` (confirmar) o `2` (cancelar) donde no hay botones. Vale solo para la última propuesta pendiente de este número;
+    si no hay ninguna devuelve False y el mensaje sigue su curso normal (puede ser la respuesta a otra pregunta)."""
+    if svc.acciones is None or not await _cupo(svc, sistema_id, m.contacto, "opcion", 10, 60, 200, 2000):
+        return False
     sistema = svc.registro.obtener(sistema_id)
     u = await _identificar(svc, sistema_id, m.contacto)
     if sistema is None or u is None:
-        return
+        return False
+    pendientes = await svc.acciones.pendientes_de(sistema_id, u.usuario_ref, _conv_id(sistema_id, u, m.contacto))
+    if not pendientes:
+        return False
     await svc.canal_vinculos.tocar(sistema_id, m.contacto)  # el sistema lo cuenta como uso: el vínculo local también
-    cod = f[2].upper()
-    for a in await svc.acciones.pendientes_de(sistema_id, u.usuario_ref, _conv_id(sistema_id, u)):
-        if hmac.compare_digest(_codigo(clave, str(a.id), m.contacto), cod):
-            await _resolver(svc, sistema_id, sistema, canal, m, u, "ok" if f[1].lower() == "confirmar" else "no", a.id)
-            return
-    await canal.enviar_texto(m.contacto, VENCIDA)
+    await _resolver(svc, sistema_id, sistema, canal, m, u, "ok" if opcion == "1" else "no", pendientes[-1].id)
+    return True
 
 
 async def _resolver(svc: Servicios, sistema_id: str, sistema, canal: Canal, m: Entrante, u: Usuario,
@@ -348,7 +339,13 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
     if u is None:
         return
     previo = await svc.canal_vinculos.tocar(sistema_id, m.contacto)
-    inactivo = None if previo is None else datetime.now(UTC) - previo.astimezone(UTC)
+    # Un aviso que el asistente le mandó también es conversación: contestarlo no empieza de cero (ni saluda como si fuera la primera vez).
+    ultimo = previo
+    if (avisos := getattr(svc, "avisos", None)) is not None:
+        aviso = await avisos.ultimo_envio_a(sistema_id, m.contacto)
+        if aviso is not None and (ultimo is None or aviso > ultimo):
+            ultimo = aviso
+    inactivo = None if ultimo is None else datetime.now(UTC) - ultimo.astimezone(UTC)
     saludar = inactivo is None or inactivo > PAUSA_SALUDO
     activo = inactivo is not None and inactivo < PAUSA_ACUSE
 
@@ -388,7 +385,7 @@ async def _turno(svc: Servicios, sistema_id: str, canal: Canal, m: Entrante) -> 
             log.info("[%s] medio rechazado (%s)", request_id, type(e).__name__)
             await canal.enviar_texto(m.contacto, MEDIO_FALLO)
             return
-    conv_id = _conv_id(sistema_id, u)
+    conv_id = _conv_id(sistema_id, u, m.contacto)
     historial = await svc.repo.historial(sistema_id, u.usuario_ref, conv_id, svc.settings.max_turnos_historial)
     error: list[str] = []
 

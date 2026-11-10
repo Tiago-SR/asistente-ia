@@ -227,7 +227,7 @@ saber el sistema:
 | Qué es | WhatsApp Web autoalojado: el número es una cuenta de WhatsApp común, no oficial | WhatsApp Business Cloud API, número de empresa |
 | Endpoints del sistema | los de §1 | los de §1 |
 | Lectura (`asistente:lectura`) | sí | sí |
-| Escritura por el canal (§4.1) | sí, opt-in del operador; la confirmación es **escribir un código** (`CONFIRMAR 4F7K2`), no un botón | sí, opt-in del operador, con confirmación por botones |
+| Escritura por el canal (§4.1) | sí, opt-in del operador; la confirmación es **responder `1` (confirmar) o `2` (cancelar)** a la última propuesta, no un botón | sí, opt-in del operador, con confirmación por botones |
 | Texto de la pantalla «Vincular WhatsApp» | «número del asistente» = el número de la sesión de OpenWA que te dé el operador | el número de la empresa en Meta |
 | Quién valida el origen del mensaje | firma HMAC del webhook de OpenWA, verificada por el asistente | firma de Meta, verificada por el asistente |
 
