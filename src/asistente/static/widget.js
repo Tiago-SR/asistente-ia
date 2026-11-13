@@ -142,7 +142,11 @@
     formLargo: "Son demasiados datos para un solo envío. Escribí la respuesta en el chat.",
     formRespuesta: "Respuesta del formulario «{titulo}»:",
     dictar: "Dictar",
-    adjuntar: "Adjuntar imagen",
+    adjuntar: "Adjuntar",
+    elegirArchivo: "Elegir un archivo",
+    sacarFoto: "Sacar una foto",
+    capturar: "Capturar",
+    camaraError: "No pude acceder a la cámara. Revisá el permiso del navegador.",
     quitarImagen: "Quitar imagen",
     avisoImagen: "Las imágenes viajan a un servicio externo de procesamiento para responderte y no se guardan.",
     avisoImagenLee: "Las imágenes viajan a un servicio externo que lee su texto. La imagen no se guarda, pero el texto leído queda en la conversación hasta que la borres o venza su retención.",
@@ -963,6 +967,19 @@
     form button.adjuntar { background: transparent; color: var(--apagado); border: 1px solid var(--b); }
     form button.adjuntar:hover:not(:disabled) { color: var(--c); border-color: var(--c); }
     form button.adjuntar[hidden] { display: none; }
+    .entrada { position: relative; }
+    .adj-menu { position: absolute; left: 24px; bottom: 64px; z-index: 6; display: flex; flex-direction: column; min-width: 180px; padding: 4px;
+      background: var(--f); border: 1px solid var(--b); border-radius: calc(var(--r) * 1.2); box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+    .adj-menu[hidden] { display: none; }
+    .adj-menu button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: calc(var(--r) * .8); cursor: pointer; font-size: 14px; }
+    .adj-menu button:hover, .adj-menu button:focus-visible { background: var(--suave); }
+    .adj-menu svg { width: 18px; height: 18px; flex: none; }
+    .camara { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; background: rgba(0,0,0,.8); }
+    .camara[hidden] { display: none; }
+    .camara video { max-width: 100%; max-height: calc(100% - 70px); border-radius: var(--r); background: #000; }
+    .camara .cam-botones { display: flex; gap: 10px; }
+    .camara .cam-botones button { padding: 9px 18px; border-radius: 999px; border: 1px solid var(--b); background: var(--f); color: inherit; font: inherit; cursor: pointer; }
+    .camara .cam-botones button.primario { background: var(--c); border-color: var(--c); color: var(--ct); }
     .imagenes { max-width: var(--asistente-ancho-columna, 760px); margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 8px; }
     .imagenes:empty { display: none; }
     .soltar { display: none; position: absolute; inset: 8px; z-index: 30; align-items: center; justify-content: center; text-align: center; padding: 16px;
@@ -1005,6 +1022,7 @@
     enviar: "M12 19V5M5 12l7-7 7 7",
     mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
     adjuntar: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
+    camara: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
     parar: "M7 7h10v10H7z",
     chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
     manos: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M2 9v4M22 9v4",
@@ -1181,6 +1199,7 @@
     disconnectedCallback() {
       this._vigilarTema(false);
       if (this._ajFuera) document.removeEventListener("pointerdown", this._ajFuera, true);
+      this._adjMenuCerrar(); this._camCerrar();
       if (this._abort) this._abort.abort();
       this._detenerGrabacion(true);
       this._detenerReco(true);
@@ -1261,7 +1280,26 @@
       this._adjInput = el("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
       this._adjInput.addEventListener("change", () => { const f = [...this._adjInput.files]; this._adjInput.value = ""; this._imgElegir(f); });
       this._adjBtn = el("button", { type: "button", class: "adjuntar", hidden: true, title: TEXTOS.adjuntar, "aria-label": TEXTOS.adjuntar }, icono("adjuntar"));
-      this._adjBtn.addEventListener("click", () => this._adjInput.click());
+      this._adjBtn.addEventListener("click", () => this._adjClip());
+      // en el móvil «capture» abre la app de cámara; en escritorio (laptop) se usa la cámara web con vista previa propia
+      this._camInput = el("input", { type: "file", accept: "image/*", capture: "environment", hidden: true });
+      this._camInput.addEventListener("change", () => { const f = [...this._camInput.files]; this._camInput.value = ""; this._imgElegir(f); });
+      const itemArchivo = el("button", { type: "button", role: "menuitem" }, icono("adjuntar"), el("span", { textContent: TEXTOS.elegirArchivo }));
+      const itemFoto = el("button", { type: "button", role: "menuitem" }, icono("camara"), el("span", { textContent: TEXTOS.sacarFoto }));
+      itemArchivo.addEventListener("click", () => { this._adjMenuCerrar(); this._adjInput.click(); });
+      itemFoto.addEventListener("click", () => { this._adjMenuCerrar(); this._camAbrir(); });
+      this._adjFoto = itemFoto;
+      this._adjMenu = el("div", { class: "adj-menu", role: "menu", hidden: true }, itemArchivo, itemFoto);
+      this._camVideo = el("video", { autoplay: true, playsinline: true, muted: true });
+      const camCapturar = el("button", { type: "button", class: "primario", textContent: TEXTOS.capturar });
+      const camCancelar = el("button", { type: "button", textContent: TEXTOS.cancelar });
+      camCapturar.addEventListener("click", () => this._camCapturar());
+      camCancelar.addEventListener("click", () => this._camCerrar());
+      this._camCaja = el("div", { class: "camara", role: "dialog", "aria-label": TEXTOS.sacarFoto, hidden: true }, this._camVideo, el("div", { class: "cam-botones" }, camCapturar, camCancelar));
+      this.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        if (!this._camCaja.hidden) this._camCerrar(); else if (!this._adjMenu.hidden) this._adjMenuCerrar();
+      });
       this._imgChips = el("div", { class: "imagenes" });
       // el aviso «suelta aquí» sigue al arrastre; el contador evita el parpadeo de dragenter/dragleave entre elementos hijos
       this._soltar = el("div", { class: "soltar", "aria-hidden": "true", textContent: TEXTOS.soltarImagenes });
@@ -1281,7 +1319,7 @@
         if (f.length) { e.preventDefault(); this._imgSoltados(f); }
       });
       this._imgAviso = el("div", { class: "aviso-voz", role: "status" });
-      const form = el("form", {}, this._adjBtn, this._adjInput, this._entrada, this._mic, this._enviar);
+      const form = el("form", {}, this._adjBtn, this._adjInput, this._camInput, this._entrada, this._mic, this._enviar);
       form.addEventListener("submit", (e) => { e.preventDefault(); this._enviarForm(); });
       // indicador de manos libres: visible siempre que el micrófono esté abierto, con el botón de apagar
       this._mhEtiqueta = el("span", { class: "mh-estado", role: "status", "aria-live": "polite" });
@@ -1310,13 +1348,13 @@
       this._escena = el("section", { class: "escena", "aria-label": TEXTOS.escenaVoz }, this._mhDicho, this._verChat);
       this.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._mhActivo()) this._mhApagar(""); });
       this._form = form;
-      this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, this._imgChips, form, this._imgAviso, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
+      this._cajaEntrada = el("div", { class: "entrada" }, this._mhCaja, this._imgChips, this._adjMenu, form, this._imgAviso, this._avisoVoz, el("div", { class: "pie", textContent: TEXTOS.pie }));
       this._construirMemoria();
       this._construirAjustes();
       const principal = el("main", { class: "principal" }, barra, this._scroll, this._escena, this._cajaEntrada, this._memPanel, this._ajPanel);
 
       this._aviso = el("div", { class: "aviso", textContent: TEXTOS.noDisponible });
-      r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso, this._soltar);
+      r.append(...(MOSTRAR_HISTORIAL ? [lateral, velo] : []), principal, this._aviso, this._soltar, this._camCaja);
       this._mostrarBienvenida();
       this._aplicarNombre();
     }
@@ -2612,6 +2650,52 @@
       this._imgPintar(error);
     }
 
+    // cámara disponible: el móvil la abre con «capture»; en escritorio hace falta getUserMedia (solo en contexto seguro)
+    _camDisponible() {
+      return window.matchMedia?.("(pointer: coarse)").matches || !!navigator.mediaDevices?.getUserMedia;
+    }
+
+    // el clip abre un menú (archivo | foto); sin cámara disponible va directo al selector de archivos
+    _adjClip() {
+      if (!this._camDisponible()) { this._adjInput.click(); return; }
+      if (!this._adjMenu.hidden) { this._adjMenuCerrar(); return; }
+      this._adjMenu.hidden = false;
+      this._adjFuera = (e) => { const t = e.composedPath(); if (!t.includes(this._adjMenu) && !t.includes(this._adjBtn)) this._adjMenuCerrar(); };
+      document.addEventListener("pointerdown", this._adjFuera, true);
+    }
+
+    _adjMenuCerrar() {
+      if (!this._adjMenu) return;
+      this._adjMenu.hidden = true;
+      if (this._adjFuera) { document.removeEventListener("pointerdown", this._adjFuera, true); this._adjFuera = null; }
+    }
+
+    async _camAbrir() {
+      if (window.matchMedia?.("(pointer: coarse)").matches || !navigator.mediaDevices?.getUserMedia) { this._camInput.click(); return; }
+      try {
+        this._camFlujo = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      } catch (e) { this._imgPintar(TEXTOS.camaraError); return; }
+      this._camVideo.srcObject = this._camFlujo;
+      this._camCaja.hidden = false;
+    }
+
+    _camCerrar() {
+      if (!this._camCaja) return;
+      this._camCaja.hidden = true;
+      this._camVideo.srcObject = null;
+      if (this._camFlujo) { this._camFlujo.getTracks().forEach((t) => t.stop()); this._camFlujo = null; }
+    }
+
+    _camCapturar() {
+      const v = this._camVideo;
+      if (!v.videoWidth) return;
+      const c = document.createElement("canvas");
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext("2d").drawImage(v, 0, 0);
+      this._camCerrar();
+      c.toBlob((b) => { if (b) this._imgElegir([new File([b], "foto.jpg", { type: "image/jpeg" })]); }, "image/jpeg", 0.92);
+    }
+
     // arrastrar y pegar reutilizan _imgElegir; el servidor es quien decide qué tipos valen
     _imgSoltados(archivos) {
       if (!this._imgInfo || this._ocupado) return;
@@ -2646,7 +2730,7 @@
     }
 
     _bloquear(si) {
-      this._ocupado = si; this._enviar.disabled = si; this._adjBtn.disabled = si;
+      this._ocupado = si; this._enviar.disabled = si; this._adjBtn.disabled = si; if (si) { this._adjMenuCerrar(); this._camCerrar(); }
       this._raiz.setAttribute("aria-busy", String(si));
       this._mhFase();
       if (!si) this._mhRevisarFin();
