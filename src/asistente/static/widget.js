@@ -968,12 +968,15 @@
     form button.adjuntar:hover:not(:disabled) { color: var(--c); border-color: var(--c); }
     form button.adjuntar[hidden] { display: none; }
     .entrada { position: relative; }
-    .adj-menu { position: absolute; left: 24px; bottom: 64px; z-index: 6; display: flex; flex-direction: column; min-width: 180px; padding: 4px;
-      background: var(--f); border: 1px solid var(--b); border-radius: calc(var(--r) * 1.2); box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+    .adj-menu { position: absolute; left: calc(max(16px, (100% - var(--asistente-ancho-columna, 760px)) / 2) + 8px); bottom: 68px; z-index: 6; display: flex; flex-direction: column; gap: 2px; min-width: 210px; padding: 6px;
+      background: var(--f); border: 1px solid var(--b); border-radius: calc(var(--r) * 1.6); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
     .adj-menu[hidden] { display: none; }
-    .adj-menu button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: calc(var(--r) * .8); cursor: pointer; font-size: 14px; }
+    .adj-menu button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: calc(var(--r) * 1.1); cursor: pointer; font-size: 14px; line-height: 1.2; transition: background .12s; }
     .adj-menu button:hover, .adj-menu button:focus-visible { background: var(--suave); }
-    .adj-menu svg { width: 18px; height: 18px; flex: none; }
+    .adj-menu button:focus-visible { outline: 2px solid var(--c); outline-offset: -2px; }
+    .adj-menu svg { width: 18px; height: 18px; flex: none; color: var(--apagado); transition: color .12s; }
+    .adj-menu button:hover svg, .adj-menu button:focus-visible svg { color: var(--c); }
+    @media (prefers-reduced-motion: no-preference) { .adj-menu { animation: adj-entra .14s ease-out; } @keyframes adj-entra { from { opacity: 0; transform: translateY(6px); } } }
     .camara { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; background: rgba(0,0,0,.8); }
     .camara[hidden] { display: none; }
     .camara video { max-width: 100%; max-height: calc(100% - 70px); border-radius: var(--r); background: #000; }
