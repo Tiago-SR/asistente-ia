@@ -44,6 +44,7 @@
  *               Si hay panel de ajustes, el usuario puede elegir el suyo ahí (claro | oscuro | automático); lo que elija
  *               manda sobre este atributo, y "automático" vuelve a él. Cambiarlo dispara asistente:tema.
  *
+ *   sin-voz      atributo booleano: el widget es solo texto (sin dictado, lectura en voz alta ni modo voz).
  *   acuse        "auto" (por defecto) | "no": en el modo voz, si el resumen tarda más de ~0,9 s se dice una frase corta («Un
  *               momento, lo consulto») para que no haya silencio; "no" la quita.
  *   modo-inicial "auto" (por defecto) | "chat": con "auto" el widget abre en modo voz cuando está disponible (el usuario pasa
@@ -1145,7 +1146,7 @@
   // ───────────────────────── Componente ─────────────────────────
 
   class AsistenteChat extends HTMLElement {
-    static get observedAttributes() { return ["token-url", "servidor", "tema"]; }
+    static get observedAttributes() { return ["token-url", "servidor", "tema", "sin-voz"]; }
     static get _utiles() { return { partirParaVoz, textoParaVoz, resumenBreve, nivelDe, suavizar, ultimoCorte, elegirVoz, normalizarFrase, buscarActivacion, comandoDe, interpretar, unirFinal, retrasoReinicio, resolverEntrada, vadInicial, vadPaso }; }  // para los tests
 
     constructor() {
@@ -1213,6 +1214,7 @@
 
     attributeChangedCallback(nombre, viejo, nuevo) {
       if (nombre === "tema") { this._aplicarTema(); return; }   // solo repinta: no reinicia la sesión
+      if (nombre === "sin-voz") { if (this._manos) this._actualizarVoz(); return; }   // se puede activar y quitar en caliente
       if (this.isConnected && this._iniciado && viejo !== nuevo) {
         this._token = null; this._iniciado = false; this._arrancar();
       }
@@ -1496,6 +1498,9 @@
       if (id) await this._abrir(id, true);
     }
 
+    // API para el anfitrión: abre una conversación existente (p. ej. la de un escaneo hecho fuera del chat).
+    abrirConversacion(id) { return this._abrir(id); }
+
     // "Nueva conversación" no borra la anterior: solo deja de mostrarla (sigue en el servidor,
     // sujeta a la retención del sistema).
     _nueva() {
@@ -1572,6 +1577,7 @@
 
     // "navegador" | "servidor" | null según el atributo voz-motor y lo disponible.
     _motorDictado() {
+      if (this.hasAttribute("sin-voz")) return null;
       let pref = (this.getAttribute("voz-motor") || "auto").toLowerCase();
       const navegador = !!reconocimiento(), servidor = this._dictadoServidor;
       // la elección del usuario solo vale con voz-motor="auto" (el anfitrión que fija un motor, por privacidad, manda) y si ese motor existe
@@ -2264,7 +2270,7 @@
       return (this.getAttribute("acuse") || "auto").toLowerCase() !== "no";
     }
     _navegadorOk() { return puedeHablar() && this._prefRespuesta() !== "servidor"; }
-    _hablaPosible() { return (this._ttsServidor && this._prefRespuesta() !== "navegador") || this._navegadorOk(); }
+    _hablaPosible() { return !this.hasAttribute("sin-voz") && ((this._ttsServidor && this._prefRespuesta() !== "navegador") || this._navegadorOk()); }
     // ¿se pide la próxima pieza al servidor? Tras un fallo reciente, no.
     _ttsActivo() { return this._ttsServidor && this._prefRespuesta() !== "navegador" && Date.now() >= this._ttsPausaHasta; }
 
