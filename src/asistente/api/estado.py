@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from asistente.api.deps import Sesion, servicios, sesion_actual
-from asistente.core import adjuntos
+from asistente.core import adjuntos, medios
 from asistente.servicios import LLMNoConfigurado, Servicios
 
 router = APIRouter()
@@ -43,6 +43,8 @@ async def estado(
         cfg, lim = svc.settings, sesion.sistema.adjuntos
         resp["imagenes"] = {"max": min(lim.max_archivos or cfg.max_imagenes, cfg.max_imagenes),
                             "max_kb": min(lim.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb), "tipos": list(adjuntos.TIPOS),
+                            # PDF: el servidor lo convierte en una imagen por página (las páginas cuentan como imágenes)
+                            "pdf": {"max_kb": medios.MAX_PDF_WEB_KB, "max_paginas": min(medios.MAX_PAGINAS, lim.max_archivos or cfg.max_imagenes, cfg.max_imagenes)},
                             # el aviso de privacidad del widget cambia: el texto leído sí queda en la conversación
                             **({"lee": True} if sesion.sistema.leer_imagenes else {})}
     return resp

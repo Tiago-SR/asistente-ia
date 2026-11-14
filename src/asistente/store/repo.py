@@ -31,7 +31,8 @@ def _a_json(m: Mensaje, archivos: list[dict] | None = None, formularios: list[di
         "llamada_id": m.llamada_id,
         # solo metadata: los bytes de una imagen nunca se guardan aquí
         **({"adjuntos": [{"tipo_mime": a.tipo_mime, "bytes": a.bytes, "ref": a.ref,
-                          **({"descripcion": a.descripcion} if a.descripcion else {})} for a in m.adjuntos]}
+                          **({"descripcion": a.descripcion} if a.descripcion else {}),
+                          **({"origen": a.origen} if a.origen else {})} for a in m.adjuntos]}
            if m.adjuntos else {}),
         # referencia a los archivos generados (solo id y nombre); `_desde_json` la ignora: el modelo no la ve
         **({"archivos": archivos} if archivos else {}),
@@ -42,7 +43,8 @@ def _a_json(m: Mensaje, archivos: list[dict] | None = None, formularios: list[di
 
 def _desde_json(rol: str, c: dict) -> Mensaje:
     llamadas = tuple(LlamadaTool(x["id"], x["nombre"], x["parametros"]) for x in c.get("llamadas", []))
-    adjuntos = tuple(Adjunto(x["tipo_mime"], b"", x.get("bytes", 0), x.get("ref"), x.get("descripcion", ""))
+    adjuntos = tuple(Adjunto(x["tipo_mime"], b"", x.get("bytes", 0), x.get("ref"), x.get("descripcion", ""),
+                        x.get("origen", ""))
                      for x in c.get("adjuntos", []))
     texto = c.get("texto", "")
     if rol == "user" and (leido := contenido_leido(adjuntos)):  # solo para el modelo: `visibles` no lo incluye

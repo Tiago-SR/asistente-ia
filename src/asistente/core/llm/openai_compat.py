@@ -22,6 +22,7 @@ from asistente.core.llm.base import (
     Respuesta,
     ToolDef,
     Uso,
+    describir_orden,
 )
 
 log = logging.getLogger(__name__)
@@ -190,6 +191,8 @@ def _traducir(mensajes: list[Mensaje]) -> list[dict]:
             # contenido por partes: el texto y cada imagen como data URI (solo las que aún tienen sus bytes)
             partes: list[dict] = [{"type": "text", "text": m.texto}] if m.texto else []
             partes.append({"type": "text", "text": NOTA_IMAGEN})
+            if orden := describir_orden(m.adjuntos):
+                partes.append({"type": "text", "text": f"[{orden}]"})
             partes += [
                 {"type": "image_url",
                  "image_url": {"url": f"data:{a.tipo_mime};base64,{base64.b64encode(a.datos).decode()}"}}

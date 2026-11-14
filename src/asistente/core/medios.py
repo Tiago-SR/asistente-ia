@@ -15,6 +15,7 @@ from PIL import Image, ImageOps
 MAX_MEDIO_BYTES = 10 * 1024 * 1024  # el tope de WhatsApp para imágenes y documentos es mayor; esto es lo que aceptamos
 MAX_LADO = 1600
 MAX_PAGINAS = 3
+MAX_PDF_WEB_KB = 2048  # un PDF subido desde el widget viaja en base64 dentro de /v1/chat (tope de cuerpo: 4 MB)
 TIMEOUT_S = 15.0
 _CALIDADES = (85, 75, 60, 45)
 
@@ -41,7 +42,7 @@ def _jpeg(img: Image.Image, max_bytes: int) -> bytes:
     raise MedioInvalido("imagen_demasiado_grande")
 
 
-def _convertir(datos: bytes, max_bytes: int, max_imagenes: int) -> list[bytes]:
+def _convertir(datos: bytes, max_bytes: int, max_imagenes: int, estricto: bool = False) -> list[bytes]:
     if len(datos) > MAX_MEDIO_BYTES:
         raise MedioInvalido("medio_demasiado_grande")
     try:
@@ -49,6 +50,8 @@ def _convertir(datos: bytes, max_bytes: int, max_imagenes: int) -> list[bytes]:
             with _pdfium:
                 pdf = pypdfium2.PdfDocument(datos)  # cifrado: lanza PdfiumError
                 try:
+                    if estricto and len(pdf) > min(MAX_PAGINAS, max_imagenes):
+                        raise MedioInvalido("pdf_demasiadas_paginas")  # mejor avisar que leer un comprobante a medias
                     salida = []
                     for i in range(min(len(pdf), MAX_PAGINAS, max_imagenes)):
                         pag = pdf[i]
@@ -70,11 +73,13 @@ def _convertir(datos: bytes, max_bytes: int, max_imagenes: int) -> list[bytes]:
     raise MedioInvalido("medio_invalido")
 
 
-async def a_imagenes(datos: bytes, *, max_bytes: int, max_imagenes: int) -> list[tuple[str, str]]:
-    """Pares `(mime, base64)` listos para `adjuntos.decodificar`. `MedioInvalido` si no se puede convertir."""
+async def a_imagenes(datos: bytes, *, max_bytes: int, max_imagenes: int,
+                     estricto: bool = False) -> list[tuple[str, str]]:
+    """Pares `(mime, base64)` listos para `adjuntos.decodificar`. `MedioInvalido` si no se puede convertir.
+    `estricto`: un PDF con más páginas de las que caben se rechaza en vez de recortarse (chat web)."""
     try:
         jpegs = await asyncio.wait_for(
-            asyncio.get_running_loop().run_in_executor(_pool, _convertir, datos, max_bytes, max_imagenes), TIMEOUT_S)
+            asyncio.get_running_loop().run_in_executor(_pool, _convertir, datos, max_bytes, max_imagenes, estricto), TIMEOUT_S)
     except TimeoutError as e:
         raise MedioInvalido("medio_invalido") from e
     return [("image/jpeg", base64.b64encode(j).decode()) for j in jpegs]

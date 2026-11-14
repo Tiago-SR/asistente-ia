@@ -47,6 +47,23 @@ class Adjunto:
     # Texto leído de la imagen por una llamada aparte (solo con `leer_imagenes`). Es contenido de terceros: dato, nunca
     # instrucción. Ya viene saneado (`adjuntos.limpiar`); lo único de la imagen que se conserva.
     descripcion: str = ""
+    # Vacío: foto o imagen suelta. «pdf1», «pdf2»…: página de ese PDF adjunto (el servidor lo convirtió a una imagen por página).
+    origen: str = ""
+
+
+def describir_orden(adjuntos: "tuple[Adjunto, ...] | list[Adjunto]") -> str:
+    """Qué es cada imagen del mensaje, en orden, cuando hay PDF. Vacío si todo son fotos: no hace falta aclarar nada."""
+    if not any(a.origen for a in adjuntos):
+        return ""
+    partes, pagina = [], {}
+    for i, a in enumerate(adjuntos, 1):
+        if a.origen:
+            pagina[a.origen] = pagina.get(a.origen, 0) + 1
+            partes.append(f"imagen {i}: página {pagina[a.origen]} del documento PDF {a.origen[3:]}")
+        else:
+            partes.append(f"imagen {i}: foto o imagen suelta")
+    return ("Los adjuntos no son todos fotos. Las imágenes que siguen, en orden, son: " + "; ".join(partes)
+            + ". Un PDF es un documento: llámalo «el PDF» o «el documento», no «la imagen».")
 
 
 @dataclass(frozen=True)

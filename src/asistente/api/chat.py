@@ -2,9 +2,12 @@
 cancela si el cliente corta."""
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -16,7 +19,7 @@ from pydantic import BaseModel
 from asistente.api.deps import Sesion, servicios, sesion_actual
 from asistente.api.errores import ErrorApi
 from asistente.core import adjuntos as adj
-from asistente.core import events, zona
+from asistente.core import events, medios, zona
 from asistente.core.agent import ConfigTurno, reservar_cuota, run_turn
 from asistente.core.llm.base import Uso
 from asistente.core.memoria import ServicioMemoria
@@ -30,7 +33,7 @@ FORMULARIO_GUARDADO = ("id", "titulo", "instruccion", "campos", "aplicar_a_todos
 
 
 class ImagenIn(BaseModel):
-    tipo: str  # image/jpeg | image/png
+    tipo: str  # image/jpeg | image/png | application/pdf (el servidor lo pasa a una imagen por página)
     datos: str  # base64 estricto, sin prefijo `data:`
 
 
@@ -45,6 +48,36 @@ class ChatIn(BaseModel):
     zona_horaria: str | None = None
     # El widget que sabe dibujar formularios (tool `pedir_datos`) lo declara; uno anterior no los recibiría bien.
     formularios: bool = False
+
+
+async def _expandir_pdfs(imagenes: list[ImagenIn], *, max_imagenes: int,
+                         max_bytes: int) -> tuple[list[tuple[str, str]], list[str]]:
+    """((tipo, base64), origen) de cada imagen; un PDF se reemplaza por sus páginas como JPEG (cuentan como imágenes).
+    El origen de una foto es '' y el de una página, «pdfN» (N = qué PDF del mensaje)."""
+    pares: list[tuple[str, str]] = []
+    origenes: list[str] = []
+    docs = 0
+    for i in imagenes:
+        if i.tipo != "application/pdf":
+            pares.append((i.tipo, i.datos))
+            origenes.append("")
+            continue
+        docs += 1
+        if len(i.datos) > medios.MAX_PDF_WEB_KB * 1024 * 4 // 3 + 8:
+            raise adj.AdjuntoInvalido("imagen_demasiado_grande")
+        try:
+            datos = base64.b64decode(i.datos, validate=True)
+            paginas = await medios.a_imagenes(datos, max_bytes=max_bytes, max_imagenes=max_imagenes - len(pares),
+                                              estricto=True)
+            pares += paginas
+            origenes += [f"pdf{docs}"] * len(paginas)
+        except medios.MedioInvalido as e:  # antes que ValueError: es una subclase
+            codigo = str(e)
+            raise adj.AdjuntoInvalido(codigo if codigo in ("pdf_demasiadas_paginas", "imagen_demasiado_grande")
+                                      else "imagenes_invalidas") from e
+        except (binascii.Error, ValueError) as e:
+            raise adj.AdjuntoInvalido("imagenes_invalidas") from e
+    return pares, origenes
 
 
 def _frame(evento: str, datos) -> bytes:
@@ -124,9 +157,11 @@ async def chat(
         if not (llm.capacidades.soporta_imagenes and sistema.adjuntos.habilitado):
             raise ErrorApi(422, "imagenes_no_soportadas")
         try:
-            adjuntos = adj.decodificar([(i.tipo, i.datos) for i in body.imagenes],
-                                       max_imagenes=min(sistema.adjuntos.max_archivos or cfg.max_imagenes, cfg.max_imagenes),
-                                       max_bytes=min(sistema.adjuntos.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb) * 1024)
+            n = min(sistema.adjuntos.max_archivos or cfg.max_imagenes, cfg.max_imagenes)
+            tope = min(sistema.adjuntos.max_kb or cfg.max_imagen_kb, cfg.max_imagen_kb) * 1024
+            pares, origenes = await _expandir_pdfs(body.imagenes, max_imagenes=n, max_bytes=tope)
+            adjuntos = tuple(replace(a, origen=o) for a, o in zip(
+                adj.decodificar(pares, max_imagenes=n, max_bytes=tope), origenes, strict=True))
         except adj.AdjuntoInvalido as e:
             if svc.metricas is not None:
                 svc.metricas.registrar(EventoMetrica(sistema_id=u.sistema_id, usuario_ref=u.usuario_ref,

@@ -58,7 +58,8 @@
  *               resto. Con voz-motor="servidor" el modo voz solo existe en "tocar". El usuario lo cambia en sus ajustes.
  *   imagenes     "auto" (por defecto) | "no": botón para adjuntar imágenes de referencia, solo si el modelo del sistema las admite
  *               (/v1/estado: imagenes). Se reducen en el navegador (JPEG, lado mayor 1280 px) y viajan solo en el turno: el servidor no
- *               las guarda y salen hacia el proveedor del modelo (el widget lo avisa). "no" quita el botón.
+ *               las guarda y salen hacia el proveedor del modelo (el widget lo avisa). "no" quita el botón. Si el servidor lo informa
+ *               (imagenes.pdf), también se pueden adjuntar PDF: viajan tal cual y el servidor los convierte en una imagen por página.
  *   orbe-volumen "auto" (por defecto) | "si" | "no": el orbe del modo voz sigue el volumen del micrófono con un segundo flujo
  *               de audio local (solo se analiza; no se graba ni se envía). "no" no lo abre; "auto" tampoco en Android
  *               (ahí el segundo flujo deja sin señal al reconocimiento); "si" lo fuerza.
@@ -148,12 +149,14 @@
     sacarFoto: "Sacar una foto",
     capturar: "Capturar",
     camaraError: "No pude acceder a la cámara. Revisá el permiso del navegador.",
-    quitarImagen: "Quitar imagen",
+    quitarImagen: "Quitar adjunto",
     avisoImagen: "Las imágenes viajan a un servicio externo de procesamiento para responderte y no se guardan.",
     avisoImagenLee: "Las imágenes viajan a un servicio externo que lee su texto. La imagen no se guarda, pero el texto leído queda en la conversación hasta que la borres o venza su retención.",
     imagenIlegible: "No pude leer esa imagen.",
     imagenPesada: "La imagen es demasiado pesada, aun reducida.",
     soloImagenes: "Por ahora solo se pueden adjuntar imágenes.",
+    soloImagenesPdf: "Por ahora solo se pueden adjuntar imágenes o PDF.",
+    pdfPesado: "El PDF es demasiado pesado (máximo {kb} KB).",
     soltarImagenes: "Suelta las imágenes aquí para adjuntarlas",
     imagenMax: "Máximo {n} imágenes por mensaje.",
     detener: "Detener grabación",
@@ -254,7 +257,8 @@
     mensaje_invalido: "El mensaje está vacío o es demasiado largo.",
     no_se_pudo_guardar: "No se pudo guardar la conversación.",
     imagenes_no_soportadas: "Este asistente no admite imágenes por ahora.",
-    imagenes_invalidas: "No pude usar esa imagen. Probá con una foto JPG o PNG.",
+    imagenes_invalidas: "No pude usar ese archivo. Probá con una foto JPG o PNG, o con un PDF.",
+    pdf_demasiadas_paginas: "El PDF tiene más páginas de las que puedo leer. Adjuntá solo las páginas que hacen falta.",
     imagen_demasiado_grande: "La imagen es demasiado pesada.",
     demasiadas_imagenes: "Adjuntaste demasiadas imágenes.",
   };
@@ -992,11 +996,18 @@
     .raiz.arrastrando .soltar { display: flex; }
     .imagenes .mini { position: relative; width: 56px; height: 56px; }
     .imagenes .mini img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--b); }
+    .imagenes .mini.pdf { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 72px; padding: 4px;
+      box-sizing: border-box; border: 1px solid var(--b); border-radius: 10px; background: var(--suave); color: var(--apagado); font-size: 10px; }
+    .imagenes .mini.pdf svg { width: 20px; height: 20px; }
+    .imagenes .mini.pdf span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .msg.user .adjunta-pdf { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 10px; border-radius: 10px; font-size: 13px;
+      background: color-mix(in srgb, currentColor 12%, transparent); }
+    .msg.user .adjunta-pdf svg { width: 16px; height: 16px; flex: none; }
     .imagenes .mini button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; font-size: 12px; line-height: 1;
       border: 0; border-radius: 50%; background: var(--c); color: var(--ct); cursor: pointer; }
     .msg.user img.adjunta { display: block; max-width: 160px; max-height: 120px; margin-top: 6px; border-radius: 10px; }
     .msg.user.solo-imagen { padding: 8px; }
-    .msg.user.solo-imagen img.adjunta:first-child { margin-top: 0; }
+    .msg.user.solo-imagen img.adjunta:first-child, .msg.user.solo-imagen .adjunta-pdf:first-child { margin-top: 0; }
     .aviso-voz { font-size: 12px; color: var(--apagado); text-align: center; padding-top: 4px; min-height: 16px; }
     .aviso-voz:empty { display: none; }
     .aviso-voz.err { color: var(--p-err-t); }
@@ -1026,6 +1037,7 @@
     enviar: "M12 19V5M5 12l7-7 7 7",
     mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM19 11a7 7 0 0 1-14 0M12 18v3",
     adjuntar: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
+    pdf: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5",
     camara: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
     parar: "M7 7h10v10H7z",
     chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
@@ -1081,6 +1093,8 @@
     } finally { if (bmp.close) bmp.close(); }
     throw new Error("imagen_grande");
   }
+
+  function esPdf(f) { return f.type === "application/pdf" || (!f.type && /\.pdf$/i.test(f.name || "")); }
 
   function base64De(blob) {
     return new Promise((ok, mal) => {
@@ -1438,7 +1452,9 @@
           this._vozSrvDefecto = typeof voz.voz_defecto === "string" ? voz.voz_defecto : "";
           const im = e.imagenes;
           this._imgInfo = (this.getAttribute("imagenes") || "auto").toLowerCase() !== "no" && im && Number(im.max) > 0 && Number(im.max_kb) > 0
-            ? { max: Number(im.max), maxKb: Number(im.max_kb), lee: im.lee === true } : null;
+            ? { max: Number(im.max), maxKb: Number(im.max_kb), lee: im.lee === true,
+                pdfKb: im.pdf && Number(im.pdf.max_kb) > 0 ? Number(im.pdf.max_kb) : 0 } : null;
+          this._adjInput.accept = this._imgInfo?.pdfKb ? "image/*,application/pdf" : "image/*";
           this._nombreServidor = nombreLimpio(e.nombre_asistente);
           this._aplicarNombre();
         }
@@ -2651,6 +2667,13 @@
       const cupo = this._imgInfo.max - this._imgPend.length;
       let error = archivos.length > cupo ? TEXTOS.imagenMax.replace("{n}", this._imgInfo.max) : "";
       for (const f of archivos.slice(0, Math.max(0, cupo))) {
+        if (esPdf(f)) {   // el servidor lo pasa a una imagen por página: aquí solo se comprueba el tamaño y se manda tal cual
+          if (!this._imgInfo.pdfKb) { error = TEXTOS.soloImagenes; continue; }
+          if (f.size > this._imgInfo.pdfKb * 1024) { error = TEXTOS.pdfPesado.replace("{kb}", this._imgInfo.pdfKb); continue; }
+          try { this._imgPend.push({ url: "", tipo: "application/pdf", datos: await base64De(f), nombre: f.name || "documento.pdf" }); }
+          catch (e) { error = TEXTOS.imagenIlegible; }
+          continue;
+        }
         try {
           const blob = await reducirImagen(f, this._imgInfo.maxKb * 1024);
           this._imgPend.push({ url: URL.createObjectURL(blob), tipo: "image/jpeg", datos: await base64De(blob) });
@@ -2708,9 +2731,10 @@
     // arrastrar y pegar reutilizan _imgElegir; el servidor es quien decide qué tipos valen
     _imgSoltados(archivos) {
       if (!this._imgInfo || this._ocupado) return;
-      const imgs = archivos.filter((f) => f.type.startsWith("image/"));
+      const pdf = !!this._imgInfo.pdfKb;
+      const imgs = archivos.filter((f) => f.type.startsWith("image/") || (pdf && esPdf(f)));
       if (imgs.length) this._imgElegir(imgs);
-      else if (archivos.length) this._imgPintar(TEXTOS.soloImagenes);
+      else if (archivos.length) this._imgPintar(pdf ? TEXTOS.soloImagenesPdf : TEXTOS.soloImagenes);
     }
 
     _imgQuitar(i) {
@@ -2723,6 +2747,7 @@
       this._imgChips.replaceChildren(...this._imgPend.map((im, i) => {
         const x = el("button", { type: "button", title: TEXTOS.quitarImagen, "aria-label": TEXTOS.quitarImagen, textContent: "×" });
         x.addEventListener("click", () => this._imgQuitar(i));
+        if (im.tipo === "application/pdf") return el("div", { class: "mini pdf", title: im.nombre }, icono("pdf"), el("span", { textContent: im.nombre }), x);
         return el("div", { class: "mini" }, el("img", { src: im.url, alt: "" }), x);
       }));
       this._imgAviso.textContent = error || (this._imgPend.length ? (this._imgInfo.lee ? TEXTOS.avisoImagenLee : TEXTOS.avisoImagen) : "");
@@ -2756,7 +2781,10 @@
       const mia = this._burbuja("user");
       mia.textContent = texto;
       mia.classList.toggle("solo-imagen", !texto && imagenes.length > 0);
-      for (const im of imagenes) mia.append(el("img", { class: "adjunta", src: im.url, alt: "" }));
+      for (const im of imagenes) {
+        if (im.tipo === "application/pdf") mia.append(el("div", { class: "adjunta-pdf" }, icono("pdf"), el("span", { textContent: im.nombre })));
+        else mia.append(el("img", { class: "adjunta", src: im.url, alt: "" }));
+      }
       const burbuja = this._burbuja("assistant");
       const estado = el("div", { class: "estado", textContent: TEXTOS.pensando });
       burbuja.append(estado);
